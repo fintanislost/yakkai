@@ -1,0 +1,18 @@
+{
+    "KPackageStructure": "Plasma/Wallpaper",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Email": "noreply@example.invalid",
+                "Name": "Papercompany"
+            }
+        ],
+        "Description": "A minimal configurable gradient wallpaper for KDE Plasma 6",
+        "Icon": "preferences-desktop-wallpaper",
+        "Id": "io.papercompany.gradient",
+        "License": "MIT",
+        "Name": "Paper Gradient",
+        "Version": "0.2.0"
+    },
+    "X-KDE-ParentApp": "org.kde.plasmashell"
+}

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0
+      http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
+  <kcfgfile name=""/>
+
+  <group name="General">
+    <entry name="StartColor" type="Color">
+      <label>Gradient start color</label>
+      <default>#0b1f33</default>
+    </entry>
+    <entry name="EndColor" type="Color">
+      <label>Gradient end color</label>
+      <default>#4d7cff</default>
+    </entry>
+    <entry name="Angle" type="Int">
+      <label>Gradient angle in degrees</label>
+      <default>125</default>
+    </entry>
+    <entry name="Animate" type="Bool">
+      <label>Whether the gradient should drift slowly</label>
+      <default>true</default>
+    </entry>
+    <entry name="AnimationDuration" type="Int">
+      <label>Animation cycle duration in seconds</label>
+      <default>30</default>
+    </entry>
+    <entry name="DriftDegrees" type="Int">
+      <label>Maximum drift offset in degrees</label>
+      <default>10</default>
+    </entry>
+    <entry name="VignetteStrength" type="Int">
+      <label>Edge darkening strength</label>
+      <default>18</default>
+    </entry>
+  </group>
+</kcfg>

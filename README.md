@@ -11,6 +11,8 @@
 - Optional slow animation
 - Adjustable drift amount
 - Optional vignette for edge darkening
+- Optional time-of-day mode with separate day and night palettes
+- Explicit mode selector so manual and time-of-day editing stay separate
 - Persistent settings through Plasma wallpaper configuration
 
 ## Repo layout
@@ -83,6 +85,23 @@ kpackagetool6 -t Plasma/Wallpaper -i "$(pwd)/wallpapers/io.papercompany.gradient
 - `AnimationDuration`: full animation cycle length in seconds
 - `DriftDegrees`: maximum angular drift applied during animation
 - `VignetteStrength`: edge darkening amount from `0` to `60`
+- `UseTimeOfDay`: enables local-time blending between day and night palettes
+- `DayStartHour`: hour when blending into the day palette begins
+- `NightStartHour`: hour when blending into the night palette begins
+- `TransitionMinutes`: blend duration at each schedule boundary
+- `DayStartColor`: first color used for the day palette
+- `DayEndColor`: second color used for the day palette
+- `NightStartColor`: first color used for the night palette
+- `NightEndColor`: second color used for the night palette
+
+## Time-of-day mode
+
+The settings panel now has an explicit `Mode` selector:
+
+- `Manual gradient`: edit a single two-color gradient for the whole day
+- `Time of day`: edit separate day and night palettes plus the transition schedule
+
+In `Time of day`, the wallpaper ignores the manual start and end colors and instead blends between the configured day and night palettes according to the local system time. The first transition starts at `DayStartHour`, the second starts at `NightStartHour`, and each transition lasts `TransitionMinutes`.
 
 ## Preset helper
 
@@ -90,7 +109,7 @@ The wallpaper settings panel includes a preset picker that seeds the current con
 
 ## Next useful extensions
 
-- Add time-of-day switching
 - Expose accent-color behavior explicitly
 - Add a third color stop or midpoint control
+- Add presets that seed both day and night palettes
 - Replace placeholder metadata before publishing

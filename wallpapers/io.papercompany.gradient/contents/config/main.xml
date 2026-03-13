@@ -34,5 +34,37 @@
       <label>Edge darkening strength</label>
       <default>18</default>
     </entry>
+    <entry name="UseTimeOfDay" type="Bool">
+      <label>Blend between separate day and night palettes based on local time</label>
+      <default>false</default>
+    </entry>
+    <entry name="DayStartHour" type="Int">
+      <label>Hour when the day palette begins</label>
+      <default>7</default>
+    </entry>
+    <entry name="NightStartHour" type="Int">
+      <label>Hour when the night palette begins</label>
+      <default>19</default>
+    </entry>
+    <entry name="TransitionMinutes" type="Int">
+      <label>Minutes used to blend into the next palette</label>
+      <default>60</default>
+    </entry>
+    <entry name="DayStartColor" type="Color">
+      <label>Day palette start color</label>
+      <default>#87b8ff</default>
+    </entry>
+    <entry name="DayEndColor" type="Color">
+      <label>Day palette end color</label>
+      <default>#f6d365</default>
+    </entry>
+    <entry name="NightStartColor" type="Color">
+      <label>Night palette start color</label>
+      <default>#0b1f33</default>
+    </entry>
+    <entry name="NightEndColor" type="Color">
+      <label>Night palette end color</label>
+      <default>#4d7cff</default>
+    </entry>
   </group>
 </kcfg>

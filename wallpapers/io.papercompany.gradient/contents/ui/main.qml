@@ -10,6 +10,31 @@ import org.kde.plasma.plasmoid
 WallpaperItem {
     id: root
 
+    readonly property string logPrefix: "[Paper Gradient]"
+
+    function resolvedVideoSource(value) {
+        const asText = String(value ?? "")
+
+        if (asText.length === 0) {
+            return ""
+        }
+
+        if (asText.startsWith("file://")) {
+            return asText
+        }
+
+        if (asText.startsWith("/")) {
+            return Qt.resolvedUrl(asText)
+        }
+
+        return asText
+    }
+
+    function log(message) {
+        console.log(logPrefix + " " + message)
+    }
+
+    property int contentMode: configuration.ContentMode ?? 0
     property color manualStartColor: configuration.StartColor ?? "#0b1f33"
     property color manualEndColor: configuration.EndColor ?? "#4d7cff"
     property int baseAngle: configuration.Angle ?? 125
@@ -25,166 +50,135 @@ WallpaperItem {
     property color dayEndColor: configuration.DayEndColor ?? "#f6d365"
     property color nightStartColor: configuration.NightStartColor ?? "#0b1f33"
     property color nightEndColor: configuration.NightEndColor ?? "#4d7cff"
-    property real animationPhase: 0
-    property int clockTick: 0
-    readonly property real effectiveAngle: baseAngle + (animate ? Math.sin(animationPhase * Math.PI * 2) * driftDegrees : 0)
-    readonly property real dayFactor: {
-        clockTick
-        return useTimeOfDay ? currentDayFactor(new Date()) : 1
-    }
-    readonly property color effectiveStartColor: useTimeOfDay ? mixColors(nightStartColor, dayStartColor, dayFactor) : manualStartColor
-    readonly property color effectiveEndColor: useTimeOfDay ? mixColors(nightEndColor, dayEndColor, dayFactor) : manualEndColor
+    property url videoSource: resolvedVideoSource(configuration.VideoSource ?? "")
+    property int videoFillMode: configuration.VideoFillMode ?? 0
+    property bool videoMuted: configuration.VideoMuted ?? true
 
-    function normalizedMinutes(value) {
-        const fullDay = 24 * 60
+    readonly property bool videoMode: contentMode === 1
+    property bool contentLoadFailed: false
+    property string contentLoadErrorText: ""
 
-        return ((value % fullDay) + fullDay) % fullDay
-    }
+    onContentModeChanged: log("contentMode=" + contentMode + " videoMode=" + videoMode)
+    onVideoSourceChanged: log("videoSource=" + String(videoSource))
+    onVideoFillModeChanged: log("videoFillMode=" + videoFillMode)
+    onVideoMutedChanged: log("videoMuted=" + videoMuted)
 
-    function progressWithinArc(value, start, duration) {
-        if (duration <= 0) {
-            return -1
-        }
-
-        const offset = normalizedMinutes(value - start)
-
-        return offset <= duration ? offset / duration : -1
-    }
-
-    function isWithinArc(value, start, end) {
-        const offset = normalizedMinutes(value - start)
-        const span = normalizedMinutes(end - start)
-
-        return offset < span
-    }
-
-    function mixColors(first, second, factor) {
-        const t = Math.max(0, Math.min(1, factor))
-
-        return Qt.rgba(
-            first.r + (second.r - first.r) * t,
-            first.g + (second.g - first.g) * t,
-            first.b + (second.b - first.b) * t,
-            first.a + (second.a - first.a) * t
-        )
-    }
-
-    function currentDayFactor(now) {
-        const minutes = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60
-        const dayStartMinutes = normalizedMinutes(dayStartHour * 60)
-        const nightStartMinutes = normalizedMinutes(nightStartHour * 60)
-        const blendMinutes = Math.max(0, transitionMinutes)
-        const dayTransition = progressWithinArc(minutes, dayStartMinutes, blendMinutes)
-
-        if (blendMinutes === 0) {
-            return isWithinArc(minutes, dayStartMinutes, nightStartMinutes) ? 1 : 0
-        }
-
-        if (dayTransition >= 0) {
-            return dayTransition
-        }
-
-        const nightTransition = progressWithinArc(minutes, nightStartMinutes, blendMinutes)
-        if (nightTransition >= 0) {
-            return 1 - nightTransition
-        }
-
-        return isWithinArc(minutes, normalizedMinutes(dayStartMinutes + blendMinutes), nightStartMinutes) ? 1 : 0
-    }
-
-    function repaint() {
-        canvas.requestPaint()
-        root.accentColorChanged()
-    }
-
-    onManualStartColorChanged: repaint()
-    onManualEndColorChanged: repaint()
-    onBaseAngleChanged: repaint()
-    onDriftDegreesChanged: repaint()
-    onVignetteStrengthChanged: repaint()
-    onAnimationPhaseChanged: canvas.requestPaint()
-    onUseTimeOfDayChanged: repaint()
-    onDayStartHourChanged: repaint()
-    onNightStartHourChanged: repaint()
-    onTransitionMinutesChanged: repaint()
-    onDayStartColorChanged: repaint()
-    onDayEndColorChanged: repaint()
-    onNightStartColorChanged: repaint()
-    onNightEndColorChanged: repaint()
-    onEffectiveStartColorChanged: repaint()
-    onEffectiveEndColorChanged: repaint()
-    onAnimateChanged: {
-        if (!animate) {
-            animationPhase = 0
-        }
-        repaint()
-    }
-
-    NumberAnimation on animationPhase {
-        from: 0
-        to: 1
-        duration: Math.max(5, root.animationDuration) * 1000
-        loops: Animation.Infinite
-        running: root.animate
-    }
-
-    Timer {
-        interval: 30000
-        repeat: true
-        running: root.useTimeOfDay
-        triggeredOnStart: true
-        onTriggered: root.clockTick += 1
-    }
-
-    Canvas {
-        id: canvas
+    Loader {
+        id: contentLoader
         anchors.fill: parent
+        source: root.videoMode ? "VideoBackground.qml" : "GradientBackground.qml"
 
-        onWidthChanged: requestPaint()
-        onHeightChanged: requestPaint()
+        onStatusChanged: {
+            root.log("loader status=" + status + " source=" + source)
 
-        Component.onCompleted: requestPaint()
-
-        onPaint: {
-            const context = getContext("2d")
-            const centerX = width / 2
-            const centerY = height / 2
-            const radians = root.effectiveAngle * Math.PI / 180
-            const halfDiagonal = Math.sqrt(width * width + height * height) / 2
-            const offsetX = Math.cos(radians) * halfDiagonal
-            const offsetY = Math.sin(radians) * halfDiagonal
-            const gradient = context.createLinearGradient(
-                centerX - offsetX,
-                centerY - offsetY,
-                centerX + offsetX,
-                centerY + offsetY
-            )
-
-            gradient.addColorStop(0, root.effectiveStartColor)
-            gradient.addColorStop(1, root.effectiveEndColor)
-
-            context.clearRect(0, 0, width, height)
-            context.fillStyle = gradient
-            context.fillRect(0, 0, width, height)
-
-            if (root.vignetteStrength > 0) {
-                const vignette = context.createRadialGradient(
-                    centerX,
-                    centerY,
-                    Math.min(width, height) * 0.1,
-                    centerX,
-                    centerY,
-                    halfDiagonal
-                )
-                const vignetteOpacity = Math.min(0.8, root.vignetteStrength / 100)
-
-                vignette.addColorStop(0, "rgba(0, 0, 0, 0.0)")
-                vignette.addColorStop(0.65, "rgba(0, 0, 0, 0.0)")
-                vignette.addColorStop(1, "rgba(0, 0, 0, " + vignetteOpacity + ")")
-
-                context.fillStyle = vignette
-                context.fillRect(0, 0, width, height)
+            if (status === Loader.Ready) {
+                root.contentLoadFailed = false
+                root.contentLoadErrorText = ""
+                root.bindLoadedContent()
+            } else if (status === Loader.Error) {
+                root.contentLoadFailed = true
+                root.contentLoadErrorText = root.videoMode
+                    ? qsTr("Video mode could not be initialized in this Plasma session. Check QtMultimedia availability and the VM codec stack.")
+                    : qsTr("The selected Paper Gradient content mode could not be initialized.")
+            } else if (status === Loader.Loading) {
+                root.contentLoadFailed = false
+                root.contentLoadErrorText = ""
             }
         }
+    }
+
+    function bindLoadedContent() {
+        if (!contentLoader.item) {
+            return
+        }
+
+        if (root.videoMode) {
+            root.log("binding video content source=" + String(root.videoSource)
+                + " fill=" + root.videoFillMode
+                + " muted=" + root.videoMuted)
+            contentLoader.item.videoSource = Qt.binding(function() {
+                return root.videoSource
+            })
+            contentLoader.item.fillModeValue = Qt.binding(function() {
+                return root.videoFillMode
+            })
+            contentLoader.item.muted = Qt.binding(function() {
+                return root.videoMuted
+            })
+            return
+        }
+
+        contentLoader.item.manualStartColor = Qt.binding(function() {
+            return root.manualStartColor
+        })
+        contentLoader.item.manualEndColor = Qt.binding(function() {
+            return root.manualEndColor
+        })
+        contentLoader.item.baseAngle = Qt.binding(function() {
+            return root.baseAngle
+        })
+        contentLoader.item.animate = Qt.binding(function() {
+            return root.animate
+        })
+        contentLoader.item.animationDuration = Qt.binding(function() {
+            return root.animationDuration
+        })
+        contentLoader.item.driftDegrees = Qt.binding(function() {
+            return root.driftDegrees
+        })
+        contentLoader.item.vignetteStrength = Qt.binding(function() {
+            return root.vignetteStrength
+        })
+        contentLoader.item.useTimeOfDay = Qt.binding(function() {
+            return root.useTimeOfDay
+        })
+        contentLoader.item.dayStartHour = Qt.binding(function() {
+            return root.dayStartHour
+        })
+        contentLoader.item.nightStartHour = Qt.binding(function() {
+            return root.nightStartHour
+        })
+        contentLoader.item.transitionMinutes = Qt.binding(function() {
+            return root.transitionMinutes
+        })
+        contentLoader.item.dayStartColor = Qt.binding(function() {
+            return root.dayStartColor
+        })
+        contentLoader.item.dayEndColor = Qt.binding(function() {
+            return root.dayEndColor
+        })
+        contentLoader.item.nightStartColor = Qt.binding(function() {
+            return root.nightStartColor
+        })
+        contentLoader.item.nightEndColor = Qt.binding(function() {
+            return root.nightEndColor
+        })
+    }
+
+    Component.onCompleted: {
+        log("wallpaper loaded contentMode=" + contentMode
+            + " resolvedVideoSource=" + String(videoSource))
+    }
+
+    Rectangle {
+        anchors.centerIn: parent
+        width: Math.min(parent.width * 0.75, 620)
+        height: errorText.implicitHeight + 32
+        radius: 10
+        color: "#88000000"
+        visible: root.contentLoadFailed
+        z: 10
+    }
+
+    Text {
+        id: errorText
+        anchors.centerIn: parent
+        width: Math.min(parent.width * 0.65, 580)
+        horizontalAlignment: Text.AlignHCenter
+        wrapMode: Text.WordWrap
+        color: "white"
+        text: root.contentLoadErrorText
+        visible: root.contentLoadFailed
+        z: 11
     }
 }

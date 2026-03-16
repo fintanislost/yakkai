@@ -11,6 +11,7 @@ import QtQuick.Layouts
 import QtCore
 import org.kde.kirigami as Kirigami
 import org.kde.kquickcontrols as KQuickControls
+import org.kde.plasma.plasma5support as Plasma5Support
 
 Kirigami.FormLayout {
     id: root
@@ -46,9 +47,20 @@ Kirigami.FormLayout {
     property string cfg_VideoSource
     property int cfg_VideoFillMode
     property bool cfg_VideoMuted
+    property string cfg_WEVideoLibraryPath
+    property string cfg_WEVideoProjectPath
+    property string cfg_WEVideoProjectTitle
+    property string cfg_WEVideoSource
+
+    property var wallpaperEngineVideoItems: []
+    property bool wallpaperEngineScanRunning: false
+    property string wallpaperEngineScanStatus: ""
+    property string wallpaperEngineScanError: ""
 
     readonly property bool gradientContentMode: cfg_ContentMode === 0
-    readonly property bool videoContentMode: cfg_ContentMode === 1
+    readonly property bool localVideoContentMode: cfg_ContentMode === 1
+    readonly property bool wallpaperEngineVideoContentMode: cfg_ContentMode === 2
+    readonly property bool videoLikeContentMode: localVideoContentMode || wallpaperEngineVideoContentMode
     readonly property bool manualMode: gradientContentMode && !cfg_UseTimeOfDay
     readonly property url defaultVideoFolder: {
         let defaultPaths = StandardPaths.standardLocations(StandardPaths.MoviesLocation)
@@ -58,6 +70,19 @@ Kirigami.FormLayout {
         }
 
         return defaultPaths[0]
+    }
+    readonly property url defaultSteamLibraryFolder: {
+        const homes = StandardPaths.standardLocations(StandardPaths.HomeLocation)
+        return homes.length > 0 ? homes[0] : "/"
+    }
+    readonly property var selectedWallpaperEngineVideo: {
+        const index = wallpaperEngineVideoComboBox.currentIndex
+
+        if (index < 0 || index >= wallpaperEngineVideoItems.length) {
+            return null
+        }
+
+        return wallpaperEngineVideoItems[index]
     }
 
     function applyPreset(index) {
@@ -78,16 +103,8 @@ Kirigami.FormLayout {
         root.cfg_VignetteStrength = preset.vignetteStrength
     }
 
-    function videoSourceLabel(source) {
-        if (!source) {
-            return qsTr("No file selected")
-        }
-
-        return String(source)
-    }
-
-    function storedVideoPath(source) {
-        const asText = String(source)
+    function localPath(value) {
+        const asText = String(value ?? "")
 
         if (asText.startsWith("file://")) {
             return decodeURIComponent(asText.substring(7))
@@ -96,12 +113,163 @@ Kirigami.FormLayout {
         return asText
     }
 
+    function videoSourceLabel(source) {
+        const path = localPath(source)
+        return path.length > 0 ? path : qsTr("No file selected")
+    }
+
+    function shellQuote(value) {
+        return "'" + String(value).replace(/'/g, "'\"'\"'") + "'"
+    }
+
+    function wallpaperEngineItemLabel(item) {
+        if (!item) {
+            return ""
+        }
+
+        if (item.kind === "workshop" && item.workshopId.length > 0) {
+            return qsTr("%1 [Workshop %2]").arg(item.title).arg(item.workshopId)
+        }
+
+        if (item.kind === "defaultprojects") {
+            return qsTr("%1 [Default]").arg(item.title)
+        }
+
+        if (item.kind === "myprojects") {
+            return qsTr("%1 [My Project]").arg(item.title)
+        }
+
+        return item.title
+    }
+
+    function clearWallpaperEngineSelection() {
+        root.cfg_WEVideoProjectPath = ""
+        root.cfg_WEVideoProjectTitle = ""
+        root.cfg_WEVideoSource = ""
+        wallpaperEngineVideoComboBox.currentIndex = -1
+    }
+
+    function applyWallpaperEngineVideoSelection(index) {
+        const item = wallpaperEngineVideoItems[index]
+
+        if (!item) {
+            return
+        }
+
+        root.cfg_WEVideoProjectPath = item.projectPath
+        root.cfg_WEVideoProjectTitle = item.title
+        root.cfg_WEVideoSource = item.sourcePath
+    }
+
+    function syncWallpaperEngineVideoSelection() {
+        if (wallpaperEngineVideoItems.length === 0) {
+            wallpaperEngineVideoComboBox.currentIndex = -1
+            return
+        }
+
+        const projectPath = String(root.cfg_WEVideoProjectPath ?? "")
+        const sourcePath = String(root.cfg_WEVideoSource ?? "")
+        let index = wallpaperEngineVideoItems.findIndex(function(item) {
+            return item.projectPath === projectPath
+        })
+
+        if (index < 0 && sourcePath.length > 0) {
+            index = wallpaperEngineVideoItems.findIndex(function(item) {
+                return item.sourcePath === sourcePath
+            })
+        }
+
+        if (index < 0) {
+            index = 0
+        }
+
+        wallpaperEngineVideoComboBox.currentIndex = index
+        applyWallpaperEngineVideoSelection(index)
+    }
+
+    function wallpaperEngineScannerPath() {
+        return localPath(Qt.resolvedUrl("../tools/we_video_scan.py"))
+    }
+
+    function startWallpaperEngineScan() {
+        const libraryPath = localPath(root.cfg_WEVideoLibraryPath)
+
+        if (libraryPath.length === 0 || wallpaperEngineScanRunning) {
+            return
+        }
+
+        wallpaperEngineScanRunning = true
+        wallpaperEngineScanError = ""
+        wallpaperEngineScanStatus = qsTr("Scanning Steam library for Wallpaper Engine video projects…")
+
+        const command = "python3 "
+            + shellQuote(wallpaperEngineScannerPath())
+            + " "
+            + shellQuote(libraryPath)
+
+        wallpaperEngineScanner.exec(command)
+    }
+
+    function handleWallpaperEngineScanResult(exitCode, stdout, stderr) {
+        wallpaperEngineScanRunning = false
+
+        if (exitCode !== 0) {
+            wallpaperEngineScanError = stderr.length > 0
+                ? stderr.trim()
+                : qsTr("The Wallpaper Engine scan helper failed.")
+            wallpaperEngineScanStatus = ""
+            return
+        }
+
+        let payload = null
+
+        try {
+            payload = JSON.parse(stdout)
+        } catch (error) {
+            wallpaperEngineScanError = qsTr("The Wallpaper Engine scan helper returned invalid JSON.")
+            wallpaperEngineScanStatus = ""
+            return
+        }
+
+        wallpaperEngineVideoItems = payload.items ?? []
+
+        if (payload.errors && payload.errors.length > 0) {
+            wallpaperEngineScanError = payload.errors.join(" ")
+        } else {
+            wallpaperEngineScanError = ""
+        }
+
+        wallpaperEngineScanStatus = qsTr("Found %1 Wallpaper Engine video wallpapers.").arg(wallpaperEngineVideoItems.length)
+
+        if (wallpaperEngineVideoItems.length > 0) {
+            syncWallpaperEngineVideoSelection()
+        } else if (root.cfg_WEVideoProjectPath.length === 0) {
+            wallpaperEngineVideoComboBox.currentIndex = -1
+        }
+    }
+
+    onCfg_ContentModeChanged: {
+        if (wallpaperEngineVideoContentMode
+                && wallpaperEngineVideoItems.length === 0
+                && root.cfg_WEVideoLibraryPath.length > 0
+                && !wallpaperEngineScanRunning) {
+            startWallpaperEngineScan()
+        }
+    }
+
+    Component.onCompleted: {
+        if (root.cfg_WEVideoLibraryPath.length > 0 && root.cfg_ContentMode === 2) {
+            startWallpaperEngineScan()
+        }
+    }
+
     QQC2.ComboBox {
         id: contentModeComboBox
         Kirigami.FormData.label: qsTr("Content:")
         model: [
             qsTr("Gradient"),
-            qsTr("Video")
+            qsTr("Video"),
+            qsTr("Wallpaper Engine Video")
         ]
         currentIndex: root.cfg_ContentMode
 
@@ -111,7 +279,9 @@ Kirigami.FormLayout {
     QQC2.Label {
         text: root.gradientContentMode
             ? qsTr("Gradient mode renders the current Paper Gradient background, with optional manual or time-of-day palettes.")
-            : qsTr("Video mode plays a local video file through QtMultimedia. Actual playback depends on the codecs installed in the current Plasma system or VM.")
+            : (root.localVideoContentMode
+                ? qsTr("Video mode plays a local video file through QtMultimedia. Actual playback depends on the codecs installed in the current Plasma system or VM.")
+                : qsTr("Wallpaper Engine Video mode scans a Steam library for Wallpaper Engine video projects and reuses the Paper Gradient video backend for playback."))
         wrapMode: Text.WordWrap
         Layout.fillWidth: true
     }
@@ -297,7 +467,7 @@ Kirigami.FormLayout {
     ColumnLayout {
         Kirigami.FormData.label: qsTr("Source:")
         Layout.fillWidth: true
-        visible: root.videoContentMode
+        visible: root.localVideoContentMode
 
         RowLayout {
             Layout.fillWidth: true
@@ -323,6 +493,81 @@ Kirigami.FormLayout {
         }
     }
 
+    ColumnLayout {
+        Kirigami.FormData.label: qsTr("Library:")
+        Layout.fillWidth: true
+        visible: root.wallpaperEngineVideoContentMode
+
+        RowLayout {
+            Layout.fillWidth: true
+
+            QQC2.Button {
+                text: root.cfg_WEVideoLibraryPath.length > 0 ? qsTr("Change Steam library…") : qsTr("Select Steam library…")
+                Layout.fillWidth: true
+                enabled: !root.wallpaperEngineScanRunning
+                onClicked: steamLibraryDialog.open()
+            }
+
+            QQC2.Button {
+                text: root.wallpaperEngineScanRunning ? qsTr("Scanning…") : qsTr("Refresh")
+                enabled: root.cfg_WEVideoLibraryPath.length > 0 && !root.wallpaperEngineScanRunning
+                onClicked: root.startWallpaperEngineScan()
+            }
+
+            QQC2.Button {
+                text: qsTr("Clear")
+                enabled: root.cfg_WEVideoLibraryPath.length > 0 || root.cfg_WEVideoProjectPath.length > 0
+
+                onClicked: {
+                    root.cfg_WEVideoLibraryPath = ""
+                    root.wallpaperEngineVideoItems = []
+                    root.wallpaperEngineScanStatus = ""
+                    root.wallpaperEngineScanError = ""
+                    root.clearWallpaperEngineSelection()
+                }
+            }
+        }
+
+        QQC2.Label {
+            text: root.videoSourceLabel(root.cfg_WEVideoLibraryPath)
+            wrapMode: Text.WrapAnywhere
+            Layout.fillWidth: true
+            opacity: root.cfg_WEVideoLibraryPath.length > 0 ? 1 : 0.7
+        }
+
+        QQC2.Label {
+            text: root.wallpaperEngineScanError.length > 0
+                ? root.wallpaperEngineScanError
+                : root.wallpaperEngineScanStatus
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+            visible: text.length > 0
+            color: root.wallpaperEngineScanError.length > 0 ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
+        }
+    }
+
+    QQC2.ComboBox {
+        id: wallpaperEngineVideoComboBox
+        Kirigami.FormData.label: qsTr("Wallpaper:")
+        model: root.wallpaperEngineVideoItems.map(function(item) {
+            return root.wallpaperEngineItemLabel(item)
+        })
+        enabled: root.wallpaperEngineVideoItems.length > 0 && !root.wallpaperEngineScanRunning
+        visible: root.wallpaperEngineVideoContentMode
+
+        onActivated: root.applyWallpaperEngineVideoSelection(currentIndex)
+    }
+
+    QQC2.Label {
+        text: root.selectedWallpaperEngineVideo
+            ? qsTr("Project: %1\nMedia: %2").arg(root.selectedWallpaperEngineVideo.projectPath).arg(root.selectedWallpaperEngineVideo.sourcePath)
+            : qsTr("Select a Steam library, refresh the scan, and choose one of the discovered Wallpaper Engine video projects.")
+        wrapMode: Text.WrapAnywhere
+        Layout.fillWidth: true
+        visible: root.wallpaperEngineVideoContentMode
+        opacity: root.selectedWallpaperEngineVideo ? 1 : 0.7
+    }
+
     QQC2.ComboBox {
         id: videoFillModeComboBox
         Kirigami.FormData.label: qsTr("Sizing:")
@@ -332,7 +577,7 @@ Kirigami.FormLayout {
             qsTr("Stretch")
         ]
         currentIndex: root.cfg_VideoFillMode
-        visible: root.videoContentMode
+        visible: root.videoLikeContentMode
 
         onActivated: root.cfg_VideoFillMode = currentIndex
     }
@@ -341,7 +586,7 @@ Kirigami.FormLayout {
         Kirigami.FormData.label: qsTr("Audio:")
         text: qsTr("Mute soundtrack")
         checked: root.cfg_VideoMuted
-        visible: root.videoContentMode
+        visible: root.videoLikeContentMode
 
         onToggled: root.cfg_VideoMuted = checked
     }
@@ -351,7 +596,9 @@ Kirigami.FormLayout {
             ? (root.manualMode
                 ? qsTr("Manual mode uses the two colors above for the full day.")
                 : qsTr("Time-of-day mode blends from the night palette into the day palette at the configured hours using your VM or system local time."))
-            : qsTr("Start with local MP4 or WebM files. If a video fails to play in the VM, the issue is likely the guest multimedia codec stack rather than the wallpaper package itself.")
+            : (root.localVideoContentMode
+                ? qsTr("Start with local MP4 or WebM files. If a video fails to play in the VM, the issue is likely the guest multimedia codec stack rather than the wallpaper package itself.")
+                : qsTr("Wallpaper Engine Video mode currently supports only Wallpaper Engine projects whose project.json type is video. It uses a small Python helper in the settings page to scan the Steam library and resolve the actual media file."))
         wrapMode: Text.WordWrap
         Layout.fillWidth: true
     }
@@ -366,6 +613,43 @@ Kirigami.FormLayout {
         ]
         currentFolder: root.defaultVideoFolder
 
-        onAccepted: root.cfg_VideoSource = root.storedVideoPath(selectedFile)
+        onAccepted: root.cfg_VideoSource = root.localPath(selectedFile)
+    }
+
+    FolderDialog {
+        id: steamLibraryDialog
+        title: qsTr("Select a Steam library folder")
+        currentFolder: root.defaultSteamLibraryFolder
+
+        onAccepted: {
+            const selectedPath = root.localPath(selectedFolder)
+            const changed = selectedPath !== root.cfg_WEVideoLibraryPath
+
+            root.cfg_WEVideoLibraryPath = selectedPath
+            root.wallpaperEngineScanStatus = ""
+            root.wallpaperEngineScanError = ""
+            root.wallpaperEngineVideoItems = []
+
+            if (changed) {
+                root.clearWallpaperEngineSelection()
+            }
+
+            root.startWallpaperEngineScan()
+        }
+    }
+
+    Plasma5Support.DataSource {
+        id: wallpaperEngineScanner
+        engine: "executable"
+        connectedSources: []
+
+        function exec(command) {
+            wallpaperEngineScanner.connectSource(command)
+        }
+
+        onNewData: function(source, data) {
+            wallpaperEngineScanner.disconnectSource(source)
+            root.handleWallpaperEngineScanResult(data["exit code"], data.stdout ?? "", data.stderr ?? "")
+        }
     }
 }

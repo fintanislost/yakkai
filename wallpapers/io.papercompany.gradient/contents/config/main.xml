@@ -82,5 +82,21 @@
       <label>Mute the wallpaper soundtrack</label>
       <default>true</default>
     </entry>
+    <entry name="WEVideoLibraryPath" type="Path">
+      <label>Steam library path for Wallpaper Engine video scanning</label>
+      <default></default>
+    </entry>
+    <entry name="WEVideoProjectPath" type="Path">
+      <label>Selected Wallpaper Engine project.json path</label>
+      <default></default>
+    </entry>
+    <entry name="WEVideoProjectTitle" type="String">
+      <label>Selected Wallpaper Engine project title</label>
+      <default></default>
+    </entry>
+    <entry name="WEVideoSource" type="Path">
+      <label>Resolved local video file for the selected Wallpaper Engine project</label>
+      <default></default>
+    </entry>
   </group>
 </kcfg>

@@ -51,15 +51,24 @@ WallpaperItem {
     property color nightStartColor: configuration.NightStartColor ?? "#0b1f33"
     property color nightEndColor: configuration.NightEndColor ?? "#4d7cff"
     property url videoSource: resolvedVideoSource(configuration.VideoSource ?? "")
+    property url wallpaperEngineVideoSource: resolvedVideoSource(configuration.WEVideoSource ?? "")
+    property string wallpaperEngineVideoProjectTitle: configuration.WEVideoProjectTitle ?? ""
     property int videoFillMode: configuration.VideoFillMode ?? 0
     property bool videoMuted: configuration.VideoMuted ?? true
 
-    readonly property bool videoMode: contentMode === 1
+    readonly property bool localVideoMode: contentMode === 1
+    readonly property bool wallpaperEngineVideoMode: contentMode === 2
+    readonly property bool videoMode: localVideoMode || wallpaperEngineVideoMode
+    readonly property url activeVideoSource: wallpaperEngineVideoMode ? wallpaperEngineVideoSource : videoSource
+    readonly property string videoEmptyMessage: wallpaperEngineVideoMode
+        ? qsTr("Select a Wallpaper Engine video in the wallpaper settings.")
+        : qsTr("Select a local video file in the wallpaper settings.")
     property bool contentLoadFailed: false
     property string contentLoadErrorText: ""
 
     onContentModeChanged: log("contentMode=" + contentMode + " videoMode=" + videoMode)
     onVideoSourceChanged: log("videoSource=" + String(videoSource))
+    onWallpaperEngineVideoSourceChanged: log("wallpaperEngineVideoSource=" + String(wallpaperEngineVideoSource))
     onVideoFillModeChanged: log("videoFillMode=" + videoFillMode)
     onVideoMutedChanged: log("videoMuted=" + videoMuted)
 
@@ -93,17 +102,20 @@ WallpaperItem {
         }
 
         if (root.videoMode) {
-            root.log("binding video content source=" + String(root.videoSource)
+            root.log("binding video content source=" + String(root.activeVideoSource)
                 + " fill=" + root.videoFillMode
                 + " muted=" + root.videoMuted)
             contentLoader.item.videoSource = Qt.binding(function() {
-                return root.videoSource
+                return root.activeVideoSource
             })
             contentLoader.item.fillModeValue = Qt.binding(function() {
                 return root.videoFillMode
             })
             contentLoader.item.muted = Qt.binding(function() {
                 return root.videoMuted
+            })
+            contentLoader.item.emptyMessage = Qt.binding(function() {
+                return root.videoEmptyMessage
             })
             return
         }
@@ -157,7 +169,7 @@ WallpaperItem {
 
     Component.onCompleted: {
         log("wallpaper loaded contentMode=" + contentMode
-            + " resolvedVideoSource=" + String(videoSource))
+            + " resolvedVideoSource=" + String(activeVideoSource))
     }
 
     Rectangle {

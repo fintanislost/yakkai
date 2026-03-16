@@ -1,6 +1,6 @@
 # Paper Gradient
 
-`Paper Gradient` is a KDE Plasma 6 wallpaper plugin focused on a small set of high-value background modes. The current version supports both configurable gradients and local video playback while staying easy to test in a Plasma VM.
+`Paper Gradient` is a KDE Plasma 6 wallpaper plugin focused on a small set of high-value background modes. The current version supports configurable gradients, local video playback, and a first-pass Wallpaper Engine video mode while staying easy to test in a Plasma VM.
 
 ## Current scope
 
@@ -15,6 +15,7 @@
 - Optional time-of-day mode with separate day and night palettes
 - Explicit mode selector so manual and time-of-day editing stay separate
 - Local video file playback through `QtMultimedia`
+- Wallpaper Engine video-project scanning from a Steam library
 - Video sizing controls for crop, fit, and stretch
 - Video soundtrack muted by default
 - Persistent settings through Plasma wallpaper configuration
@@ -66,11 +67,13 @@
         `-- contents/
             |-- config/
             |   `-- main.xml
-                `-- ui/
-                    |-- GradientBackground.qml
-                    |-- VideoBackground.qml
-                    |-- config.qml
-                    `-- main.qml
+            |-- tools/
+            |   `-- we_video_scan.py
+            `-- ui/
+                |-- GradientBackground.qml
+                |-- VideoBackground.qml
+                |-- config.qml
+                `-- main.qml
 ```
 
 ## Install
@@ -149,6 +152,10 @@ This reference is intentionally partial. It focuses on backend loading, pause po
 - `VideoSource`: local video file path
 - `VideoFillMode`: `Crop`, `Fit`, or `Stretch`
 - `VideoMuted`: mutes wallpaper audio
+- `WEVideoLibraryPath`: Steam library root used for Wallpaper Engine video scanning
+- `WEVideoProjectPath`: selected Wallpaper Engine `project.json` path
+- `WEVideoProjectTitle`: selected Wallpaper Engine project title
+- `WEVideoSource`: resolved local video file for the selected Wallpaper Engine project
 
 ## Content modes
 
@@ -156,6 +163,7 @@ The settings panel now starts with a top-level `Content` selector:
 
 - `Gradient`: keeps the original Paper Gradient renderer
 - `Video`: plays a local video file through `QtMultimedia`
+- `Wallpaper Engine Video`: scans a Steam library for Wallpaper Engine `video` projects and reuses the same `QtMultimedia` playback path
 
 ## Time-of-day mode
 
@@ -166,7 +174,7 @@ When `Content` is set to `Gradient`, the settings panel exposes a `Mode` selecto
 
 In `Time of day`, the wallpaper ignores the manual start and end colors and instead blends between the configured day and night palettes according to the local system time. The first transition starts at `DayStartHour`, the second starts at `NightStartHour`, and each transition lasts `TransitionMinutes`.
 
-## Video mode
+## Video modes
 
 `Video` mode is intentionally narrow in the first implementation:
 
@@ -178,6 +186,16 @@ In `Time of day`, the wallpaper ignores the manual start and end colors and inst
 - crop, fit, and stretch sizing
 
 Actual playback support depends on the multimedia codecs installed in the current Plasma system or VM. If a file installs correctly but does not render, test a different container or codec before assuming the wallpaper package is broken.
+
+`Wallpaper Engine Video` mode is also intentionally narrow:
+
+- Steam library picker in the settings page
+- scans only Wallpaper Engine projects whose `project.json` type is `video`
+- resolves the actual media file during settings-time and saves it into the wallpaper config
+- reuses the same `QtMultimedia` runtime backend as local video mode
+- does not support Wallpaper Engine `scene` or `web` projects yet
+
+The settings-side scan uses the bundled `contents/tools/we_video_scan.py` helper, so the Plasma system running the settings UI needs `python3` available.
 
 If the video backend itself cannot initialize in the current Plasma session, Paper Gradient now keeps the wallpaper selected and shows an in-wallpaper error message instead of silently falling back to another content path.
 

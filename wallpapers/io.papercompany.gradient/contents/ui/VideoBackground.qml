@@ -11,6 +11,7 @@ Item {
     id: root
 
     property url videoSource: ""
+    property string emptyMessage: qsTr("Select a local video file in the wallpaper settings.")
     property int fillModeValue: 0
     property bool muted: true
     property int stalledTicks: 0
@@ -69,7 +70,7 @@ Item {
 
     readonly property string statusText: {
         if (videoSource.toString().length === 0) {
-            return qsTr("Select a local video file in the wallpaper settings.")
+            return emptyMessage
         }
 
         if (player.mediaStatus === MediaPlayer.NoMedia) {

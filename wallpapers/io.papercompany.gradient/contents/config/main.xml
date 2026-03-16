@@ -114,5 +114,29 @@
       <label>Serialized Wallpaper Engine user properties for the selected web project</label>
       <default></default>
     </entry>
+    <entry name="WESceneProjectPath" type="Path">
+      <label>Selected Wallpaper Engine scene project.json path</label>
+      <default></default>
+    </entry>
+    <entry name="WESceneProjectTitle" type="String">
+      <label>Selected Wallpaper Engine scene project title</label>
+      <default></default>
+    </entry>
+    <entry name="WESceneSource" type="Path">
+      <label>Resolved local scene source for the selected Wallpaper Engine project</label>
+      <default></default>
+    </entry>
+    <entry name="WESceneSourceKind" type="String">
+      <label>Resolved scene source kind for the selected Wallpaper Engine project</label>
+      <default></default>
+    </entry>
+    <entry name="WESceneExperimentalEnabled" type="Bool">
+      <label>Enable the experimental native scene renderer</label>
+      <default>false</default>
+    </entry>
+    <entry name="WESceneMouseInput" type="Bool">
+      <label>Enable direct mouse and hover input for the experimental scene renderer</label>
+      <default>false</default>
+    </entry>
   </group>
 </kcfg>

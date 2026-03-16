@@ -34,6 +34,17 @@ WallpaperItem {
         console.log(logPrefix + " " + message)
     }
 
+    function joinPath(basePath, childPath) {
+        const base = String(basePath ?? "").replace(/\/+$/, "")
+        const child = String(childPath ?? "")
+
+        if (base.length === 0) {
+            return ""
+        }
+
+        return base + child
+    }
+
     property int contentMode: configuration.ContentMode ?? 0
     property color manualStartColor: configuration.StartColor ?? "#0b1f33"
     property color manualEndColor: configuration.EndColor ?? "#4d7cff"
@@ -56,27 +67,41 @@ WallpaperItem {
     property url wallpaperEngineWebSource: resolvedVideoSource(configuration.WEWebSource ?? "")
     property string wallpaperEngineWebProjectTitle: configuration.WEWebProjectTitle ?? ""
     property string wallpaperEngineWebPropertiesJson: configuration.WEWebPropertiesJson ?? ""
+    property url wallpaperEngineSceneSource: resolvedVideoSource(configuration.WESceneSource ?? "")
+    property string wallpaperEngineSceneProjectTitle: configuration.WESceneProjectTitle ?? ""
+    property string wallpaperEngineSceneSourceKind: configuration.WESceneSourceKind ?? ""
+    property bool wallpaperEngineSceneExperimentalEnabled: configuration.WESceneExperimentalEnabled ?? false
+    property bool wallpaperEngineSceneMouseInput: configuration.WESceneMouseInput ?? false
+    property string wallpaperEngineLibraryPath: configuration.WEVideoLibraryPath ?? ""
     property int videoFillMode: configuration.VideoFillMode ?? 0
     property bool videoMuted: configuration.VideoMuted ?? true
 
     readonly property bool localVideoMode: contentMode === 1
     readonly property bool wallpaperEngineVideoMode: contentMode === 2
     readonly property bool wallpaperEngineWebMode: contentMode === 3
+    readonly property bool wallpaperEngineSceneMode: contentMode === 4
     readonly property bool videoMode: localVideoMode || wallpaperEngineVideoMode
     readonly property bool webMode: wallpaperEngineWebMode
+    readonly property bool sceneMode: wallpaperEngineSceneMode
     readonly property url activeVideoSource: wallpaperEngineVideoMode ? wallpaperEngineVideoSource : videoSource
     readonly property url activeWebSource: wallpaperEngineWebSource
+    readonly property url activeSceneSource: wallpaperEngineSceneSource
+    readonly property string activeSceneAssetsPath: joinPath(wallpaperEngineLibraryPath, "/steamapps/common/wallpaper_engine/assets")
     readonly property string videoEmptyMessage: wallpaperEngineVideoMode
         ? qsTr("Select a Wallpaper Engine video in the wallpaper settings.")
         : qsTr("Select a local video file in the wallpaper settings.")
     readonly property string webEmptyMessage: qsTr("Select a Wallpaper Engine web wallpaper in the wallpaper settings.")
+    readonly property string sceneEmptyMessage: qsTr("Select a Wallpaper Engine scene wallpaper in the wallpaper settings.")
     property bool contentLoadFailed: false
     property string contentLoadErrorText: ""
 
-    onContentModeChanged: log("contentMode=" + contentMode + " videoMode=" + videoMode + " webMode=" + webMode)
+    onContentModeChanged: log("contentMode=" + contentMode + " videoMode=" + videoMode + " webMode=" + webMode + " sceneMode=" + sceneMode)
     onVideoSourceChanged: log("videoSource=" + String(videoSource))
     onWallpaperEngineVideoSourceChanged: log("wallpaperEngineVideoSource=" + String(wallpaperEngineVideoSource))
     onWallpaperEngineWebSourceChanged: log("wallpaperEngineWebSource=" + String(wallpaperEngineWebSource))
+    onWallpaperEngineSceneSourceChanged: log("wallpaperEngineSceneSource=" + String(wallpaperEngineSceneSource))
+    onWallpaperEngineSceneExperimentalEnabledChanged: log("wallpaperEngineSceneExperimentalEnabled=" + wallpaperEngineSceneExperimentalEnabled)
+    onWallpaperEngineSceneMouseInputChanged: log("wallpaperEngineSceneMouseInput=" + wallpaperEngineSceneMouseInput)
     onVideoFillModeChanged: log("videoFillMode=" + videoFillMode)
     onVideoMutedChanged: log("videoMuted=" + videoMuted)
 
@@ -85,7 +110,9 @@ WallpaperItem {
         anchors.fill: parent
         source: root.videoMode
             ? "VideoBackground.qml"
-            : (root.webMode ? "WebBackground.qml" : "GradientBackground.qml")
+            : (root.webMode
+                ? "WebBackground.qml"
+                : (root.sceneMode ? "SceneGuard.qml" : "GradientBackground.qml"))
 
         onStatusChanged: {
             root.log("loader status=" + status + " source=" + source)
@@ -99,8 +126,10 @@ WallpaperItem {
                 root.contentLoadErrorText = root.videoMode
                     ? qsTr("Video mode could not be initialized in this Plasma session. Check QtMultimedia availability and the VM codec stack.")
                     : (root.webMode
-                        ? qsTr("Wallpaper Engine Web mode could not be initialized in this Plasma session. Check QtWebEngine and QtWebChannel availability in the VM.")
-                        : qsTr("The selected Paper Gradient content mode could not be initialized."))
+                        ? qsTr("Wallpaper Engine Web mode could not be initialized in this Plasma session. Check QtWebEngine availability in the VM.")
+                        : (root.sceneMode
+                            ? qsTr("Wallpaper Engine Scene research mode could not be initialized in this Plasma session.")
+                            : qsTr("The selected Paper Gradient content mode could not be initialized.")))
             } else if (status === Loader.Loading) {
                 root.contentLoadFailed = false
                 root.contentLoadErrorText = ""
@@ -154,6 +183,39 @@ WallpaperItem {
             return
         }
 
+        if (root.sceneMode) {
+            root.log("binding scene content source=" + String(root.activeSceneSource)
+                + " title=" + root.wallpaperEngineSceneProjectTitle)
+            contentLoader.item.sceneSource = Qt.binding(function() {
+                return root.activeSceneSource
+            })
+            contentLoader.item.projectTitle = Qt.binding(function() {
+                return root.wallpaperEngineSceneProjectTitle
+            })
+            contentLoader.item.sceneSourceKind = Qt.binding(function() {
+                return root.wallpaperEngineSceneSourceKind
+            })
+            contentLoader.item.assetsPath = Qt.binding(function() {
+                return root.activeSceneAssetsPath
+            })
+            contentLoader.item.mouseInputEnabled = Qt.binding(function() {
+                return root.wallpaperEngineSceneMouseInput
+            })
+            contentLoader.item.fillModeValue = Qt.binding(function() {
+                return root.videoFillMode
+            })
+            contentLoader.item.muted = Qt.binding(function() {
+                return root.videoMuted
+            })
+            contentLoader.item.emptyMessage = Qt.binding(function() {
+                return root.sceneEmptyMessage
+            })
+            contentLoader.item.experimentalEnabled = Qt.binding(function() {
+                return root.wallpaperEngineSceneExperimentalEnabled
+            })
+            return
+        }
+
         contentLoader.item.manualStartColor = Qt.binding(function() {
             return root.manualStartColor
         })
@@ -203,7 +265,11 @@ WallpaperItem {
 
     Component.onCompleted: {
         log("wallpaper loaded contentMode=" + contentMode
-            + " resolvedMediaSource=" + String(videoMode ? activeVideoSource : activeWebSource))
+            + " resolvedMediaSource=" + String(
+                videoMode
+                    ? activeVideoSource
+                    : (webMode ? activeWebSource : (sceneMode ? activeSceneSource : ""))
+            ))
     }
 
     Rectangle {

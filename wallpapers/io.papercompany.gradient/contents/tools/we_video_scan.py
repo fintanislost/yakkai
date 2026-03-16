@@ -15,6 +15,33 @@ def candidate_roots(library_root: Path) -> list[tuple[str, Path]]:
     ]
 
 
+def resolve_source_path(project_path: Path, file_name: object, project_type: str) -> Path | None:
+    candidates: list[Path] = []
+
+    if isinstance(file_name, str) and file_name:
+        candidates.append(project_path.parent / file_name)
+
+    if project_type == "scene":
+        candidates.extend(
+            [
+                project_path.parent / "scene.pkg",
+                project_path.parent / "scene.json",
+            ]
+        )
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+
+        if resolved.is_file():
+            return resolved
+
+    return None
+
+
 def load_project(project_path: Path, kind: str, expected_type: str) -> dict | None:
     try:
         data = json.loads(project_path.read_text(encoding="utf-8-sig"))
@@ -25,12 +52,8 @@ def load_project(project_path: Path, kind: str, expected_type: str) -> dict | No
     if project_type != expected_type:
         return None
 
-    file_name = data.get("file")
-    if not isinstance(file_name, str) or not file_name:
-        return None
-
-    source_path = (project_path.parent / file_name).resolve()
-    if not source_path.is_file():
+    source_path = resolve_source_path(project_path, data.get("file"), project_type)
+    if source_path is None:
         return None
 
     preview_name = data.get("preview")
@@ -56,6 +79,7 @@ def load_project(project_path: Path, kind: str, expected_type: str) -> dict | No
         "projectPath": str(project_path.resolve()),
         "folderPath": str(project_path.parent.resolve()),
         "sourcePath": str(source_path),
+        "sourceKind": source_path.name,
         "previewPath": preview_path,
         "kind": kind,
         "type": project_type,
@@ -104,21 +128,21 @@ def main(argv: list[str]) -> int:
                     "library": "",
                     "type": "",
                     "items": [],
-                    "errors": ["Usage: we_video_scan.py <steam-library-path> [video|web]"],
+                    "errors": ["Usage: we_video_scan.py <steam-library-path> [video|web|scene]"],
                 }
             )
         )
         return 1
 
     expected_type = argv[2].strip().lower() if len(argv) == 3 else "video"
-    if expected_type not in {"video", "web"}:
+    if expected_type not in {"video", "web", "scene"}:
         print(
             json.dumps(
                 {
                     "library": "",
                     "type": expected_type,
                     "items": [],
-                    "errors": ["Supported project types are: video, web"],
+                    "errors": ["Supported project types are: video, web, scene"],
                 }
             )
         )

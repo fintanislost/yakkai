@@ -2,6 +2,32 @@
 
 This document tracks the practical fixes and debugging outcomes that got `Paper Gradient` to a working state for local video, Wallpaper Engine video, and first-pass Wallpaper Engine web testing.
 
+## Wallpaper Engine Scene backend limit
+
+Problem:
+- The guarded experimental `Wallpaper Engine Scene` path loads and reaches first frame without crashing Plasma, but some scenes render badly offset on the host.
+- The issue persisted across:
+  - fresh scene-runtime launches
+  - `Crop` / `Fit` / `Stretch` changes
+  - mouse-input enabled and disabled
+
+Evidence:
+- QML-side scene geometry matches the native backend swapchain size:
+  - `scene runtime geometry ... item=2560x1440`
+  - native backend: `set swapchain image size: 2560x1440`
+- The experimental guard now restarts the native scene runtime on sizing and mouse-input changes, so each test is a clean launch.
+- The runtime consistently reaches `firstFrame`, which means the scene backend is not simply failing to start.
+- The native backend still logs the same renderer issue on each clean launch:
+  - `ERROR glExtra.cpp:142 GL_INVALID_ENUM(1280) at genExTexture`
+
+Diagnosis:
+- The remaining scene defect is very likely in the native `SceneViewer` / external-texture import path, not in Paper Gradient’s QML wrapper.
+- The vendored reference source in this repo includes the `SceneBackend.cpp` call sites, but not the `glExtra` implementation that emits `genExTexture`, so the failing texture-import code is not currently patchable from this repo alone.
+
+Result:
+- `Wallpaper Engine Scene` should still be treated as experimental and backend-limited.
+- The current Paper Gradient scene work is useful for safe selection, diagnostics, and guarded launch behavior, but not enough to resolve native scene renderer bugs on its own.
+
 ## Wallpaper Engine Web bridge
 
 Problem:

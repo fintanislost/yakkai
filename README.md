@@ -17,6 +17,7 @@
 - Local video file playback through `QtMultimedia`
 - Wallpaper Engine video-project scanning from a Steam library
 - Wallpaper Engine web-project scanning from a Steam library
+- Wallpaper Engine scene-project scanning and safe placeholder selection from a Steam library
 - Video sizing controls for crop, fit, and stretch
 - Audio mute control for media modes
 - Persistent settings through Plasma wallpaper configuration
@@ -73,6 +74,9 @@
             |   `-- we_video_scan.py
             `-- ui/
                 |-- GradientBackground.qml
+                |-- SceneGuard.qml
+                |-- ScenePlaceholder.qml
+                |-- SceneRuntime.qml
                 |-- VideoBackground.qml
                 |-- WebBackground.qml
                 |-- config.qml
@@ -166,6 +170,12 @@ This reference is intentionally partial. It focuses on backend loading, pause po
 - `WEWebProjectTitle`: selected Wallpaper Engine web project title
 - `WEWebSource`: resolved local entry HTML file for the selected Wallpaper Engine web project
 - `WEWebPropertiesJson`: serialized default Wallpaper Engine user properties for the selected web project
+- `WESceneProjectPath`: selected Wallpaper Engine scene `project.json` path
+- `WESceneProjectTitle`: selected Wallpaper Engine scene project title
+- `WESceneSource`: resolved local scene source for the selected Wallpaper Engine scene project
+- `WESceneSourceKind`: the resolved scene source filename, such as `scene.pkg` or `scene.json`
+- `WESceneExperimentalEnabled`: enables the guarded experimental native scene renderer attempt
+- `WESceneMouseInput`: enables direct scene mouse and hover input for the experimental scene runtime
 
 ## Content modes
 
@@ -175,6 +185,7 @@ The settings panel now starts with a top-level `Content` selector:
 - `Video`: plays a local video file through `QtMultimedia`
 - `Wallpaper Engine Video`: scans a Steam library for Wallpaper Engine `video` projects and reuses the same `QtMultimedia` playback path
 - `Wallpaper Engine Web`: scans a Steam library for Wallpaper Engine `web` projects and loads their local HTML entrypoints through `QtWebEngine`
+- `Wallpaper Engine Scene`: scans a Steam library for Wallpaper Engine `scene` projects, defaults to a safe placeholder, and can optionally attempt a guarded native renderer path
 
 ## Time-of-day mode
 
@@ -217,6 +228,26 @@ Actual playback support depends on the multimedia codecs installed in the curren
 
 The settings-side scan uses the bundled `contents/tools/we_video_scan.py` helper, so the Plasma system running the settings UI needs `python3` available. The web mode requires `QtWebEngine` in the Plasma session.
 
+`Wallpaper Engine Scene` mode is currently a guarded research path:
+
+- shares the same Steam library picker and scan helper as the other Wallpaper Engine modes
+- scans only Wallpaper Engine projects whose `project.json` type is `scene`
+- resolves the real on-disk scene source conservatively, preferring an existing `scene.pkg` or `scene.json` instead of trusting metadata alone
+- stores the selected project and source path in the wallpaper config
+- shows placeholder diagnostics for source kind, source existence, Wallpaper Engine assets-path existence, and reference `SceneViewer` module presence
+- keeps the placeholder as the default path because crash resistance is the current priority
+- exposes an explicit `Enable experimental native scene renderer` toggle in the settings
+- reuses the existing sizing and mute controls when the experimental scene renderer is enabled
+- keeps direct scene mouse and hover input off by default, with an explicit opt-in toggle for testing parallax-sensitive scenes
+- routes that experimental attempt through a guard component that falls back to the placeholder if the scene runtime fails to load cleanly
+- restarts the guarded experimental scene runtime when sizing or mouse-input settings change, so backend behavior can be tested from a clean launch
+- logs scene guard, source, fill-mode, mouse-input, first-frame state, geometry, DPR, and Qt Quick graphics API details through the existing `[Paper Gradient]` journal prefix
+
+This mode exists to validate selection, source resolution, and future runtime assumptions while making the native scene path an explicit, guarded opt-in.
+
+Current limitation from host-side validation:
+- the QML wrapper now launches scenes cleanly, restarts on sizing and mouse-input changes, and matches the native swapchain size, but some scenes still render offset because the underlying `SceneViewer` backend continues to hit `GL_INVALID_ENUM` in its external-texture import path
+
 If the video backend itself cannot initialize in the current Plasma session, Paper Gradient now keeps the wallpaper selected and shows an in-wallpaper error message instead of silently falling back to another content path.
 
 If the web backend cannot initialize in the current Plasma session, Paper Gradient keeps the wallpaper selected and shows an in-wallpaper error message instead of silently falling back to another content path.
@@ -255,6 +286,6 @@ Wallpaper Engine integration is split by source type:
 
 - `video`: feasible with a small scan helper plus the existing `QtMultimedia` backend
 - `web`: feasible with `QtWebEngine`, `QtWebChannel`, and a lightweight compatibility bridge
-- `scene`: still deferred because the reference implementation depends on compiled `SceneViewer` types and a larger native runtime
+- `scene`: scan-and-select support exists, plus a guarded experimental renderer path that depends on compiled `SceneViewer` types and a larger native runtime
 
 The closest working reference remains the third-party `Wallpaper Engine for Kde` plugin under `references/wallpaper-engine-kde`.

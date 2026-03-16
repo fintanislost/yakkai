@@ -1,6 +1,6 @@
 # Paper Gradient
 
-`Paper Gradient` is a KDE Plasma 6 wallpaper plugin focused on a small set of high-value background modes. The current version supports configurable gradients, local video playback, and a first-pass Wallpaper Engine video mode while staying easy to test in a Plasma VM.
+`Paper Gradient` is a KDE Plasma 6 wallpaper plugin focused on a small set of high-value background modes. The current version supports configurable gradients, local video playback, and first-pass Wallpaper Engine video and web modes while staying easy to test in a Plasma VM.
 
 ## Current scope
 
@@ -16,8 +16,9 @@
 - Explicit mode selector so manual and time-of-day editing stay separate
 - Local video file playback through `QtMultimedia`
 - Wallpaper Engine video-project scanning from a Steam library
+- Wallpaper Engine web-project scanning from a Steam library
 - Video sizing controls for crop, fit, and stretch
-- Video soundtrack muted by default
+- Audio mute control for media modes
 - Persistent settings through Plasma wallpaper configuration
 
 ## Repo layout
@@ -25,6 +26,7 @@
 ```text
 .
 |-- AGENTS.md
+|-- fixes.md
 |-- LICENSE
 |-- README.md
 |-- references/
@@ -72,6 +74,7 @@
             `-- ui/
                 |-- GradientBackground.qml
                 |-- VideoBackground.qml
+                |-- WebBackground.qml
                 |-- config.qml
                 `-- main.qml
 ```
@@ -106,6 +109,7 @@ This repo does not include a full Plasma runtime harness. The fastest checks are
 qmllint wallpapers/io.papercompany.gradient/contents/ui/main.qml
 qmllint wallpapers/io.papercompany.gradient/contents/ui/GradientBackground.qml
 qmllint wallpapers/io.papercompany.gradient/contents/ui/VideoBackground.qml
+qmllint wallpapers/io.papercompany.gradient/contents/ui/WebBackground.qml
 qmllint wallpapers/io.papercompany.gradient/contents/ui/config.qml
 ```
 
@@ -131,6 +135,8 @@ kpackagetool6 -t Plasma/Wallpaper -i "$(pwd)/wallpapers/io.papercompany.gradient
 
 This reference is intentionally partial. It focuses on backend loading, pause policy, and the custom QML module rather than the full Workshop browser UI.
 
+`fixes.md` records the concrete issues and debugging fixes that got the current video and Wallpaper Engine paths working in practice.
+
 ## Configuration keys
 
 - `StartColor`: gradient start color
@@ -148,14 +154,18 @@ This reference is intentionally partial. It focuses on backend loading, pause po
 - `DayEndColor`: second color used for the day palette
 - `NightStartColor`: first color used for the night palette
 - `NightEndColor`: second color used for the night palette
-- `ContentMode`: selects `Gradient` or `Video`
+- `ContentMode`: selects `Gradient`, `Video`, `Wallpaper Engine Video`, or `Wallpaper Engine Web`
 - `VideoSource`: local video file path
 - `VideoFillMode`: `Crop`, `Fit`, or `Stretch`
 - `VideoMuted`: mutes wallpaper audio
-- `WEVideoLibraryPath`: Steam library root used for Wallpaper Engine video scanning
+- `WEVideoLibraryPath`: shared Steam library root used for Wallpaper Engine scanning
 - `WEVideoProjectPath`: selected Wallpaper Engine `project.json` path
 - `WEVideoProjectTitle`: selected Wallpaper Engine project title
 - `WEVideoSource`: resolved local video file for the selected Wallpaper Engine project
+- `WEWebProjectPath`: selected Wallpaper Engine web `project.json` path
+- `WEWebProjectTitle`: selected Wallpaper Engine web project title
+- `WEWebSource`: resolved local entry HTML file for the selected Wallpaper Engine web project
+- `WEWebPropertiesJson`: serialized default Wallpaper Engine user properties for the selected web project
 
 ## Content modes
 
@@ -164,6 +174,7 @@ The settings panel now starts with a top-level `Content` selector:
 - `Gradient`: keeps the original Paper Gradient renderer
 - `Video`: plays a local video file through `QtMultimedia`
 - `Wallpaper Engine Video`: scans a Steam library for Wallpaper Engine `video` projects and reuses the same `QtMultimedia` playback path
+- `Wallpaper Engine Web`: scans a Steam library for Wallpaper Engine `web` projects and loads their local HTML entrypoints through `QtWebEngine`
 
 ## Time-of-day mode
 
@@ -174,7 +185,7 @@ When `Content` is set to `Gradient`, the settings panel exposes a `Mode` selecto
 
 In `Time of day`, the wallpaper ignores the manual start and end colors and instead blends between the configured day and night palettes according to the local system time. The first transition starts at `DayStartHour`, the second starts at `NightStartHour`, and each transition lasts `TransitionMinutes`.
 
-## Video modes
+## Media modes
 
 `Video` mode is intentionally narrow in the first implementation:
 
@@ -193,13 +204,26 @@ Actual playback support depends on the multimedia codecs installed in the curren
 - scans only Wallpaper Engine projects whose `project.json` type is `video`
 - resolves the actual media file during settings-time and saves it into the wallpaper config
 - reuses the same `QtMultimedia` runtime backend as local video mode
-- does not support Wallpaper Engine `scene` or `web` projects yet
+- does not support Wallpaper Engine `scene` projects yet
 
-The settings-side scan uses the bundled `contents/tools/we_video_scan.py` helper, so the Plasma system running the settings UI needs `python3` available.
+`Wallpaper Engine Web` mode is the first-pass web path:
+
+- shares the same Steam library picker and scan helper as Wallpaper Engine video mode
+- scans only Wallpaper Engine projects whose `project.json` type is `web`
+- loads the resolved local HTML entry file through `QtWebEngine`
+- injects a direct JavaScript compatibility shim for `window.wpeQml`, `window.wallpaperPropertyListener`, and `window.wallpaperRegisterAudioListener(...)` instead of depending on a live `QWebChannel` bootstrap
+- does not yet emulate the full Wallpaper Engine audio, media-integration, or per-project settings stack
+- explicitly enables `QtWebEngine` WebGL and accelerated 2D canvas support, though some VM GPU stacks may still report WebGL as unavailable
+
+The settings-side scan uses the bundled `contents/tools/we_video_scan.py` helper, so the Plasma system running the settings UI needs `python3` available. The web mode requires `QtWebEngine` in the Plasma session.
 
 If the video backend itself cannot initialize in the current Plasma session, Paper Gradient now keeps the wallpaper selected and shows an in-wallpaper error message instead of silently falling back to another content path.
 
+If the web backend cannot initialize in the current Plasma session, Paper Gradient keeps the wallpaper selected and shows an in-wallpaper error message instead of silently falling back to another content path.
+
 If a selected video still renders as black, the wallpaper keeps a small status overlay visible until the first decoded frame arrives. That overlay now distinguishes loading, missing video tracks, stalled playback, and cases where playback time advances without any frames reaching the wallpaper.
+
+For Wallpaper Engine web mode, the on-wallpaper status overlay is now limited to actual page-load problems. If the page is already rendering, Wallpaper Engine bridge or property-payload timing issues are logged instead of being shown on screen.
 
 For runtime diagnostics from a live Plasma session, the wallpaper now emits QML logs with a `"[Paper Gradient]"` prefix. In the VM, the simplest way to watch them is:
 
@@ -208,6 +232,8 @@ journalctl --user -f | rg "Paper Gradient"
 ```
 
 Those logs include the resolved video source, loader status, `MediaPlayer` state transitions, `hasVideo`, playback position, and frame-delivery events.
+
+For Wallpaper Engine web debugging, the same `"[Paper Gradient]"` log prefix now also includes `QtWebEngine` console messages emitted by the loaded page.
 
 ## Preset helper
 
@@ -223,21 +249,12 @@ The wallpaper settings panel includes a preset picker that seeds the current con
 - Add playback rate and optional audio controls
 - Replace placeholder metadata before publishing
 
-## Video research notes
+## Wallpaper Engine research notes
 
-Video remains the primary feature target, but Plasma 6 does not ship a built-in video wallpaper plugin in the wallpaper set installed on this machine. The closest working reference is the third-party `Wallpaper Engine for Kde` plugin under `references/wallpaper-engine-kde`.
+Wallpaper Engine integration is split by source type:
 
-The main takeaways from that reference are:
+- `video`: feasible with a small scan helper plus the existing `QtMultimedia` backend
+- `web`: feasible with `QtWebEngine`, `QtWebChannel`, and a lightweight compatibility bridge
+- `scene`: still deferred because the reference implementation depends on compiled `SceneViewer` types and a larger native runtime
 
-- A simple video path can be done in QML with `QtMultimedia` and `MediaPlayer`.
-- The reference plugin adds a second, optional `mpv` backend through a compiled QML plugin.
-- It also uses extra compiled types for scene rendering, mouse capture, and TTY/suspend handling.
-- Most of the complexity is around pause policy, battery behavior, and backend selection, not basic playback.
-
-That points to a pragmatic first implementation for this repo:
-
-- local file video only
-- `QtMultimedia` backend only
-- muted by default
-- fit/crop/scale controls
-- pause when a window is focused, maximized, or fullscreen as a later step
+The closest working reference remains the third-party `Wallpaper Engine for Kde` plugin under `references/wallpaper-engine-kde`.

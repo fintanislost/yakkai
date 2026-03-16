@@ -83,7 +83,7 @@
       <default>true</default>
     </entry>
     <entry name="WEVideoLibraryPath" type="Path">
-      <label>Steam library path for Wallpaper Engine video scanning</label>
+      <label>Steam library path for Wallpaper Engine scanning</label>
       <default></default>
     </entry>
     <entry name="WEVideoProjectPath" type="Path">
@@ -96,6 +96,22 @@
     </entry>
     <entry name="WEVideoSource" type="Path">
       <label>Resolved local video file for the selected Wallpaper Engine project</label>
+      <default></default>
+    </entry>
+    <entry name="WEWebProjectPath" type="Path">
+      <label>Selected Wallpaper Engine web project.json path</label>
+      <default></default>
+    </entry>
+    <entry name="WEWebProjectTitle" type="String">
+      <label>Selected Wallpaper Engine web project title</label>
+      <default></default>
+    </entry>
+    <entry name="WEWebSource" type="Path">
+      <label>Resolved local entry HTML file for the selected Wallpaper Engine web project</label>
+      <default></default>
+    </entry>
+    <entry name="WEWebPropertiesJson" type="String">
+      <label>Serialized Wallpaper Engine user properties for the selected web project</label>
       <default></default>
     </entry>
   </group>

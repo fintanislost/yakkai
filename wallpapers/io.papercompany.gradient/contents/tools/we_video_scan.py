@@ -15,13 +15,14 @@ def candidate_roots(library_root: Path) -> list[tuple[str, Path]]:
     ]
 
 
-def load_project(project_path: Path, kind: str) -> dict | None:
+def load_project(project_path: Path, kind: str, expected_type: str) -> dict | None:
     try:
         data = json.loads(project_path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError):
         return None
 
-    if str(data.get("type", "")).lower() != "video":
+    project_type = str(data.get("type", "")).lower()
+    if project_type != expected_type:
         return None
 
     file_name = data.get("file")
@@ -43,6 +44,13 @@ def load_project(project_path: Path, kind: str) -> dict | None:
     if kind == "workshop" and project_path.parent.name.isdigit():
         workshop_id = project_path.parent.name
 
+    user_properties = {}
+    general = data.get("general")
+    if isinstance(general, dict):
+        properties = general.get("properties")
+        if isinstance(properties, dict):
+            user_properties = properties
+
     return {
         "title": str(data.get("title") or project_path.parent.name),
         "projectPath": str(project_path.resolve()),
@@ -50,13 +58,16 @@ def load_project(project_path: Path, kind: str) -> dict | None:
         "sourcePath": str(source_path),
         "previewPath": preview_path,
         "kind": kind,
+        "type": project_type,
         "workshopId": workshop_id,
+        "propertiesJson": json.dumps(user_properties, ensure_ascii=False, sort_keys=True),
     }
 
 
-def scan_library(library_root: Path) -> dict:
+def scan_library(library_root: Path, expected_type: str) -> dict:
     payload = {
         "library": str(library_root.resolve()),
+        "type": expected_type,
         "items": [],
         "errors": [],
     }
@@ -76,7 +87,7 @@ def scan_library(library_root: Path) -> dict:
             continue
 
         for project_path in root.glob("*/project.json"):
-            item = load_project(project_path, kind)
+            item = load_project(project_path, kind, expected_type)
             if item is not None:
                 items.append(item)
 
@@ -86,19 +97,34 @@ def scan_library(library_root: Path) -> dict:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 2:
+    if len(argv) not in (2, 3):
         print(
             json.dumps(
                 {
                     "library": "",
+                    "type": "",
                     "items": [],
-                    "errors": ["Usage: we_video_scan.py <steam-library-path>"],
+                    "errors": ["Usage: we_video_scan.py <steam-library-path> [video|web]"],
                 }
             )
         )
         return 1
 
-    payload = scan_library(Path(argv[1]).expanduser())
+    expected_type = argv[2].strip().lower() if len(argv) == 3 else "video"
+    if expected_type not in {"video", "web"}:
+        print(
+            json.dumps(
+                {
+                    "library": "",
+                    "type": expected_type,
+                    "items": [],
+                    "errors": ["Supported project types are: video, web"],
+                }
+            )
+        )
+        return 1
+
+    payload = scan_library(Path(argv[1]).expanduser(), expected_type)
     print(json.dumps(payload, ensure_ascii=False))
     return 0
 

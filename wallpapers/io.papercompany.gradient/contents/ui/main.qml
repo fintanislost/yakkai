@@ -53,29 +53,39 @@ WallpaperItem {
     property url videoSource: resolvedVideoSource(configuration.VideoSource ?? "")
     property url wallpaperEngineVideoSource: resolvedVideoSource(configuration.WEVideoSource ?? "")
     property string wallpaperEngineVideoProjectTitle: configuration.WEVideoProjectTitle ?? ""
+    property url wallpaperEngineWebSource: resolvedVideoSource(configuration.WEWebSource ?? "")
+    property string wallpaperEngineWebProjectTitle: configuration.WEWebProjectTitle ?? ""
+    property string wallpaperEngineWebPropertiesJson: configuration.WEWebPropertiesJson ?? ""
     property int videoFillMode: configuration.VideoFillMode ?? 0
     property bool videoMuted: configuration.VideoMuted ?? true
 
     readonly property bool localVideoMode: contentMode === 1
     readonly property bool wallpaperEngineVideoMode: contentMode === 2
+    readonly property bool wallpaperEngineWebMode: contentMode === 3
     readonly property bool videoMode: localVideoMode || wallpaperEngineVideoMode
+    readonly property bool webMode: wallpaperEngineWebMode
     readonly property url activeVideoSource: wallpaperEngineVideoMode ? wallpaperEngineVideoSource : videoSource
+    readonly property url activeWebSource: wallpaperEngineWebSource
     readonly property string videoEmptyMessage: wallpaperEngineVideoMode
         ? qsTr("Select a Wallpaper Engine video in the wallpaper settings.")
         : qsTr("Select a local video file in the wallpaper settings.")
+    readonly property string webEmptyMessage: qsTr("Select a Wallpaper Engine web wallpaper in the wallpaper settings.")
     property bool contentLoadFailed: false
     property string contentLoadErrorText: ""
 
-    onContentModeChanged: log("contentMode=" + contentMode + " videoMode=" + videoMode)
+    onContentModeChanged: log("contentMode=" + contentMode + " videoMode=" + videoMode + " webMode=" + webMode)
     onVideoSourceChanged: log("videoSource=" + String(videoSource))
     onWallpaperEngineVideoSourceChanged: log("wallpaperEngineVideoSource=" + String(wallpaperEngineVideoSource))
+    onWallpaperEngineWebSourceChanged: log("wallpaperEngineWebSource=" + String(wallpaperEngineWebSource))
     onVideoFillModeChanged: log("videoFillMode=" + videoFillMode)
     onVideoMutedChanged: log("videoMuted=" + videoMuted)
 
     Loader {
         id: contentLoader
         anchors.fill: parent
-        source: root.videoMode ? "VideoBackground.qml" : "GradientBackground.qml"
+        source: root.videoMode
+            ? "VideoBackground.qml"
+            : (root.webMode ? "WebBackground.qml" : "GradientBackground.qml")
 
         onStatusChanged: {
             root.log("loader status=" + status + " source=" + source)
@@ -88,7 +98,9 @@ WallpaperItem {
                 root.contentLoadFailed = true
                 root.contentLoadErrorText = root.videoMode
                     ? qsTr("Video mode could not be initialized in this Plasma session. Check QtMultimedia availability and the VM codec stack.")
-                    : qsTr("The selected Paper Gradient content mode could not be initialized.")
+                    : (root.webMode
+                        ? qsTr("Wallpaper Engine Web mode could not be initialized in this Plasma session. Check QtWebEngine and QtWebChannel availability in the VM.")
+                        : qsTr("The selected Paper Gradient content mode could not be initialized."))
             } else if (status === Loader.Loading) {
                 root.contentLoadFailed = false
                 root.contentLoadErrorText = ""
@@ -116,6 +128,28 @@ WallpaperItem {
             })
             contentLoader.item.emptyMessage = Qt.binding(function() {
                 return root.videoEmptyMessage
+            })
+            return
+        }
+
+        if (root.webMode) {
+            root.log("binding web content source=" + String(root.activeWebSource)
+                + " muted=" + root.videoMuted
+                + " title=" + root.wallpaperEngineWebProjectTitle)
+            contentLoader.item.webSource = Qt.binding(function() {
+                return root.activeWebSource
+            })
+            contentLoader.item.muted = Qt.binding(function() {
+                return root.videoMuted
+            })
+            contentLoader.item.emptyMessage = Qt.binding(function() {
+                return root.webEmptyMessage
+            })
+            contentLoader.item.projectTitle = Qt.binding(function() {
+                return root.wallpaperEngineWebProjectTitle
+            })
+            contentLoader.item.userPropertiesJson = Qt.binding(function() {
+                return root.wallpaperEngineWebPropertiesJson
             })
             return
         }
@@ -169,7 +203,7 @@ WallpaperItem {
 
     Component.onCompleted: {
         log("wallpaper loaded contentMode=" + contentMode
-            + " resolvedVideoSource=" + String(activeVideoSource))
+            + " resolvedMediaSource=" + String(videoMode ? activeVideoSource : activeWebSource))
     }
 
     Rectangle {

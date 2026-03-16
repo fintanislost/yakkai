@@ -51,16 +51,25 @@ Kirigami.FormLayout {
     property string cfg_WEVideoProjectPath
     property string cfg_WEVideoProjectTitle
     property string cfg_WEVideoSource
+    property string cfg_WEWebProjectPath
+    property string cfg_WEWebProjectTitle
+    property string cfg_WEWebSource
+    property string cfg_WEWebPropertiesJson
 
     property var wallpaperEngineVideoItems: []
+    property var wallpaperEngineWebItems: []
     property bool wallpaperEngineScanRunning: false
+    property string wallpaperEngineScanType: ""
     property string wallpaperEngineScanStatus: ""
     property string wallpaperEngineScanError: ""
 
     readonly property bool gradientContentMode: cfg_ContentMode === 0
     readonly property bool localVideoContentMode: cfg_ContentMode === 1
     readonly property bool wallpaperEngineVideoContentMode: cfg_ContentMode === 2
-    readonly property bool videoLikeContentMode: localVideoContentMode || wallpaperEngineVideoContentMode
+    readonly property bool wallpaperEngineWebContentMode: cfg_ContentMode === 3
+    readonly property bool wallpaperEngineContentMode: wallpaperEngineVideoContentMode || wallpaperEngineWebContentMode
+    readonly property bool playbackVideoContentMode: localVideoContentMode || wallpaperEngineVideoContentMode
+    readonly property bool audioContentMode: localVideoContentMode || wallpaperEngineVideoContentMode || wallpaperEngineWebContentMode
     readonly property bool manualMode: gradientContentMode && !cfg_UseTimeOfDay
     readonly property url defaultVideoFolder: {
         let defaultPaths = StandardPaths.standardLocations(StandardPaths.MoviesLocation)
@@ -75,14 +84,16 @@ Kirigami.FormLayout {
         const homes = StandardPaths.standardLocations(StandardPaths.HomeLocation)
         return homes.length > 0 ? homes[0] : "/"
     }
-    readonly property var selectedWallpaperEngineVideo: {
-        const index = wallpaperEngineVideoComboBox.currentIndex
+    readonly property var currentWallpaperEngineItems: wallpaperEngineWebContentMode ? wallpaperEngineWebItems : wallpaperEngineVideoItems
+    readonly property string currentWallpaperEngineType: wallpaperEngineWebContentMode ? "web" : "video"
+    readonly property var selectedWallpaperEngineProject: {
+        const index = wallpaperEngineProjectComboBox.currentIndex
 
-        if (index < 0 || index >= wallpaperEngineVideoItems.length) {
+        if (index < 0 || index >= currentWallpaperEngineItems.length) {
             return null
         }
 
-        return wallpaperEngineVideoItems[index]
+        return currentWallpaperEngineItems[index]
     }
 
     function applyPreset(index) {
@@ -142,17 +153,33 @@ Kirigami.FormLayout {
         return item.title
     }
 
-    function clearWallpaperEngineSelection() {
-        root.cfg_WEVideoProjectPath = ""
-        root.cfg_WEVideoProjectTitle = ""
-        root.cfg_WEVideoSource = ""
-        wallpaperEngineVideoComboBox.currentIndex = -1
+    function clearWallpaperEngineSelection(projectType) {
+        if (projectType === "web") {
+            root.cfg_WEWebProjectPath = ""
+            root.cfg_WEWebProjectTitle = ""
+            root.cfg_WEWebSource = ""
+            root.cfg_WEWebPropertiesJson = ""
+        } else {
+            root.cfg_WEVideoProjectPath = ""
+            root.cfg_WEVideoProjectTitle = ""
+            root.cfg_WEVideoSource = ""
+        }
+
+        wallpaperEngineProjectComboBox.currentIndex = -1
     }
 
-    function applyWallpaperEngineVideoSelection(index) {
-        const item = wallpaperEngineVideoItems[index]
+    function applyWallpaperEngineSelection(index) {
+        const item = currentWallpaperEngineItems[index]
 
         if (!item) {
+            return
+        }
+
+        if (currentWallpaperEngineType === "web") {
+            root.cfg_WEWebProjectPath = item.projectPath
+            root.cfg_WEWebProjectTitle = item.title
+            root.cfg_WEWebSource = item.sourcePath
+            root.cfg_WEWebPropertiesJson = item.propertiesJson ?? "{}"
             return
         }
 
@@ -161,20 +188,22 @@ Kirigami.FormLayout {
         root.cfg_WEVideoSource = item.sourcePath
     }
 
-    function syncWallpaperEngineVideoSelection() {
-        if (wallpaperEngineVideoItems.length === 0) {
-            wallpaperEngineVideoComboBox.currentIndex = -1
+    function syncWallpaperEngineSelection(projectType) {
+        const items = projectType === "web" ? wallpaperEngineWebItems : wallpaperEngineVideoItems
+
+        if (items.length === 0) {
+            wallpaperEngineProjectComboBox.currentIndex = -1
             return
         }
 
-        const projectPath = String(root.cfg_WEVideoProjectPath ?? "")
-        const sourcePath = String(root.cfg_WEVideoSource ?? "")
-        let index = wallpaperEngineVideoItems.findIndex(function(item) {
+        const projectPath = String(projectType === "web" ? root.cfg_WEWebProjectPath ?? "" : root.cfg_WEVideoProjectPath ?? "")
+        const sourcePath = String(projectType === "web" ? root.cfg_WEWebSource ?? "" : root.cfg_WEVideoSource ?? "")
+        let index = items.findIndex(function(item) {
             return item.projectPath === projectPath
         })
 
         if (index < 0 && sourcePath.length > 0) {
-            index = wallpaperEngineVideoItems.findIndex(function(item) {
+            index = items.findIndex(function(item) {
                 return item.sourcePath === sourcePath
             })
         }
@@ -183,8 +212,8 @@ Kirigami.FormLayout {
             index = 0
         }
 
-        wallpaperEngineVideoComboBox.currentIndex = index
-        applyWallpaperEngineVideoSelection(index)
+        wallpaperEngineProjectComboBox.currentIndex = index
+        applyWallpaperEngineSelection(index)
     }
 
     function wallpaperEngineScannerPath() {
@@ -193,19 +222,25 @@ Kirigami.FormLayout {
 
     function startWallpaperEngineScan() {
         const libraryPath = localPath(root.cfg_WEVideoLibraryPath)
+        const projectType = currentWallpaperEngineType
 
         if (libraryPath.length === 0 || wallpaperEngineScanRunning) {
             return
         }
 
         wallpaperEngineScanRunning = true
+        wallpaperEngineScanType = projectType
         wallpaperEngineScanError = ""
-        wallpaperEngineScanStatus = qsTr("Scanning Steam library for Wallpaper Engine video projects…")
+        wallpaperEngineScanStatus = projectType === "web"
+            ? qsTr("Scanning Steam library for Wallpaper Engine web projects…")
+            : qsTr("Scanning Steam library for Wallpaper Engine video projects…")
 
         const command = "python3 "
             + shellQuote(wallpaperEngineScannerPath())
             + " "
             + shellQuote(libraryPath)
+            + " "
+            + shellQuote(projectType)
 
         wallpaperEngineScanner.exec(command)
     }
@@ -231,7 +266,11 @@ Kirigami.FormLayout {
             return
         }
 
-        wallpaperEngineVideoItems = payload.items ?? []
+        if (wallpaperEngineScanType === "web") {
+            wallpaperEngineWebItems = payload.items ?? []
+        } else {
+            wallpaperEngineVideoItems = payload.items ?? []
+        }
 
         if (payload.errors && payload.errors.length > 0) {
             wallpaperEngineScanError = payload.errors.join(" ")
@@ -239,26 +278,32 @@ Kirigami.FormLayout {
             wallpaperEngineScanError = ""
         }
 
-        wallpaperEngineScanStatus = qsTr("Found %1 Wallpaper Engine video wallpapers.").arg(wallpaperEngineVideoItems.length)
+        const itemCount = wallpaperEngineScanType === "web" ? wallpaperEngineWebItems.length : wallpaperEngineVideoItems.length
+        wallpaperEngineScanStatus = wallpaperEngineScanType === "web"
+            ? qsTr("Found %1 Wallpaper Engine web wallpapers.").arg(itemCount)
+            : qsTr("Found %1 Wallpaper Engine video wallpapers.").arg(itemCount)
 
-        if (wallpaperEngineVideoItems.length > 0) {
-            syncWallpaperEngineVideoSelection()
-        } else if (root.cfg_WEVideoProjectPath.length === 0) {
-            wallpaperEngineVideoComboBox.currentIndex = -1
+        if (itemCount > 0) {
+            syncWallpaperEngineSelection(wallpaperEngineScanType)
+        } else if ((wallpaperEngineScanType === "web" ? root.cfg_WEWebProjectPath.length : root.cfg_WEVideoProjectPath.length) === 0) {
+            wallpaperEngineProjectComboBox.currentIndex = -1
         }
     }
 
     onCfg_ContentModeChanged: {
-        if (wallpaperEngineVideoContentMode
-                && wallpaperEngineVideoItems.length === 0
+        if (wallpaperEngineContentMode
                 && root.cfg_WEVideoLibraryPath.length > 0
                 && !wallpaperEngineScanRunning) {
-            startWallpaperEngineScan()
+            if (currentWallpaperEngineItems.length === 0) {
+                startWallpaperEngineScan()
+            } else {
+                syncWallpaperEngineSelection(currentWallpaperEngineType)
+            }
         }
     }
 
     Component.onCompleted: {
-        if (root.cfg_WEVideoLibraryPath.length > 0 && root.cfg_ContentMode === 2) {
+        if (root.cfg_WEVideoLibraryPath.length > 0 && wallpaperEngineContentMode) {
             startWallpaperEngineScan()
         }
     }
@@ -269,7 +314,8 @@ Kirigami.FormLayout {
         model: [
             qsTr("Gradient"),
             qsTr("Video"),
-            qsTr("Wallpaper Engine Video")
+            qsTr("Wallpaper Engine Video"),
+            qsTr("Wallpaper Engine Web")
         ]
         currentIndex: root.cfg_ContentMode
 
@@ -281,7 +327,9 @@ Kirigami.FormLayout {
             ? qsTr("Gradient mode renders the current Paper Gradient background, with optional manual or time-of-day palettes.")
             : (root.localVideoContentMode
                 ? qsTr("Video mode plays a local video file through QtMultimedia. Actual playback depends on the codecs installed in the current Plasma system or VM.")
-                : qsTr("Wallpaper Engine Video mode scans a Steam library for Wallpaper Engine video projects and reuses the Paper Gradient video backend for playback."))
+                : (root.wallpaperEngineVideoContentMode
+                    ? qsTr("Wallpaper Engine Video mode scans a Steam library for Wallpaper Engine video projects and reuses the Paper Gradient video backend for playback.")
+                    : qsTr("Wallpaper Engine Web mode scans a Steam library for Wallpaper Engine web projects and loads their local HTML entrypoints through QtWebEngine.")))
         wrapMode: Text.WordWrap
         Layout.fillWidth: true
     }
@@ -496,7 +544,7 @@ Kirigami.FormLayout {
     ColumnLayout {
         Kirigami.FormData.label: qsTr("Library:")
         Layout.fillWidth: true
-        visible: root.wallpaperEngineVideoContentMode
+        visible: root.wallpaperEngineContentMode
 
         RowLayout {
             Layout.fillWidth: true
@@ -516,14 +564,18 @@ Kirigami.FormLayout {
 
             QQC2.Button {
                 text: qsTr("Clear")
-                enabled: root.cfg_WEVideoLibraryPath.length > 0 || root.cfg_WEVideoProjectPath.length > 0
+                enabled: root.cfg_WEVideoLibraryPath.length > 0
+                    || root.cfg_WEVideoProjectPath.length > 0
+                    || root.cfg_WEWebProjectPath.length > 0
 
                 onClicked: {
                     root.cfg_WEVideoLibraryPath = ""
                     root.wallpaperEngineVideoItems = []
+                    root.wallpaperEngineWebItems = []
                     root.wallpaperEngineScanStatus = ""
                     root.wallpaperEngineScanError = ""
-                    root.clearWallpaperEngineSelection()
+                    root.clearWallpaperEngineSelection("video")
+                    root.clearWallpaperEngineSelection("web")
                 }
             }
         }
@@ -547,25 +599,29 @@ Kirigami.FormLayout {
     }
 
     QQC2.ComboBox {
-        id: wallpaperEngineVideoComboBox
+        id: wallpaperEngineProjectComboBox
         Kirigami.FormData.label: qsTr("Wallpaper:")
-        model: root.wallpaperEngineVideoItems.map(function(item) {
+        model: root.currentWallpaperEngineItems.map(function(item) {
             return root.wallpaperEngineItemLabel(item)
         })
-        enabled: root.wallpaperEngineVideoItems.length > 0 && !root.wallpaperEngineScanRunning
-        visible: root.wallpaperEngineVideoContentMode
+        enabled: root.currentWallpaperEngineItems.length > 0 && !root.wallpaperEngineScanRunning
+        visible: root.wallpaperEngineContentMode
 
-        onActivated: root.applyWallpaperEngineVideoSelection(currentIndex)
+        onActivated: root.applyWallpaperEngineSelection(currentIndex)
     }
 
     QQC2.Label {
-        text: root.selectedWallpaperEngineVideo
-            ? qsTr("Project: %1\nMedia: %2").arg(root.selectedWallpaperEngineVideo.projectPath).arg(root.selectedWallpaperEngineVideo.sourcePath)
-            : qsTr("Select a Steam library, refresh the scan, and choose one of the discovered Wallpaper Engine video projects.")
+        text: root.selectedWallpaperEngineProject
+            ? (root.wallpaperEngineWebContentMode
+                ? qsTr("Project: %1\nEntry: %2").arg(root.selectedWallpaperEngineProject.projectPath).arg(root.selectedWallpaperEngineProject.sourcePath)
+                : qsTr("Project: %1\nMedia: %2").arg(root.selectedWallpaperEngineProject.projectPath).arg(root.selectedWallpaperEngineProject.sourcePath))
+            : (root.wallpaperEngineWebContentMode
+                ? qsTr("Select a Steam library, refresh the scan, and choose one of the discovered Wallpaper Engine web projects.")
+                : qsTr("Select a Steam library, refresh the scan, and choose one of the discovered Wallpaper Engine video projects."))
         wrapMode: Text.WrapAnywhere
         Layout.fillWidth: true
-        visible: root.wallpaperEngineVideoContentMode
-        opacity: root.selectedWallpaperEngineVideo ? 1 : 0.7
+        visible: root.wallpaperEngineContentMode
+        opacity: root.selectedWallpaperEngineProject ? 1 : 0.7
     }
 
     QQC2.ComboBox {
@@ -577,16 +633,16 @@ Kirigami.FormLayout {
             qsTr("Stretch")
         ]
         currentIndex: root.cfg_VideoFillMode
-        visible: root.videoLikeContentMode
+        visible: root.playbackVideoContentMode
 
         onActivated: root.cfg_VideoFillMode = currentIndex
     }
 
     QQC2.CheckBox {
         Kirigami.FormData.label: qsTr("Audio:")
-        text: qsTr("Mute soundtrack")
+        text: qsTr("Mute audio")
         checked: root.cfg_VideoMuted
-        visible: root.videoLikeContentMode
+        visible: root.audioContentMode
 
         onToggled: root.cfg_VideoMuted = checked
     }
@@ -598,7 +654,9 @@ Kirigami.FormLayout {
                 : qsTr("Time-of-day mode blends from the night palette into the day palette at the configured hours using your VM or system local time."))
             : (root.localVideoContentMode
                 ? qsTr("Start with local MP4 or WebM files. If a video fails to play in the VM, the issue is likely the guest multimedia codec stack rather than the wallpaper package itself.")
-                : qsTr("Wallpaper Engine Video mode currently supports only Wallpaper Engine projects whose project.json type is video. It uses a small Python helper in the settings page to scan the Steam library and resolve the actual media file."))
+                : (root.wallpaperEngineVideoContentMode
+                    ? qsTr("Wallpaper Engine Video mode currently supports only Wallpaper Engine projects whose project.json type is video. It uses a small Python helper in the settings page to scan the Steam library and resolve the actual media file.")
+                    : qsTr("Wallpaper Engine Web mode currently supports only Wallpaper Engine projects whose project.json type is web. It loads the local HTML entrypoint and sends the default Wallpaper Engine property payload through a minimal WebChannel bridge.")))
         wrapMode: Text.WordWrap
         Layout.fillWidth: true
     }
@@ -629,9 +687,11 @@ Kirigami.FormLayout {
             root.wallpaperEngineScanStatus = ""
             root.wallpaperEngineScanError = ""
             root.wallpaperEngineVideoItems = []
+            root.wallpaperEngineWebItems = []
 
             if (changed) {
-                root.clearWallpaperEngineSelection()
+                root.clearWallpaperEngineSelection("video")
+                root.clearWallpaperEngineSelection("web")
             }
 
             root.startWallpaperEngineScan()

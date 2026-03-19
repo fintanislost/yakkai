@@ -79,10 +79,13 @@ WallpaperItem {
     readonly property bool localVideoMode: contentMode === 1
     readonly property bool wallpaperEngineVideoMode: contentMode === 2
     readonly property bool wallpaperEngineWebMode: contentMode === 3
-    readonly property bool wallpaperEngineSceneMode: contentMode === 4
+    readonly property bool legacySceneNativeMode: contentMode === 4 && wallpaperEngineSceneExperimentalEnabled
+    readonly property bool wallpaperEngineSceneMode: contentMode === 4 && !legacySceneNativeMode
+    readonly property bool wallpaperEngineSceneNativeMode: contentMode === 5 || legacySceneNativeMode
     readonly property bool videoMode: localVideoMode || wallpaperEngineVideoMode
     readonly property bool webMode: wallpaperEngineWebMode
     readonly property bool sceneMode: wallpaperEngineSceneMode
+    readonly property bool sceneNativeMode: wallpaperEngineSceneNativeMode
     readonly property url activeVideoSource: wallpaperEngineVideoMode ? wallpaperEngineVideoSource : videoSource
     readonly property url activeWebSource: wallpaperEngineWebSource
     readonly property url activeSceneSource: wallpaperEngineSceneSource
@@ -95,7 +98,7 @@ WallpaperItem {
     property bool contentLoadFailed: false
     property string contentLoadErrorText: ""
 
-    onContentModeChanged: log("contentMode=" + contentMode + " videoMode=" + videoMode + " webMode=" + webMode + " sceneMode=" + sceneMode)
+    onContentModeChanged: log("contentMode=" + contentMode + " videoMode=" + videoMode + " webMode=" + webMode + " sceneMode=" + sceneMode + " sceneNativeMode=" + sceneNativeMode)
     onVideoSourceChanged: log("videoSource=" + String(videoSource))
     onWallpaperEngineVideoSourceChanged: log("wallpaperEngineVideoSource=" + String(wallpaperEngineVideoSource))
     onWallpaperEngineWebSourceChanged: log("wallpaperEngineWebSource=" + String(wallpaperEngineWebSource))
@@ -112,7 +115,9 @@ WallpaperItem {
             ? "VideoBackground.qml"
             : (root.webMode
                 ? "WebBackground.qml"
-                : (root.sceneMode ? "SceneGuard.qml" : "GradientBackground.qml"))
+                : (root.sceneNativeMode
+                    ? "SceneGuard.qml"
+                    : (root.sceneMode ? "ScenePlaceholder.qml" : "GradientBackground.qml")))
 
         onStatusChanged: {
             root.log("loader status=" + status + " source=" + source)
@@ -127,8 +132,8 @@ WallpaperItem {
                     ? qsTr("Video mode could not be initialized in this Plasma session. Check QtMultimedia availability and the VM codec stack.")
                     : (root.webMode
                         ? qsTr("Wallpaper Engine Web mode could not be initialized in this Plasma session. Check QtWebEngine availability in the VM.")
-                        : (root.sceneMode
-                            ? qsTr("Wallpaper Engine Scene research mode could not be initialized in this Plasma session.")
+                        : ((root.sceneMode || root.sceneNativeMode)
+                            ? qsTr("Wallpaper Engine Scene mode could not be initialized in this Plasma session.")
                             : qsTr("The selected Paper Gradient content mode could not be initialized.")))
             } else if (status === Loader.Loading) {
                 root.contentLoadFailed = false
@@ -183,7 +188,7 @@ WallpaperItem {
             return
         }
 
-        if (root.sceneMode) {
+        if (root.sceneMode || root.sceneNativeMode) {
             root.log("binding scene content source=" + String(root.activeSceneSource)
                 + " title=" + root.wallpaperEngineSceneProjectTitle)
             contentLoader.item.sceneSource = Qt.binding(function() {
@@ -211,7 +216,7 @@ WallpaperItem {
                 return root.sceneEmptyMessage
             })
             contentLoader.item.experimentalEnabled = Qt.binding(function() {
-                return root.wallpaperEngineSceneExperimentalEnabled
+                return root.sceneNativeMode
             })
             return
         }
@@ -268,7 +273,7 @@ WallpaperItem {
             + " resolvedMediaSource=" + String(
                 videoMode
                     ? activeVideoSource
-                    : (webMode ? activeWebSource : (sceneMode ? activeSceneSource : ""))
+                    : (webMode ? activeWebSource : ((sceneMode || sceneNativeMode) ? activeSceneSource : ""))
             ))
     }
 

@@ -16,11 +16,15 @@ Item {
     property string assetsPath: ""
     property string emptyMessage: qsTr("Select a Wallpaper Engine scene wallpaper in the wallpaper settings.")
     property bool experimentalEnabled: false
+    property bool mouseInputEnabled: false
+    property int fillModeValue: 0
+    property bool muted: true
     property string runtimeErrorText: ""
 
     property string sourceExistsStatus: qsTr("Not checked")
     property string assetsExistsStatus: qsTr("Not checked")
     property string backendModuleStatus: qsTr("Not checked")
+    property bool backendModuleStaged: false
     property var pendingDiagnostics: ({})
 
     readonly property bool hasSelection: String(sceneSource).length > 0
@@ -33,9 +37,14 @@ Item {
         ? (runtimeErrorText.length > 0
             ? runtimeErrorText
             : (experimentalEnabled
-                ? qsTr("Wallpaper Engine Scene is in guarded experimental mode. If the native renderer does not come up cleanly, Paper Gradient falls back to this safe placeholder instead of continuing the attempt.")
+                ? (backendModuleStatus === qsTr("Checking…")
+                    ? qsTr("Wallpaper Engine Scene Native is checking whether the repo-owned Paper Company scene module is staged into this wallpaper package.")
+                    : (backendModuleStaged
+                    ? qsTr("Wallpaper Engine Scene Native is in guarded experimental mode. If the repo-owned native renderer does not come up cleanly, Paper Gradient falls back to this safe placeholder instead of continuing the attempt.")
+                    : qsTr("Wallpaper Engine Scene Native needs the repo-owned Paper Company scene module to be staged into this wallpaper package before the guarded native renderer can start. Build the native workspace, then update the wallpaper package again.")))
                 : qsTr("Wallpaper Engine Scene is currently a research-only mode. Scene projects can be scanned and selected safely, but rendering is intentionally disabled to avoid destabilizing Plasma.")))
         : emptyMessage
+    readonly property string nativeModuleDirPath: localPath(Qt.resolvedUrl("../imports/io/papercompany/scene"))
 
     function localPath(value) {
         const asText = String(value ?? "")
@@ -65,6 +74,7 @@ Item {
         sourceExistsStatus = hasSelection ? qsTr("Checking…") : qsTr("No scene selected")
         assetsExistsStatus = assetsPath.length > 0 ? qsTr("Checking…") : qsTr("No Steam assets path available")
         backendModuleStatus = qsTr("Checking…")
+        backendModuleStaged = false
 
         if (hasSelection) {
             queueDiagnostic("source", "test -f " + shellQuote(sourcePath) + " && printf yes || printf no")
@@ -76,9 +86,10 @@ Item {
 
         queueDiagnostic(
             "backend",
-            "if test -f /usr/lib/qt6/qml/com/github/catsout/wallpaperEngineKde/qmldir "
-                + "|| test -f /usr/lib64/qt6/qml/com/github/catsout/wallpaperEngineKde/qmldir; "
-                + "then printf yes; else printf no; fi"
+            "if test -f " + shellQuote(nativeModuleDirPath + "/qmldir")
+                + " && test -f " + shellQuote(nativeModuleDirPath + "/libpapercompany_scene_backendplugin.so")
+                + " && test -f " + shellQuote(nativeModuleDirPath + "/libpapercompany_scene_backend.so")
+                + "; then printf yes; else printf no; fi"
         )
     }
 
@@ -146,7 +157,7 @@ Item {
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
             color: "#dde6ef"
-            text: qsTr("Scene source exists: %1\nWallpaper Engine assets directory exists: %2\nReference SceneViewer module installed: %3")
+            text: qsTr("Scene source exists: %1\nWallpaper Engine assets directory exists: %2\nPaper Company native scene module staged: %3")
                 .arg(sourceExistsStatus)
                 .arg(assetsExistsStatus)
                 .arg(backendModuleStatus)
@@ -166,7 +177,9 @@ Item {
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WrapAnywhere
             color: "#9fb0c2"
-            text: qsTr("Expected assets path: %1").arg(assetsPath.length > 0 ? assetsPath : qsTr("Unknown"))
+            text: qsTr("Expected assets path: %1\nExpected native module path: %2")
+                .arg(assetsPath.length > 0 ? assetsPath : qsTr("Unknown"))
+                .arg(nativeModuleDirPath.length > 0 ? nativeModuleDirPath : qsTr("Unknown"))
         }
     }
 
@@ -191,6 +204,7 @@ Item {
                 root.assetsExistsStatus = status
             } else if (kind === "backend") {
                 root.backendModuleStatus = status
+                root.backendModuleStaged = (data.stdout ?? "").trim() === "yes"
             }
         }
     }

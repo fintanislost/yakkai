@@ -6,7 +6,7 @@
 
 import QtQuick
 import QtQuick.Window
-import com.github.catsout.wallpaperEngineKde 1.2
+import "../imports/io/papercompany/scene" as PaperSceneModule
 
 Item {
     id: root
@@ -80,12 +80,12 @@ Item {
     function sceneFillModeEnum() {
         switch (fillModeValue) {
         case 1:
-            return SceneViewer.ASPECTFIT
+            return PaperSceneModule.PaperSceneViewer.AspectFit
         case 2:
-            return SceneViewer.STRETCH
+            return PaperSceneModule.PaperSceneViewer.Stretch
         case 0:
         default:
-            return SceneViewer.ASPECTCROP
+            return PaperSceneModule.PaperSceneViewer.AspectCrop
         }
     }
 
@@ -108,8 +108,7 @@ Item {
     }
 
     function applyMouseInput() {
-        player.setAcceptMouse(mouseInputEnabled)
-        player.setAcceptHover(mouseInputEnabled)
+        player.mouseInputEnabled = mouseInputEnabled
         log("scene runtime mouseInputEnabled=" + mouseInputEnabled)
     }
 
@@ -150,16 +149,17 @@ Item {
         }
     }
 
-    SceneViewer {
+    PaperSceneModule.PaperSceneViewer {
         id: player
         anchors.fill: parent
         source: root.sceneSource
         assets: root.assetsUrl(root.assetsPath)
-        fillMode: SceneViewer.ASPECTCROP
+        fillMode: PaperSceneModule.PaperSceneViewer.AspectCrop
         fps: 30
         speed: 1.0
         muted: root.muted
         volume: root.muted ? 0.0 : 1.0
+        mouseInputEnabled: root.mouseInputEnabled
 
         Component.onCompleted: {
             root.log("scene runtime component completed")
@@ -186,6 +186,10 @@ Item {
 
             function onFillModeChanged() {
                 root.log("scene viewer fillModeChanged=" + player.fillMode)
+            }
+
+            function onBackendStatusChanged() {
+                root.log("scene viewer backendStatus=" + player.backendStatus)
             }
         }
     }

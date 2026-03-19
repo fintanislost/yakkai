@@ -21,6 +21,10 @@ Item {
     property bool muted: true
     property bool runtimeActive: false
     property string pendingRestartReason: ""
+    property url runtimeSceneSource: ""
+    property string runtimeAssetsPath: ""
+    property int runtimeFillModeValue: 0
+    property bool runtimeMouseInputEnabled: false
 
     readonly property bool readyForExperimentalAttempt: experimentalEnabled
         && String(sceneSource).length > 0
@@ -33,27 +37,69 @@ Item {
         console.log(logPrefix + " " + message)
     }
 
-    onSceneSourceChanged: log("scene guard sceneSource=" + String(sceneSource))
-    onAssetsPathChanged: log("scene guard assetsPath=" + assetsPath)
+    function syncRuntimeInputs() {
+        runtimeSceneSource = sceneSource
+        runtimeAssetsPath = assetsPath
+        runtimeFillModeValue = fillModeValue
+        runtimeMouseInputEnabled = mouseInputEnabled
+    }
+
+    function activateRuntime() {
+        if (!readyForExperimentalAttempt) {
+            runtimeActive = false
+            return
+        }
+
+        syncRuntimeInputs()
+        runtimeActive = true
+    }
+
+    function beginRuntimeRestart(reason) {
+        pendingRestartReason = reason
+
+        log("scene guard restarting runtime reason=" + pendingRestartReason
+            + " source=" + String(sceneSource)
+            + " assets=" + assetsPath
+            + " fillModeValue=" + fillModeValue
+            + " mouseInputEnabled=" + mouseInputEnabled)
+
+        runtimeActive = false
+        restartActivateTimer.restart()
+    }
+
+    function scheduleRuntimeRestartIfReady(reason) {
+        if (runtimeActive && readyForExperimentalAttempt) {
+            scheduleRuntimeRestart(reason)
+        }
+    }
+
+    onSceneSourceChanged: {
+        log("scene guard sceneSource=" + String(sceneSource))
+
+        if (runtimeActive && readyForExperimentalAttempt) {
+            beginRuntimeRestart("sceneSourceChanged")
+        }
+    }
+    onAssetsPathChanged: {
+        log("scene guard assetsPath=" + assetsPath)
+
+        if (runtimeActive && readyForExperimentalAttempt) {
+            beginRuntimeRestart("assetsPathChanged")
+        }
+    }
     onExperimentalEnabledChanged: log("scene guard experimentalEnabled=" + experimentalEnabled)
     onMouseInputEnabledChanged: {
         log("scene guard mouseInputEnabled=" + mouseInputEnabled)
-
-        if (runtimeLoader.status === Loader.Ready && readyForExperimentalAttempt) {
-            scheduleRuntimeRestart("mouseInputEnabledChanged")
-        }
+        scheduleRuntimeRestartIfReady("mouseInputEnabledChanged")
     }
     onFillModeValueChanged: {
         log("scene guard fillModeValue=" + fillModeValue)
-
-        if (runtimeLoader.status === Loader.Ready && readyForExperimentalAttempt) {
-            scheduleRuntimeRestart("fillModeValueChanged")
-        }
+        scheduleRuntimeRestartIfReady("fillModeValueChanged")
     }
     onMutedChanged: log("scene guard muted=" + muted)
     onReadyForExperimentalAttemptChanged: {
         log("scene guard readyForExperimentalAttempt=" + readyForExperimentalAttempt)
-        runtimeActive = readyForExperimentalAttempt
+        activateRuntime()
     }
 
     Component.onCompleted: {
@@ -62,7 +108,7 @@ Item {
             + " experimentalEnabled=" + experimentalEnabled
             + " mouseInputEnabled=" + mouseInputEnabled
             + " fillModeValue=" + fillModeValue)
-        runtimeActive = readyForExperimentalAttempt
+        activateRuntime()
     }
 
     function scheduleRuntimeRestart(reason) {
@@ -80,11 +126,7 @@ Item {
                 return
             }
 
-            root.log("scene guard restarting runtime reason=" + root.pendingRestartReason
-                + " fillModeValue=" + root.fillModeValue
-                + " mouseInputEnabled=" + root.mouseInputEnabled)
-            root.runtimeActive = false
-            restartActivateTimer.start()
+            root.beginRuntimeRestart(root.pendingRestartReason)
         }
     }
 
@@ -94,7 +136,7 @@ Item {
         repeat: false
 
         onTriggered: {
-            root.runtimeActive = root.readyForExperimentalAttempt
+            root.activateRuntime()
         }
     }
 
@@ -103,11 +145,11 @@ Item {
 
         SceneRuntime {
             logPrefix: root.logPrefix
-            sceneSource: root.sceneSource
-            assetsPath: root.assetsPath
-            fillModeValue: root.fillModeValue
+            sceneSource: root.runtimeSceneSource
+            assetsPath: root.runtimeAssetsPath
+            fillModeValue: root.runtimeFillModeValue
             muted: root.muted
-            mouseInputEnabled: root.mouseInputEnabled
+            mouseInputEnabled: root.runtimeMouseInputEnabled
         }
     }
 

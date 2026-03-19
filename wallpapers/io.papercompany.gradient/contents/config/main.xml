@@ -131,7 +131,7 @@
       <default></default>
     </entry>
     <entry name="WESceneExperimentalEnabled" type="Bool">
-      <label>Enable the experimental native scene renderer</label>
+      <label>Compatibility mirror for the Wallpaper Engine Scene Native content mode</label>
       <default>false</default>
     </entry>
     <entry name="WESceneMouseInput" type="Bool">

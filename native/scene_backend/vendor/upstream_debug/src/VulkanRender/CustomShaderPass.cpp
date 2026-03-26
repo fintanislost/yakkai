@@ -84,6 +84,10 @@ void LogInterestingUniformValue(const char* phase, const std::string& name, cons
 std::string FormatPackedBounds(const std::array<float, 4>& values, size_t componentCount) {
     return FormatFloatList(std::span<const float>(values.data(), componentCount));
 }
+
+bool IsMainSceneColorTarget(std::string_view output) {
+    return output == wallpaper::SpecTex_Default || output == wallpaper::WE_REFLECTION_BUFFER;
+}
 } // namespace
 
 CustomShaderPass::CustomShaderPass(const Desc& desc) {
@@ -195,12 +199,21 @@ static void UpdateUniform(StagingBuffer* buf, const StagingBufferRef& bufref,
     }
 
     size_t offset    = uni->second.offset;
-    size_t type_size = sizeof(float) * uni->second.num;
-    if (type_size != value_u8.size()) {
-        // assert(type_size == value_u8.size());
-        ; // to do
+    size_t type_size = uni->second.size;
+    if (value_u8.size() > type_size) {
+        LOG_INFO("uniform upload size mismatch: block=%s name=%.*s expected=%zu actual=%zu",
+                 block.name.c_str(),
+                 static_cast<int>(name.size()),
+                 name.data(),
+                 type_size,
+                 value_u8.size());
     }
-    buf->writeToBuf(bufref, value_u8, offset);
+
+    const size_t write_size = std::min(type_size, value_u8.size());
+    if (write_size == 0) {
+        return;
+    }
+    buf->writeToBuf(bufref, value_u8.first(write_size), offset);
 }
 
 void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingResources& rr) {
@@ -690,10 +703,16 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
     }
 
     {
-        auto& sc           = scene.clearColor;
-        m_desc.clear_value = VkClearValue {
-            .color = { sc[0], sc[1], sc[2], 1.0f },
-        };
+        auto& sc = scene.clearColor;
+        if (IsSpecTex(m_desc.output) && !IsMainSceneColorTarget(m_desc.output)) {
+            m_desc.clear_value = VkClearValue {
+                .color = { 0.0f, 0.0f, 0.0f, 0.0f },
+            };
+        } else {
+            m_desc.clear_value = VkClearValue {
+                .color = { sc[0], sc[1], sc[2], 1.0f },
+            };
+        }
     }
     for (auto& tex : releaseTexs()) {
         device.tex_cache().MarkShareReady(tex);

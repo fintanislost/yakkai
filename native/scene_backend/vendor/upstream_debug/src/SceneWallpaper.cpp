@@ -6,6 +6,7 @@
 
 #include "Timer/FrameTimer.hpp"
 #include "Utils/FpsCounter.h"
+#include "WPJson.hpp"
 #include "WPSceneParser.hpp"
 #include "Scene/Scene.h"
 #include "Particle/ParticleSystem.h"
@@ -21,7 +22,9 @@
 
 #include "VulkanRender/SceneToRenderGraph.hpp"
 #include "VulkanRender/VulkanRender.hpp"
+#include <nlohmann/json.hpp>
 #include <atomic>
+#include <fstream>
 
 using namespace wallpaper;
 
@@ -36,6 +39,53 @@ using namespace wallpaper;
 
 namespace
 {
+nlohmann::json LoadScenePropertiesFromProjectFile(const std::filesystem::path& projectPath) {
+    std::ifstream input(projectPath);
+    if (! input) {
+        return nlohmann::json::object();
+    }
+
+    const std::string projectSource((std::istreambuf_iterator<char>(input)),
+                                    std::istreambuf_iterator<char>());
+    nlohmann::json projectJson;
+    if (! PARSE_JSON(projectSource, projectJson) || ! projectJson.is_object()) {
+        return nlohmann::json::object();
+    }
+
+    const auto generalIt = projectJson.find("general");
+    if (generalIt == projectJson.end() || ! generalIt->is_object()) {
+        return nlohmann::json::object();
+    }
+
+    const auto propertiesIt = generalIt->find("properties");
+    if (propertiesIt == generalIt->end() || ! propertiesIt->is_object()) {
+        return nlohmann::json::object();
+    }
+
+    LOG_INFO("scene property defaults loaded from %s: count=%zu",
+             projectPath.string().c_str(),
+             propertiesIt->size());
+    return *propertiesIt;
+}
+
+std::string ResolveScenePropertiesJson(const std::string& explicitJson, const std::string& pkgDir) {
+    if (! explicitJson.empty()) {
+        nlohmann::json parsedProperties;
+        if (PARSE_JSON(explicitJson, parsedProperties) && parsedProperties.is_object() &&
+            ! parsedProperties.empty()) {
+            return explicitJson;
+        }
+    }
+
+    const std::filesystem::path projectPath = std::filesystem::path(pkgDir) / "project.json";
+    const nlohmann::json        properties  = LoadScenePropertiesFromProjectFile(projectPath);
+    if (! properties.empty()) {
+        return properties.dump();
+    }
+
+    return explicitJson;
+}
+
 bool ShouldLogHighFrequency(std::atomic<uint64_t>& counter,
                             uint64_t               initial_burst = 6,
                             uint64_t               interval = 180) {
@@ -115,6 +165,7 @@ private:
     std::string m_assets;
     std::string m_source;
     std::string m_cache_path;
+    std::string m_scene_properties_json;
     bool        m_gen_graphviz { false };
 
     WPSceneParser                        m_scene_parser;
@@ -373,6 +424,8 @@ MHANDLER_CMD_IMPL(MainHandler, SET_PROPERTY) {
             std::string path;
             msg->findString("value", &path);
             m_cache_path = path;
+        } else if (property == PROPERTY_SCENE_PROPERTIES_JSON) {
+            msg->findString("value", &m_scene_properties_json);
         } else if (property == PROPERTY_FIRST_FRAME_CALLBACK) {
             std::shared_ptr<FirstFrameCallback> cb;
             msg->findObject("value", &cb);
@@ -469,6 +522,8 @@ void MainHandler::loadScene() {
             LOG_ERROR("Not supported scene type");
             return;
         }
+        m_scene_parser.SetScenePropertiesJson(
+            ResolveScenePropertiesJson(m_scene_properties_json, pkgDir));
         scene = m_scene_parser.Parse(scene_id, scene_src, vfs, *m_sound_manager);
         LOG_INFO("main loadScene: parse finished for %s", scene_id.c_str());
         scene->vfs.swap(pVfs);

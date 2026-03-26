@@ -88,9 +88,11 @@ public:
 
     struct AnimationLayer {
         i32    id { 0 };
+        std::string name;
         double rate { 1.0f };
         double blend { 1.0f };
         bool   visible { true };
+        bool   paused { false };
         double cur_time { 0.0f };
     };
 

@@ -70,6 +70,7 @@ WallpaperItem {
     property url wallpaperEngineSceneSource: resolvedVideoSource(configuration.WESceneSource ?? "")
     property string wallpaperEngineSceneProjectTitle: configuration.WESceneProjectTitle ?? ""
     property string wallpaperEngineSceneSourceKind: configuration.WESceneSourceKind ?? ""
+    property string wallpaperEngineScenePropertiesJson: configuration.WEScenePropertiesJson ?? ""
     property bool wallpaperEngineSceneExperimentalEnabled: configuration.WESceneExperimentalEnabled ?? false
     property bool wallpaperEngineSceneMouseInput: configuration.WESceneMouseInput ?? false
     property string wallpaperEngineLibraryPath: configuration.WEVideoLibraryPath ?? ""
@@ -199,6 +200,9 @@ WallpaperItem {
             })
             contentLoader.item.sceneSourceKind = Qt.binding(function() {
                 return root.wallpaperEngineSceneSourceKind
+            })
+            contentLoader.item.scenePropertiesJson = Qt.binding(function() {
+                return root.wallpaperEngineScenePropertiesJson
             })
             contentLoader.item.assetsPath = Qt.binding(function() {
                 return root.activeSceneAssetsPath

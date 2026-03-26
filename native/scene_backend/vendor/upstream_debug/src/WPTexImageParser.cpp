@@ -35,6 +35,169 @@ using WPTexFlags = BitFlags<WPTexFlagEnum>;
 
 namespace
 {
+bool ShouldLogSleepingAronaTexture(std::string_view name) {
+    return name == "ARONA_CROP_SHEET" || name == "ARONA_CROP_SHEET_channelmap";
+}
+
+const char* TextureFormatName(TextureFormat format) {
+    switch (format) {
+    case TextureFormat::BC1: return "BC1";
+    case TextureFormat::BC2: return "BC2";
+    case TextureFormat::BC3: return "BC3";
+    case TextureFormat::RGB8: return "RGB8";
+    case TextureFormat::RGBA8: return "RGBA8";
+    case TextureFormat::RG8: return "RG8";
+    case TextureFormat::R8: return "R8";
+    default: return "unknown";
+    }
+}
+
+const char* ImageTypeName(ImageType type) {
+    switch (type) {
+    case ImageType::UNKNOWN: return "UNKNOWN";
+    case ImageType::BMP: return "BMP";
+    case ImageType::ICO: return "ICO";
+    case ImageType::JPEG: return "JPEG";
+    case ImageType::JNG: return "JNG";
+    case ImageType::KOALA: return "KOALA";
+    case ImageType::LBM: return "LBM";
+    case ImageType::MNG: return "MNG";
+    case ImageType::PBM: return "PBM";
+    case ImageType::PBMRAW: return "PBMRAW";
+    case ImageType::PCD: return "PCD";
+    case ImageType::PCX: return "PCX";
+    case ImageType::PGM: return "PGM";
+    case ImageType::PGMRAW: return "PGMRAW";
+    case ImageType::PNG: return "PNG";
+    case ImageType::PPM: return "PPM";
+    case ImageType::PPMRAW: return "PPMRAW";
+    case ImageType::RAS: return "RAS";
+    case ImageType::TARGA: return "TARGA";
+    case ImageType::TIFF: return "TIFF";
+    case ImageType::WBMP: return "WBMP";
+    case ImageType::PSD: return "PSD";
+    case ImageType::CUT: return "CUT";
+    case ImageType::XBM: return "XBM";
+    case ImageType::XPM: return "XPM";
+    case ImageType::DDS: return "DDS";
+    case ImageType::GIF: return "GIF";
+    case ImageType::HDR: return "HDR";
+    case ImageType::FAXG3: return "FAXG3";
+    case ImageType::SGI: return "SGI";
+    case ImageType::EXR: return "EXR";
+    case ImageType::J2K: return "J2K";
+    case ImageType::JP2: return "JP2";
+    case ImageType::PFM: return "PFM";
+    case ImageType::PICT: return "PICT";
+    case ImageType::RAW: return "RAW";
+    default: return "unknown";
+    }
+}
+
+std::string FormatUint8Stats(const char* label,
+                             const uint8_t* data,
+                             size_t count,
+                             size_t stride,
+                             size_t offset) {
+    if (data == nullptr || count == 0 || stride == 0 || offset >= stride) {
+        return std::string(label) + "=n/a";
+    }
+
+    uint8_t minValue = 255;
+    uint8_t maxValue = 0;
+    double  sum = 0.0;
+    size_t  nonZeroCount = 0;
+    size_t  fullCount = 0;
+    for (size_t i = 0; i < count; ++i) {
+        const uint8_t value = data[i * stride + offset];
+        minValue = std::min(minValue, value);
+        maxValue = std::max(maxValue, value);
+        sum += value;
+        if (value != 0) {
+            nonZeroCount++;
+        }
+        if (value == 255) {
+            fullCount++;
+        }
+    }
+
+    std::ostringstream out;
+    out << label
+        << "={min=" << static_cast<int>(minValue)
+        << " max=" << static_cast<int>(maxValue)
+        << " mean=" << static_cast<int>(std::lround(sum / static_cast<double>(count)))
+        << " nonZero=" << nonZeroCount
+        << "/" << count
+        << " full=" << fullCount
+        << "/" << count
+        << "}";
+    return out.str();
+}
+
+void LogSleepingAronaTextureStats(const Image& img) {
+    if (! ShouldLogSleepingAronaTexture(img.key) || img.slots.empty() || img.slots[0].mipmaps.empty()) {
+        return;
+    }
+
+    const auto& mip = img.slots[0].mipmaps[0];
+    LOG_INFO("sleeping arona texture parsed: name=%s format=%s type=%s tex=%dx%d map=%dx%d slot=%dx%d mip=%dx%d bytes=%td",
+             img.key.c_str(),
+             TextureFormatName(img.header.format),
+             ImageTypeName(img.header.type),
+             img.header.width,
+             img.header.height,
+             img.header.mapWidth,
+             img.header.mapHeight,
+             img.slots[0].width,
+             img.slots[0].height,
+             mip.width,
+             mip.height,
+             mip.size);
+
+    const auto* bytes = mip.data.get();
+    if (bytes == nullptr || mip.width <= 0 || mip.height <= 0) {
+        return;
+    }
+
+    const size_t pixelCount = static_cast<size_t>(mip.width) * static_cast<size_t>(mip.height);
+    std::vector<std::string> stats;
+    switch (img.header.format) {
+    case TextureFormat::RGBA8:
+        if (mip.size >= static_cast<isize>(pixelCount * 4)) {
+            stats.push_back(FormatUint8Stats("r", bytes, pixelCount, 4, 0));
+            stats.push_back(FormatUint8Stats("g", bytes, pixelCount, 4, 1));
+            stats.push_back(FormatUint8Stats("b", bytes, pixelCount, 4, 2));
+            stats.push_back(FormatUint8Stats("a", bytes, pixelCount, 4, 3));
+        }
+        break;
+    case TextureFormat::RG8:
+        if (mip.size >= static_cast<isize>(pixelCount * 2)) {
+            stats.push_back(FormatUint8Stats("r", bytes, pixelCount, 2, 0));
+            stats.push_back(FormatUint8Stats("g", bytes, pixelCount, 2, 1));
+        }
+        break;
+    case TextureFormat::R8:
+        if (mip.size >= static_cast<isize>(pixelCount)) {
+            stats.push_back(FormatUint8Stats("r", bytes, pixelCount, 1, 0));
+        }
+        break;
+    default: break;
+    }
+
+    if (! stats.empty()) {
+        std::ostringstream out;
+        for (size_t i = 0; i < stats.size(); ++i) {
+            if (i > 0) {
+                out << " ";
+            }
+            out << stats[i];
+        }
+        LOG_INFO("sleeping arona texture channels: name=%s %s",
+                 img.key.c_str(),
+                 out.str().c_str());
+    }
+}
+
 bool HasRasterExtension(std::string_view name) {
     const auto dot = name.find_last_of('.');
     if (dot == std::string_view::npos) {
@@ -206,6 +369,7 @@ std::shared_ptr<Image> WPTexImageParser::ParseRasterImage(const std::string& nam
         stbi_image_free(data);
     });
 
+    LogSleepingAronaTextureStats(img);
     return img_ptr;
 }
 
@@ -352,6 +516,7 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
             delete[] result;
         }
     }
+    LogSleepingAronaTextureStats(img);
     return img_ptr;
 }
 

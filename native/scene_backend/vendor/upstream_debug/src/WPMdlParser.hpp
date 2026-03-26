@@ -4,6 +4,7 @@
 #include <array>
 #include <vector>
 #include <memory>
+#include <span>
 #include <Eigen/Dense>
 
 #include "WPPuppet.hpp"
@@ -32,6 +33,7 @@ struct WPMdl {
         std::array<float, 3>    position { 0.0f, 0.0f, 0.0f };
         std::array<float, 3>    normal { 0.0f, 0.0f, 1.0f };
         std::array<float, 4>    tangent { 1.0f, 0.0f, 0.0f, 1.0f };
+        std::array<float, 2>    channelmap_texcoord { 0.0f, 0.0f };
         std::array<uint32_t, 4> blend_indices { 0, 0, 0, 0 };
         std::array<float, 4>    weight { 1.0f, 0.0f, 0.0f, 0.0f };
         std::array<float, 2>    texcoord { 0.0f, 0.0f };
@@ -68,9 +70,28 @@ public:
     static void AddPuppetMatInfo(wpscene::WPMaterial& mat, const WPMdl& mdl);
 
     static void GenPuppetMesh(SceneMesh& mesh, const WPMdl& mdl);
+    static bool GenPuppetMesh(SceneMesh&                    mesh,
+                              const WPMdl&                  mdl,
+                              std::span<const uint32_t>     activePrimaryBlendSlots,
+                              bool                          includeFullyActiveTriangles = true);
+    static void GenPuppetChannelMapMesh(SceneMesh& mesh, const WPMdl& mdl);
+    static void GenPuppetChannelMapBaseUvMesh(SceneMesh&                  mesh,
+                                              const WPMdl&                mdl,
+                                              const std::array<float, 2>& imageSize);
+    static void GenPuppetChannelMapMesh(SceneMesh&                       mesh,
+                                        const WPMdl&                     mdl,
+                                        std::span<const Eigen::Affine3f> bone_affines);
     static void GenPuppetMesh(SceneMesh& mesh,
                               const WPMdl::Submesh& mdl,
                               const Eigen::Matrix3f& basis = Eigen::Matrix3f::Identity());
+    static void GenPuppetImageSpaceMesh(SceneMesh&                    mesh,
+                                        const WPMdl&                  mdl,
+                                        const std::array<float, 2>&   imageSize);
+    static bool GenPuppetImageSpaceMesh(SceneMesh&                    mesh,
+                                        const WPMdl&                  mdl,
+                                        const std::array<float, 2>&   imageSize,
+                                        std::span<const uint32_t>     activePrimaryBlendSlots,
+                                        bool                          includeFullyActiveTriangles = true);
     static void GenStaticMesh(SceneMesh& mesh,
                               const WPMdl::Submesh& mdl,
                               bool                  useNormalMap,

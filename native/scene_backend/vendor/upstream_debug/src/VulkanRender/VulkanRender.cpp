@@ -88,8 +88,9 @@ struct VulkanRender::Impl {
     void UpdateCameraFillMode(Scene&, wallpaper::FillMode);
 
     bool initRes();
-    void drawFrameSwapchain();
-    void drawFrameOffscreen();
+    void drawFrameSwapchain(Scene&);
+    void drawFrameOffscreen(Scene&);
+    void dumpDebugRenderTargets(Scene&);
     void setRenderTargetSize(Scene&, rg::RenderGraph&);
 
     Instance                m_instance;
@@ -316,9 +317,9 @@ void VulkanRender::Impl::drawFrame(Scene& scene) {
 #endif
 
     if (m_instance.offscreen()) {
-        drawFrameOffscreen();
+        drawFrameOffscreen(scene);
     } else {
-        drawFrameSwapchain();
+        drawFrameSwapchain(scene);
     }
 
     if (m_redraw_cb) m_redraw_cb();
@@ -330,7 +331,19 @@ void VulkanRender::Impl::drawFrame(Scene& scene) {
 #endif
 }
 
-void VulkanRender::Impl::drawFrameSwapchain() {
+void VulkanRender::Impl::dumpDebugRenderTargets(Scene& scene) {
+    for (auto& dump : scene.debugRenderDumps) {
+        if (dump.completed) continue;
+        if (! m_device->tex_cache().DumpTexture(dump.renderTarget, dump.path)) continue;
+        dump.completed = true;
+        LOG_INFO("debug render dump complete: label=%s key=%s path=%s",
+                 dump.label.c_str(),
+                 dump.renderTarget.c_str(),
+                 dump.path.c_str());
+    }
+}
+
+void VulkanRender::Impl::drawFrameSwapchain(Scene& scene) {
     static size_t resource_index = 0;
 
     RenderingResources& rr = m_rendering_resources;
@@ -387,8 +400,9 @@ void VulkanRender::Impl::drawFrameSwapchain() {
 
     VVK_CHECK_VOID_RE(rr.fence_frame.Wait(vk_wait_time));
     VVK_CHECK_VOID_RE(rr.fence_frame.Reset());
+    dumpDebugRenderTargets(scene);
 }
-void VulkanRender::Impl::drawFrameOffscreen() {
+void VulkanRender::Impl::drawFrameOffscreen(Scene& scene) {
     RenderingResources& rr                 = m_rendering_resources;
     ExHandle*           handle             = m_ex_swapchain->getInprogress();
     ImageParameters     image              = m_ex_swapchain->GetInprogressImage();
@@ -437,6 +451,7 @@ void VulkanRender::Impl::drawFrameOffscreen() {
 
     VVK_CHECK_VOID_RE(rr.fence_frame.Wait(vk_wait_time));
     VVK_CHECK_VOID_RE(rr.fence_frame.Reset());
+    dumpDebugRenderTargets(scene);
     m_ex_swapchain->renderFrame();
 }
 

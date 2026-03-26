@@ -235,7 +235,9 @@ std::span<const Eigen::Affine3f> WPPuppetLayer::genFrame(double time) noexcept {
 void WPPuppetLayer::updateInterpolation(double time) noexcept {
     for (auto& layer : m_layers) {
         if (layer) {
-            layer.anim_layer.cur_time += time * layer.anim_layer.rate;
+            if (! layer.anim_layer.paused) {
+                layer.anim_layer.cur_time += time * layer.anim_layer.rate;
+            }
             layer.interp_info = layer.anim->getInterpolationInfo(&(layer.anim_layer.cur_time));
         }
     }

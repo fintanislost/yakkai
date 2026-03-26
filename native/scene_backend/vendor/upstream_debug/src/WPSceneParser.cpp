@@ -30,11 +30,14 @@
 #include "Utils/Eigen.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <iostream>
+#include <fstream>
 #include <sstream>
 #include <string>
 #include <limits>
 #include <unordered_map>
+#include <unordered_set>
 #include <random>
 #include <cmath>
 #include <functional>
@@ -59,6 +62,12 @@ struct ParseContext {
     i32                    ortho_w;
     i32                    ortho_h;
     fs::VFS*               vfs;
+    std::unordered_map<int32_t, std::shared_ptr<SceneNode>> object_nodes;
+    std::unordered_map<int32_t, std::vector<std::shared_ptr<SceneNode>>> deferred_children;
+    std::unordered_map<std::string, std::unordered_set<std::string>> paused_puppet_animations;
+    bool                                                          has_sleeping_arona_crop_sheet {
+        false
+    };
 
     ShaderValueMap             global_base_uniforms;
     std::shared_ptr<SceneNode> effect_camera_node;
@@ -68,12 +77,159 @@ struct ParseContext {
     bool                      has_scene_perspective_pose { false };
 };
 
+struct WPSolidAnchorObject {
+    bool FromJson(const nlohmann::json& json, fs::VFS&) {
+        GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
+        GET_JSON_NAME_VALUE_NOWARN(json, "parent", parent);
+        GET_JSON_NAME_VALUE_NOWARN(json, "name", name);
+        GET_JSON_NAME_VALUE_NOWARN(json, "origin", origin);
+        GET_JSON_NAME_VALUE_NOWARN(json, "angles", angles);
+        GET_JSON_NAME_VALUE_NOWARN(json, "scale", scale);
+        GET_JSON_NAME_VALUE_NOWARN(json, "visible", visible);
+        return true;
+    }
+
+    int32_t              id { 0 };
+    int32_t              parent { 0 };
+    std::string          name;
+    std::array<float, 3> origin { 0.0f, 0.0f, 0.0f };
+    std::array<float, 3> scale { 1.0f, 1.0f, 1.0f };
+    std::array<float, 3> angles { 0.0f, 0.0f, 0.0f };
+    bool                 visible { true };
+};
+
 using WPObjectVar = std::variant<wpscene::WPImageObject, wpscene::WPParticleObject,
                                  wpscene::WPSoundObject, wpscene::WPLightObject,
-                                 wpscene::WPModelObject>;
+                                 wpscene::WPModelObject, WPSolidAnchorObject>;
 
 namespace
 {
+nlohmann::json LoadScenePropertiesFromProjectJsonSource(const std::string& projectJsonSource,
+                                                        const char*        sourceLabel) {
+    nlohmann::json projectJson;
+    if (! PARSE_JSON(projectJsonSource, projectJson) || ! projectJson.is_object()) {
+        return nlohmann::json::object();
+    }
+
+    const auto generalIt = projectJson.find("general");
+    if (generalIt == projectJson.end() || ! generalIt->is_object()) {
+        return nlohmann::json::object();
+    }
+
+    const auto propertiesIt = generalIt->find("properties");
+    if (propertiesIt == generalIt->end() || ! propertiesIt->is_object()) {
+        return nlohmann::json::object();
+    }
+
+    LOG_INFO("scene property defaults loaded from %s: count=%zu",
+             sourceLabel,
+             propertiesIt->size());
+    return *propertiesIt;
+}
+
+nlohmann::json NormalizeScenePropertiesForNativeFallback(nlohmann::json properties) {
+    if (! properties.is_object()) {
+        return nlohmann::json::object();
+    }
+
+    auto it = properties.find("loadingintro");
+    if (it != properties.end() && it->is_object() && it->contains("value")) {
+        const auto& value = it->at("value");
+        const bool enabled = (value.is_boolean() && value.get<bool>()) ||
+                             (value.is_number_integer() && value.get<int64_t>() != 0) ||
+                             (value.is_number_unsigned() && value.get<uint64_t>() != 0) ||
+                             (value.is_string() &&
+                              (value.get<std::string>() == "1" ||
+                               value.get<std::string>() == "true"));
+        if (enabled) {
+            (*it)["value"] = false;
+            LOG_INFO("forcing loadingintro disabled for native scene fallback");
+        }
+    }
+
+    return properties;
+}
+
+nlohmann::json ResolveSceneProperties(fs::VFS& vfs, const std::string& scenePropertiesJson) {
+    if (! scenePropertiesJson.empty()) {
+        nlohmann::json parsedProperties;
+        if (PARSE_JSON(scenePropertiesJson, parsedProperties) && parsedProperties.is_object() &&
+            ! parsedProperties.empty()) {
+            return NormalizeScenePropertiesForNativeFallback(std::move(parsedProperties));
+        }
+    }
+
+    if (vfs.Contains("/assets/project.json")) {
+        return NormalizeScenePropertiesForNativeFallback(LoadScenePropertiesFromProjectJsonSource(
+            fs::GetFileContent(vfs, "/assets/project.json"), "mounted project.json"));
+    }
+
+    return nlohmann::json::object();
+}
+
+void RegisterPuppetPauseDirectives(ParseContext& context, const nlohmann::json& value) {
+    static const std::regex pauseRegex(
+        R"REGEX(thisScene\.getLayer\("([^"]+)"\)\.getAnimationLayer\("([^"]+)"\))REGEX");
+
+    if (value.is_object()) {
+        auto scriptIt = value.find("script");
+        if (scriptIt != value.end() && scriptIt->is_string()) {
+            const auto& script = scriptIt->get_ref<const std::string&>();
+            if (script.find(".pause()") != std::string::npos) {
+                for (auto it = std::sregex_iterator(script.begin(), script.end(), pauseRegex);
+                     it != std::sregex_iterator();
+                     ++it) {
+                    const std::string targetLayer = (*it)[1].str();
+                    const std::string animationLayer = (*it)[2].str();
+                    if (targetLayer.empty() || animationLayer.empty()) {
+                        continue;
+                    }
+                    context.paused_puppet_animations[targetLayer].insert(animationLayer);
+                    LOG_INFO("discovered native puppet pause directive: layer=%s animation=%s",
+                             targetLayer.c_str(),
+                             animationLayer.c_str());
+                }
+            }
+        }
+
+        for (const auto& item : value.items()) {
+            RegisterPuppetPauseDirectives(context, item.value());
+        }
+        return;
+    }
+
+    if (value.is_array()) {
+        for (const auto& item : value) {
+            RegisterPuppetPauseDirectives(context, item);
+        }
+    }
+}
+
+bool HasDrawablePayload(const nlohmann::json& obj) {
+    auto hasNonNull = [&obj](const char* key) {
+        return obj.contains(key) && ! obj.at(key).is_null();
+    };
+    return hasNonNull("image") || hasNonNull("particle") || hasNonNull("sound") ||
+           hasNonNull("light") || hasNonNull("model");
+}
+
+bool IsTransformAnchorObject(const nlohmann::json& obj) {
+    if (HasDrawablePayload(obj)) {
+        return false;
+    }
+
+    if (obj.contains("text") || obj.contains("font")) {
+        return false;
+    }
+
+    if (! obj.contains("id")) {
+        return false;
+    }
+
+    return obj.contains("origin") || obj.contains("angles") || obj.contains("scale") ||
+           obj.contains("parent") || obj.contains("parallaxDepth") || obj.contains("solid");
+}
+
 float ClampUnit(float value) {
     return std::max(-1.0f, std::min(1.0f, value));
 }
@@ -92,6 +248,42 @@ bool MaterialComboEnabled(const wpscene::WPMaterial& material, std::string_view 
             return combo.second != 0;
         }
     }
+    return false;
+}
+
+bool IsUnsupportedWorkshopBokehParticle(std::string_view particlePath) {
+    return particlePath == "particles/workshop/2820123291/bokeh_Hex.json" ||
+           particlePath == "particles/workshop/2820123291/Bokeh_Cir.json";
+}
+
+bool DebugSkipLayerByName(std::string_view name) {
+    const char* raw = std::getenv("PAPER_SCENE_DEBUG_SKIP_LAYERS");
+    if (raw == nullptr || *raw == '\0' || name.empty()) {
+        return false;
+    }
+
+    std::string_view haystack(raw);
+    usize            start = 0;
+    while (start < haystack.size()) {
+        usize end = haystack.find(',', start);
+        if (end == std::string_view::npos) {
+            end = haystack.size();
+        }
+
+        std::string_view token = haystack.substr(start, end - start);
+        while (! token.empty() && std::isspace(static_cast<unsigned char>(token.front()))) {
+            token.remove_prefix(1);
+        }
+        while (! token.empty() && std::isspace(static_cast<unsigned char>(token.back()))) {
+            token.remove_suffix(1);
+        }
+
+        if (! token.empty() && token == name) {
+            return true;
+        }
+        start = end + 1;
+    }
+
     return false;
 }
 
@@ -115,6 +307,354 @@ std::string ResolveStaticFallbackDiffuseTexture(fs::VFS& vfs, std::string_view b
     }
 
     return std::string(baseName);
+}
+
+std::string DerivePuppetChannelMapMaterialPath(std::string_view imagePath) {
+    const usize slash = imagePath.find_last_of('/');
+    const usize stemStart = slash == std::string_view::npos ? 0 : slash + 1;
+    const usize dot = imagePath.find_last_of('.');
+    const usize stemEnd = dot == std::string_view::npos || dot <= stemStart ? imagePath.size() : dot;
+    if (stemStart >= stemEnd) {
+        return {};
+    }
+
+    return "materials/" + std::string(imagePath.substr(stemStart, stemEnd - stemStart)) +
+           "_channelmap.json";
+}
+
+std::string InjectPuppetChannelMapSkinning(std::string src) {
+    if (src.find("g_Bones[") != std::string::npos || src.find("a_BlendWeights") != std::string::npos) {
+        return src;
+    }
+
+    constexpr std::string_view declBlock = "#if SKINNING\n"
+                                           "uniform mat4x3 g_Bones[BONECOUNT];\n"
+                                           "attribute vec4 a_BlendWeights;\n"
+                                           "#endif\n";
+
+    const std::regex blendIndexLine(R"((^[ \t]*attribute\s+uvec4\s+a_BlendIndices\s*;\s*$))",
+                                    std::regex::ECMAScript | std::regex::multiline);
+    if (std::regex_search(src, blendIndexLine)) {
+        src = std::regex_replace(src,
+                                 blendIndexLine,
+                                 std::string("$1\n") + std::string(declBlock),
+                                 std::regex_constants::format_first_only);
+    } else if (const usize mainPos = src.find("void main("); mainPos != std::string::npos) {
+        src.insert(mainPos, std::string(declBlock));
+    }
+
+    const std::regex glPosLine(
+        R"((^[ \t]*)gl_Position\s*=\s*mul\s*\(\s*vec4\s*\(\s*a_Position\s*,\s*1\.0\s*\)\s*,\s*g_ModelViewProjectionMatrix\s*\)\s*;\s*$)",
+        std::regex::ECMAScript | std::regex::multiline);
+    if (std::regex_search(src, glPosLine)) {
+        src = std::regex_replace(
+            src,
+            glPosLine,
+            "$1#if SKINNING\n"
+            "$1vec3 localPos = mul(vec4(a_Position, 1.0), g_Bones[a_BlendIndices.x] * a_BlendWeights.x +\n"
+            "$1\t\t\t\t\tg_Bones[a_BlendIndices.y] * a_BlendWeights.y +\n"
+            "$1\t\t\t\t\tg_Bones[a_BlendIndices.z] * a_BlendWeights.z +\n"
+            "$1\t\t\t\t\tg_Bones[a_BlendIndices.w] * a_BlendWeights.w);\n"
+            "$1#else\n"
+            "$1vec3 localPos = a_Position;\n"
+            "$1#endif\n"
+            "$1gl_Position = mul(vec4(localPos, 1.0), g_ModelViewProjectionMatrix);",
+            std::regex_constants::format_first_only);
+    }
+
+    return src;
+}
+
+std::string InjectGenericImage4ChannelMapAlphaMask(std::string src) {
+    if (src.find("paperChannelMapMaskAlpha") != std::string::npos ||
+        src.find("paperBaseMaskAlpha") != std::string::npos ||
+        src.find("paperBaseVisibleAlpha") != std::string::npos ||
+        src.find("paperStandaloneBaseAlpha") != std::string::npos) {
+        return src;
+    }
+
+    constexpr std::string_view declBlock = "#if PAPER_CHANNELMAP_ALPHA_MASK || PAPER_CHANNELMAP_BASE_EXCLUDE || PAPER_BASE_ALPHA_MASK\n"
+                                           "uniform sampler2D g_Texture1;\n"
+                                           "#endif\n"
+                                            "#if PAPER_CHANNELMAP_ALPHA_MASK\n"
+                                            "uniform sampler2D g_Texture2;\n"
+                                            "#endif\n";
+
+    const std::regex tex0Line(R"((^[ \t]*uniform\s+sampler2D\s+g_Texture0\s*;[^\n]*$))",
+                              std::regex::ECMAScript | std::regex::multiline);
+    if (std::regex_search(src, tex0Line)) {
+        src = std::regex_replace(src,
+                                 tex0Line,
+                                 std::string("$1\n") + std::string(declBlock),
+                                 std::regex_constants::format_first_only);
+    }
+
+    const std::regex colorWriteLine(R"((^[ \t]*)gl_FragColor\s*=\s*color\s*;\s*$)",
+                                    std::regex::ECMAScript | std::regex::multiline);
+    if (std::regex_search(src, colorWriteLine)) {
+        src = std::regex_replace(
+            src,
+            colorWriteLine,
+            "$1#if PAPER_CHANNELMAP_ALPHA_MASK || PAPER_CHANNELMAP_BASE_EXCLUDE || PAPER_BASE_ALPHA_MASK\n"
+            "$1float paperChannelMapMaskAlpha = texSample2D(g_Texture1, v_TexCoord.xy).a;\n"
+            "$1#endif\n"
+            "$1#if PAPER_CHANNELMAP_ALPHA_MASK\n"
+            "$1float paperBaseMaskAlpha = texSample2D(g_Texture2, v_TexCoord.xy).a;\n"
+            "$1float paperOverlayMaskAlpha = paperChannelMapMaskAlpha * paperBaseMaskAlpha;\n"
+            "$1color.rgb *= paperOverlayMaskAlpha;\n"
+            "$1color.a *= paperOverlayMaskAlpha;\n"
+            "$1#endif\n"
+            "$1#if PAPER_BASE_ALPHA_MASK\n"
+            "$1float paperStandaloneBaseAlpha = paperChannelMapMaskAlpha;\n"
+            "$1color.rgb *= paperStandaloneBaseAlpha;\n"
+            "$1color.a *= paperStandaloneBaseAlpha;\n"
+            "$1#endif\n"
+            "$1#if PAPER_CHANNELMAP_BASE_EXCLUDE\n"
+            "$1float paperBaseVisibleAlpha = 1.0 - paperChannelMapMaskAlpha;\n"
+            "$1color.rgb *= paperBaseVisibleAlpha;\n"
+            "$1color.a *= paperBaseVisibleAlpha;\n"
+            "$1#endif\n"
+            "$1gl_FragColor = color;",
+            std::regex_constants::format_first_only);
+    }
+
+    return src;
+}
+
+uint32_t ResolvePuppetChannelMapRowCount(const WPMdl& mdl, uint32_t minimumRowCount) {
+    uint32_t maxBlendIndex = 0;
+    for (const auto& vertex : mdl.vertexs) {
+        maxBlendIndex = std::max(maxBlendIndex, vertex.blend_indices[0]);
+    }
+    return std::max(minimumRowCount, maxBlendIndex / 4u + 1u);
+}
+
+bool PuppetBoneFramesHaveMeaningfulDelta(const WPPuppet::Animation::BoneFrames& bframes) {
+    if (bframes.frames.size() <= 1) {
+        return false;
+    }
+
+    const auto& base = bframes.frames.front();
+    constexpr float kPosEps2 = 1.0e-6f;
+    constexpr float kAngEps2 = 1.0e-6f;
+    constexpr float kSclEps2 = 1.0e-6f;
+
+    for (usize frameIndex = 1; frameIndex < bframes.frames.size(); ++frameIndex) {
+        const auto& frame = bframes.frames[frameIndex];
+        if ((frame.position - base.position).squaredNorm() > kPosEps2 ||
+            (frame.angle - base.angle).squaredNorm() > kAngEps2 ||
+            (frame.scale - base.scale).squaredNorm() > kSclEps2) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void LogPuppetChannelMapBlendIndexCoverage(const wpscene::WPImageObject& imageObject,
+                                           const WPMdl&                  mdl,
+                                           std::span<const float>        blendMap) {
+    std::array<size_t, 64> vertexCounts {};
+    std::array<size_t, 64> triangleCounts {};
+
+    for (const auto& vertex : mdl.vertexs) {
+        const size_t index = std::min<size_t>(vertex.blend_indices[0], vertexCounts.size() - 1);
+        vertexCounts[index]++;
+    }
+
+    for (const auto& tri : mdl.indices) {
+        size_t triIndex = vertexCounts.size() - 1;
+        if (tri[0] < mdl.vertexs.size() && tri[1] < mdl.vertexs.size() && tri[2] < mdl.vertexs.size()) {
+            const auto i0 = static_cast<size_t>(mdl.vertexs[tri[0]].blend_indices[0]);
+            const auto i1 = static_cast<size_t>(mdl.vertexs[tri[1]].blend_indices[0]);
+            const auto i2 = static_cast<size_t>(mdl.vertexs[tri[2]].blend_indices[0]);
+            if (i0 == i1 && i1 == i2) {
+                triIndex = std::min(i0, triangleCounts.size() - 1);
+            }
+        }
+        triangleCounts[triIndex]++;
+    }
+
+    std::ostringstream activeStream;
+    bool first = true;
+    for (size_t i = 0; i < blendMap.size(); ++i) {
+        if (blendMap[i] <= 1.0e-6f) {
+            continue;
+        }
+        if (!first) {
+            activeStream << "; ";
+        }
+        first = false;
+        activeStream << "slot=" << i
+                     << " weight=" << blendMap[i]
+                     << " verts=" << vertexCounts[std::min(i, vertexCounts.size() - 1)]
+                     << " tris=" << triangleCounts[std::min(i, triangleCounts.size() - 1)];
+    }
+    if (first) {
+        activeStream << "none";
+    }
+
+    std::ostringstream topStream;
+    bool firstTop = true;
+    for (size_t i = 0; i < vertexCounts.size(); ++i) {
+        if (vertexCounts[i] == 0 && triangleCounts[i] == 0) {
+            continue;
+        }
+        if (!firstTop) {
+            topStream << "; ";
+        }
+        firstTop = false;
+        topStream << "slot=" << i
+                  << " verts=" << vertexCounts[i]
+                  << " tris=" << triangleCounts[i];
+    }
+
+    LOG_INFO("native puppet channelmap blend coverage: image=%s active=[%s] all=[%s]",
+             imageObject.name.c_str(),
+             activeStream.str().c_str(),
+             topStream.str().c_str());
+}
+
+size_t SeedPuppetChannelMapBlendMapFromVisibleLayers(const wpscene::WPImageObject& imageObject,
+                                                     const WPMdl&                  mdl,
+                                                     std::vector<float>&           blendMap,
+                                                     std::vector<uint32_t>*        activeIndicesOut) {
+    constexpr float kInactiveChannelMapBlendValue = 0.0f;
+    constexpr float kActiveChannelMapBlendValue = 1.0f;
+
+    std::fill(blendMap.begin(), blendMap.end(), kInactiveChannelMapBlendValue);
+
+    if (! mdl.puppet) {
+        return 0;
+    }
+
+    size_t              activeBlendSlots = 0;
+    std::vector<uint32_t> activeIndices;
+    activeIndices.reserve(blendMap.size());
+
+    for (const auto& layer : imageObject.puppet_layers) {
+        if (! layer.visible || layer.blend <= 1.0e-6) {
+            continue;
+        }
+
+        const auto animIt = std::find_if(mdl.puppet->anims.begin(),
+                                         mdl.puppet->anims.end(),
+                                         [&layer](const auto& anim) { return anim.id == layer.id; });
+        if (animIt == mdl.puppet->anims.end()) {
+            continue;
+        }
+
+        const float layerBlendValue = std::clamp(static_cast<float>(layer.blend),
+                                                 kInactiveChannelMapBlendValue,
+                                                 kActiveChannelMapBlendValue);
+
+        const usize boneCount = std::min<usize>(animIt->bframes_array.size(), blendMap.size());
+        for (usize boneIndex = 0; boneIndex < boneCount; ++boneIndex) {
+            if (! PuppetBoneFramesHaveMeaningfulDelta(animIt->bframes_array[boneIndex])) {
+                continue;
+            }
+
+            if (blendMap[boneIndex] <= kInactiveChannelMapBlendValue) {
+                activeIndices.push_back(static_cast<uint32_t>(boneIndex));
+                activeBlendSlots++;
+            }
+            blendMap[boneIndex] = std::max(blendMap[boneIndex], layerBlendValue);
+        }
+    }
+
+    std::ostringstream activeIndicesStream;
+    for (usize i = 0; i < activeIndices.size(); ++i) {
+        if (i != 0) activeIndicesStream << ", ";
+        activeIndicesStream << activeIndices[i];
+    }
+    LOG_INFO("native puppet channelmap blend map seeded from visible animation layers: image=%s activeBlendSlots=%zu indices=[%s]",
+             imageObject.name.c_str(),
+             activeBlendSlots,
+             activeIndicesStream.str().c_str());
+
+    if (activeIndicesOut) {
+        *activeIndicesOut = activeIndices;
+    }
+
+    return activeBlendSlots;
+}
+
+std::string ResolveEffectPingPongFinalTarget(const std::string& pingpongA,
+                                             const std::string& pingpongB,
+                                             int32_t            authoredEffectCount) {
+    if (authoredEffectCount <= 0) {
+        return pingpongA;
+    }
+    return (authoredEffectCount % 2 == 0) ? pingpongA : pingpongB;
+}
+
+bool TryPreparePuppetChannelMapPrepass(const wpscene::WPImageObject& imageObject,
+                                       const WPMdl&                  puppet,
+                                       fs::VFS&                      vfs,
+                                       wpscene::WPMaterial&          material,
+                                       ShaderValueMap&               baseUniforms,
+                                       std::vector<uint32_t>*        activeBlendSlotsOut) {
+    const bool sourceMaterialExplicitlyRequestsChannelMap =
+        imageObject.material.shader == "puppettexturechannels" ||
+        std::any_of(imageObject.material.textures.begin(),
+                    imageObject.material.textures.end(),
+                    [](const std::string& textureName) {
+                        return textureName.find("_channelmap") != std::string::npos;
+                    });
+    const std::string channelMapMaterialPath = DerivePuppetChannelMapMaterialPath(imageObject.image);
+    if (channelMapMaterialPath.empty()) {
+        return false;
+    }
+
+    if (! vfs.Open("/assets/" + channelMapMaterialPath)) {
+        return false;
+    }
+
+    nlohmann::json materialJson;
+    wpscene::WPMaterial parsedMaterial;
+    if (! PARSE_JSON(fs::GetFileContent(vfs, "/assets/" + channelMapMaterialPath), materialJson) ||
+        ! parsedMaterial.FromJson(materialJson)) {
+        LOG_ERROR("failed to load puppet channelmap material: %s", channelMapMaterialPath.c_str());
+        return false;
+    }
+
+    if (! sourceMaterialExplicitlyRequestsChannelMap) {
+        LOG_INFO("native puppet channelmap prepass skipped because source material has no explicit channelmap route: image=%s shader=%s",
+                 imageObject.name.c_str(),
+                 imageObject.material.shader.c_str());
+        return false;
+    }
+
+    material = std::move(parsedMaterial);
+
+    if (material.shader != "puppettexturechannels" || imageObject.material.textures.empty()) {
+        return false;
+    }
+
+    material.textures.resize(std::max<usize>(material.textures.size(), 2));
+    material.textures[1] = imageObject.material.textures[0];
+    material.combos["DOUBLEBUFFERED"] = 1;
+
+    const uint32_t rowCount =
+        ResolvePuppetChannelMapRowCount(puppet,
+                                        static_cast<uint32_t>(
+                                            std::max(1, material.combos["BLENDROWCOUNT"])));
+    material.combos["BLENDROWCOUNT"] = static_cast<int32_t>(rowCount);
+
+    std::vector<float> blendMap(rowCount * 4u, 0.0f);
+    const size_t       activeBlendSlots =
+        SeedPuppetChannelMapBlendMapFromVisibleLayers(imageObject, puppet, blendMap, activeBlendSlotsOut);
+    baseUniforms["g_BlendMap"] = blendMap;
+    LogPuppetChannelMapBlendIndexCoverage(imageObject, puppet, blendMap);
+
+    LOG_INFO("native puppet channelmap prepass enabled: image=%s material=%s rowCount=%u activeBlendSlots=%zu baseTexture=%s channelTexture=%s",
+             imageObject.name.c_str(),
+             channelMapMaterialPath.c_str(),
+             rowCount,
+             activeBlendSlots,
+             material.textures[1].c_str(),
+             material.textures[0].c_str());
+    return true;
 }
 
 Eigen::Vector3f ComputeCameraNodeRotation(const std::array<float, 3>& eye,
@@ -1259,6 +1799,42 @@ BlendMode ParseBlendMode(std::string_view str) {
     return bm;
 }
 
+std::string ResolveFallbackTextureName(std::string_view name) {
+    if (name == "_rt_shadowAtlas") {
+        LOG_INFO("substituting unsupported shadow atlas with neutral texture");
+        return "util/white";
+    }
+
+    if (name == "_alias_lightCookie" || name == "materials/_alias_lightCookie" ||
+        send_with(name, "/_alias_lightCookie") || name == "_alias_lightCookie.tex" ||
+        name == "materials/_alias_lightCookie.tex" || send_with(name, "/_alias_lightCookie.tex")) {
+        LOG_INFO("substituting missing light cookie alias with neutral texture: %s",
+                 std::string(name).c_str());
+        return "util/white";
+    }
+
+    return std::string(name);
+}
+
+std::string CanonicalizeRuntimeRenderTargetName(std::string_view baseName,
+                                                std::string_view uniqueSuffix) {
+    std::string result;
+    if (IsSpecTex(baseName)) {
+        result = std::string(baseName);
+    } else if (! baseName.empty() && baseName.front() == '_') {
+        result = std::string(WE_SPEC_PREFIX.substr(0, WE_SPEC_PREFIX.size() - 1)) +
+                 std::string(baseName);
+    } else {
+        result = std::string(WE_SPEC_PREFIX) + std::string(baseName);
+    }
+
+    if (! uniqueSuffix.empty()) {
+        result += "_";
+        result += uniqueSuffix;
+    }
+    return result;
+}
+
 void ParseSpecTexName(std::string& name, const wpscene::WPMaterial& wpmat,
                       const WPShaderInfo& sinfo) {
     if (IsSpecTex(name)) {
@@ -1286,9 +1862,44 @@ void ParseSpecTexName(std::string& name, const wpscene::WPMaterial& wpmat,
         } else if (sstart_with(name, WE_QUARTER_COMPO_BUFFER_PREFIX)) {
         } else if (sstart_with(name, WE_FULL_COMPO_BUFFER_PREFIX)) {
         } else {
-            LOG_ERROR("unknown tex \"%s\"", name.c_str());
+            // Scene-local effects synthesize additional _rt_* names during parse.
         }
     }
+}
+
+void AttachObjectNode(ParseContext&                    context,
+                      const std::shared_ptr<SceneNode>& node,
+                      int32_t                           id,
+                      int32_t                           parentId) {
+    if (! node) {
+        return;
+    }
+
+    if (parentId > 0 && parentId != id) {
+        auto parentIt = context.object_nodes.find(parentId);
+        if (parentIt != context.object_nodes.end()) {
+            parentIt->second->AppendChild(node);
+        } else {
+            context.deferred_children[parentId].push_back(node);
+        }
+    } else {
+        context.scene->sceneGraph->AppendChild(node);
+    }
+
+    if (id <= 0) {
+        return;
+    }
+
+    context.object_nodes[id] = node;
+    auto deferredIt = context.deferred_children.find(id);
+    if (deferredIt == context.deferred_children.end()) {
+        return;
+    }
+
+    for (const auto& child : deferredIt->second) {
+        node->AppendChild(child);
+    }
+    context.deferred_children.erase(deferredIt);
 }
 
 bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene, SceneNode* pNode,
@@ -1324,14 +1935,39 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
                               .preprocess_info = {},
                           } };
 
+    for (const auto& el : wpmat.combos) {
+        pWPShaderInfo->combos[el.first] = std::to_string(el.second);
+    }
+
+    const bool shaderUsesSkinning =
+        exists(pWPShaderInfo->combos, "SKINNING") && pWPShaderInfo->combos.at("SKINNING") != "0";
+    const bool shaderUsesChannelMapAlphaMask = exists(pWPShaderInfo->combos, "PAPER_CHANNELMAP_ALPHA_MASK") &&
+                                               pWPShaderInfo->combos.at("PAPER_CHANNELMAP_ALPHA_MASK") != "0";
+    const bool shaderUsesChannelMapBaseExclude =
+        exists(pWPShaderInfo->combos, "PAPER_CHANNELMAP_BASE_EXCLUDE") &&
+        pWPShaderInfo->combos.at("PAPER_CHANNELMAP_BASE_EXCLUDE") != "0";
+    const bool shaderUsesBaseAlphaMask = exists(pWPShaderInfo->combos, "PAPER_BASE_ALPHA_MASK") &&
+                                         pWPShaderInfo->combos.at("PAPER_BASE_ALPHA_MASK") != "0";
+    if (wpmat.shader == "puppettexturechannels" && shaderUsesSkinning) {
+        sd_units[0].src = InjectPuppetChannelMapSkinning(std::move(sd_units[0].src));
+        LOG_INFO("injecting native skinning path into puppettexturechannels vertex shader");
+    }
+    if (wpmat.shader == "genericimage4" &&
+        (shaderUsesChannelMapAlphaMask || shaderUsesChannelMapBaseExclude ||
+         shaderUsesBaseAlphaMask)) {
+        sd_units[1].src = InjectGenericImage4ChannelMapAlphaMask(std::move(sd_units[1].src));
+        LOG_INFO("injecting native channelmap alpha/base mask logic into genericimage4 fragment shader");
+    }
+
     std::vector<WPShaderTexInfo>                 texinfos;
     std::unordered_map<std::string, ImageHeader> texHeaders;
     for (const auto& el : wpmat.textures) {
-        if (el.empty()) {
+        const std::string resolvedTexture = ResolveFallbackTextureName(el);
+        if (resolvedTexture.empty()) {
             texinfos.push_back({ false });
-        } else if (! IsSpecTex(el)) {
-            const auto& texh = pScene->imageParser->ParseHeader(el);
-            texHeaders[el]   = texh;
+        } else if (! IsSpecTex(resolvedTexture)) {
+            const auto& texh = pScene->imageParser->ParseHeader(resolvedTexture);
+            texHeaders[resolvedTexture] = texh;
             if (texh.extraHeader.count("compo1") == 0) {
                 texinfos.push_back({ false });
                 continue;
@@ -1349,12 +1985,26 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
     for (auto& unit : sd_units) {
         unit.src = WPShaderParser::PreShaderSrc(vfs, unit.src, pWPShaderInfo, texinfos);
     }
+    if (wpmat.shader == "genericimage4" && shaderUsesChannelMapAlphaMask) {
+        pWPShaderInfo->combos["LIGHTING"]   = "0";
+        pWPShaderInfo->combos["REFLECTION"] = "0";
+        pWPShaderInfo->combos["NORMALMAP"]  = "0";
+        pWPShaderInfo->combos["PBRMASKS"]   = "0";
+    }
+
+    if (wpmat.shader == "genericimage4") {
+        const bool vertexHasBones = sd_units[0].src.find("g_Bones[") != std::string::npos;
+        const bool vertexHasBlendWeights = sd_units[0].src.find("a_BlendWeights") != std::string::npos;
+        const auto boneCountIt = pWPShaderInfo->combos.find("BONECOUNT");
+        LOG_INFO("genericimage4 shader resolved: usePuppet=%d comboSKINNING=%d comboBONECOUNT=%s vertexHasBones=%d vertexHasBlendWeights=%d",
+                 wpmat.use_puppet ? 1 : 0,
+                 shaderUsesSkinning ? 1 : 0,
+                 boneCountIt != pWPShaderInfo->combos.end() ? boneCountIt->second.c_str() : "",
+                 vertexHasBones ? 1 : 0,
+                 vertexHasBlendWeights ? 1 : 0);
+    }
 
     shader->default_uniforms = pWPShaderInfo->svs;
-
-    for (const auto& el : wpmat.combos) {
-        pWPShaderInfo->combos[el.first] = std::to_string(el.second);
-    }
 
     auto textures = wpmat.textures;
     if (pWPShaderInfo->defTexs.size() > 0) {
@@ -1366,6 +2016,10 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
             }
             textures[t.first] = t.second;
         }
+    }
+
+    for (auto& texture : textures) {
+        texture = ResolveFallbackTextureName(texture);
     }
 
     for (usize i = 0; i < textures.size(); i++) {
@@ -1602,8 +2256,35 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
 void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     auto& wpimgobj = img_obj;
     if (! wpimgobj.visible) return;
+    if (context.has_sleeping_arona_crop_sheet &&
+        wpimgobj.image == "models/util/composelayer.json" &&
+        wpimgobj.name == "Adjustable Composition Layer") {
+        LOG_INFO("skipping sleeping arona adjustable composition layer: name=%s id=%d",
+                 wpimgobj.name.c_str(),
+                 wpimgobj.id);
+        return;
+    }
+    if (DebugSkipLayerByName(wpimgobj.name)) {
+        LOG_INFO("debug skipping image layer: name=%s id=%d image=%s",
+                 wpimgobj.name.c_str(),
+                 wpimgobj.id,
+                 wpimgobj.image.c_str());
+        return;
+    }
 
     auto& vfs = *context.vfs;
+
+    if (const auto pauseIt = context.paused_puppet_animations.find(wpimgobj.name);
+        pauseIt != context.paused_puppet_animations.end()) {
+        for (auto& layer : wpimgobj.puppet_layers) {
+            if (! layer.name.empty() && pauseIt->second.count(layer.name) > 0) {
+                layer.paused = true;
+                LOG_INFO("pausing puppet animation layer for native fallback: image=%s animation=%s",
+                         wpimgobj.name.c_str(),
+                         layer.name.c_str());
+            }
+        }
+    }
 
     // coloBlendMode load passthrough manaully
     if (wpimgobj.colorBlendMode != 0) {
@@ -1626,6 +2307,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         if (wpeffobj.visible) count_eff++;
     }
     bool hasEffect = count_eff > 0;
+    std::vector<wpscene::WPImageEffect> effectObjects = wpimgobj.effects;
 
     bool hasPuppet = ! wpimgobj.puppet.empty();
     (void)hasPuppet;
@@ -1645,6 +2327,18 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         }
     }
 
+    const bool useSleepingAronaPlainPuppetFallback =
+        puppet && hasEffect && wpimgobj.name == "ARONA_CROP_SHEET";
+    const bool useSleepingAronaFlatCardFallback = useSleepingAronaPlainPuppetFallback;
+    if (useSleepingAronaPlainPuppetFallback) {
+        LOG_INFO("using sleeping arona plain puppet fallback: image=%s disablingAuthoredEffects=%d",
+                 wpimgobj.name.c_str(),
+                 count_eff);
+        count_eff = 0;
+        hasEffect = false;
+        effectObjects.clear();
+    }
+
     // wpimgobj.origin[1] = context.ortho_h - wpimgobj.origin[1];
     auto spImgNode = std::make_shared<SceneNode>(Vector3f(wpimgobj.origin.data()),
                                                  Vector3f(wpimgobj.scale.data()),
@@ -1657,11 +2351,25 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
 
     ShaderValueMap baseConstSvs = context.global_base_uniforms;
     WPShaderInfo   shaderInfo;
+    wpscene::WPMaterial sourceMaterial = wpimgobj.material;
+    const bool            useUpstreamPuppetEffectBaseline =
+        puppet && hasEffect && wpimgobj.name == "ARONA_CROP_SHEET";
+    bool                  usePuppetChannelMapPrepass { false };
+    bool                  routePuppetPrepassThroughAuthoredEffects { false };
+    bool                  useStandalonePuppetFinalDisplay { false };
+    bool                  useStandalonePuppetBaseDisplay { false };
+    bool                  zeroSlotChannelMapFallback { false };
+    std::vector<uint32_t> activePuppetChannelBlendSlots;
+    std::vector<WPPuppetLayer::AnimationLayer> renderPuppetLayers = wpimgobj.puppet_layers;
     {
         if (! hasEffect) {
             svData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
-            if (puppet) {
+            if (puppet && ! useSleepingAronaFlatCardFallback) {
                 WPMdlParser::AddPuppetShaderInfo(shaderInfo, *puppet);
+            } else if (useSleepingAronaFlatCardFallback) {
+                LOG_INFO("using sleeping arona flat card source fallback: image=%s shader=%s",
+                         wpimgobj.name.c_str(),
+                         sourceMaterial.shader.c_str());
             }
         }
 
@@ -1674,10 +2382,40 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         baseConstSvs["g_UserAlpha"]  = wpimgobj.alpha;
         baseConstSvs["g_Brightness"] = wpimgobj.brightness;
 
+        if (puppet && hasEffect && ! useUpstreamPuppetEffectBaseline) {
+            usePuppetChannelMapPrepass =
+                TryPreparePuppetChannelMapPrepass(wpimgobj,
+                                                  *puppet,
+                                                  vfs,
+                                                  sourceMaterial,
+                                                  baseConstSvs,
+                                                  &activePuppetChannelBlendSlots);
+            if (usePuppetChannelMapPrepass && activePuppetChannelBlendSlots.empty()) {
+                LOG_INFO("native puppet channelmap prepass disabled because no active visible blend slots remain: image=%s",
+                         wpimgobj.name.c_str());
+                usePuppetChannelMapPrepass = false;
+                zeroSlotChannelMapFallback = true;
+                sourceMaterial             = wpimgobj.material;
+                svData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
+                WPMdlParser::AddPuppetShaderInfo(shaderInfo, *puppet);
+                LOG_INFO("native puppet channelmap prepass falling back to ordinary puppet image-effects route: image=%s authoredEffects=%d",
+                         wpimgobj.name.c_str(),
+                         count_eff);
+            } else if (! usePuppetChannelMapPrepass) {
+                svData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
+                WPMdlParser::AddPuppetShaderInfo(shaderInfo, *puppet);
+            }
+        }
+        if (useUpstreamPuppetEffectBaseline) {
+            LOG_INFO("using upstream-compatible puppet+effects baseline: image=%s authoredEffects=%d",
+                     wpimgobj.name.c_str(),
+                     count_eff);
+        }
+
         shaderInfo.baseConstSvs = baseConstSvs;
 
         if (! LoadMaterial(vfs,
-                           wpimgobj.material,
+                           sourceMaterial,
                            context.scene.get(),
                            spImgNode.get(),
                            &material,
@@ -1686,10 +2424,10 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             LOG_ERROR("load imageobj '%s' material faild", wpimgobj.name.c_str());
             return;
         };
-        LoadConstvalue(material, wpimgobj.material, shaderInfo);
+        LoadConstvalue(material, sourceMaterial, shaderInfo);
     }
 
-    for (const auto& cs : wpimgobj.material.constantshadervalues) {
+    for (const auto& cs : sourceMaterial.constantshadervalues) {
         const auto&               name  = cs.first;
         const std::vector<float>& value = cs.second;
         std::string               glname;
@@ -1724,26 +2462,63 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             mapRate       = { r[2] / r[0], r[3] / r[1] };
         }
 
-        if (puppet) {
+        if (puppet && ! useSleepingAronaFlatCardFallback) {
             if (hasEffect) {
-                GenCardMesh(
-                    mesh, { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] }, mapRate);
-                WPMdlParser::GenPuppetMesh(effct_final_mesh, *puppet);
+                if (useUpstreamPuppetEffectBaseline) {
+                    GenCardMesh(mesh,
+                                { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] },
+                                mapRate);
+                    WPMdlParser::GenPuppetMesh(effct_final_mesh, *puppet);
 
-                wpscene::WPImageEffect puppet_effect;
-                wpscene::WPMaterial    puppet_mat;
-                puppet_mat             = wpimgobj.material;
-                puppet_mat.textures[0] = "";
-                WPMdlParser::AddPuppetMatInfo(puppet_mat, *puppet);
-                puppet_effect.materials.push_back(puppet_mat);
-                wpimgobj.effects.push_back(puppet_effect);
+                    wpscene::WPImageEffect puppet_effect;
+                    wpscene::WPMaterial    puppet_mat = wpimgobj.material;
+                    if (puppet_mat.textures.empty()) {
+                        puppet_mat.textures.resize(1);
+                    }
+                    puppet_mat.textures[0] = "";
+                    WPMdlParser::AddPuppetMatInfo(puppet_mat, *puppet);
+                    puppet_effect.visible = true;
+                    puppet_effect.materials.push_back(puppet_mat);
+                    effectObjects.push_back(puppet_effect);
+                    LOG_INFO("appending upstream puppet effect publish node: image=%s authoredEffects=%d totalEffects=%zu",
+                             wpimgobj.name.c_str(),
+                             count_eff,
+                             effectObjects.size());
+                } else if (usePuppetChannelMapPrepass) {
+                    WPMdlParser::GenPuppetChannelMapBaseUvMesh(mesh,
+                                                               *puppet,
+                                                               { wpimgobj.size[0], wpimgobj.size[1] });
+                    WPMdlParser::GenPuppetMesh(effct_final_mesh, *puppet);
+                    LOG_INFO("native puppet channelmap prepass using authored base-uv flat prepass mesh: image=%s bones=%zu",
+                             wpimgobj.name.c_str(),
+                             puppet->puppet->bones.size());
+                    routePuppetPrepassThroughAuthoredEffects = true;
+                    useStandalonePuppetFinalDisplay = true;
+                    useStandalonePuppetBaseDisplay  = true;
+                } else {
+                    svData.puppet_layer = WPPuppetLayer(puppet->puppet);
+                    svData.puppet_layer.prepared(renderPuppetLayers);
+                    WPMdlParser::GenPuppetMesh(mesh, *puppet);
+                    GenCardMesh(effct_final_mesh,
+                                { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] });
+                    useStandalonePuppetFinalDisplay = true;
+                    LOG_INFO("routing full puppet render through offscreen target before flat final effect publish: image=%s authoredEffects=%d",
+                             wpimgobj.name.c_str(),
+                             count_eff);
+                }
+
+                if (routePuppetPrepassThroughAuthoredEffects) {
+                    LOG_INFO("routing puppet channelmap prepass through authored image effects before final generic puppet stage: image=%s authoredEffects=%d",
+                             wpimgobj.name.c_str(),
+                             count_eff);
+                }
             } else {
                 svData.puppet_layer = WPPuppetLayer(puppet->puppet);
-                svData.puppet_layer.prepared(wpimgobj.puppet_layers);
+                svData.puppet_layer.prepared(renderPuppetLayers);
                 WPMdlParser::GenPuppetMesh(mesh, *puppet);
             }
         }
-        if (! puppet) {
+        if (! puppet || useSleepingAronaFlatCardFallback) {
             GenCardMesh(mesh, { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] }, mapRate);
             GenCardMesh(effct_final_mesh,
                         { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] });
@@ -1759,6 +2534,8 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     spImgNode->AddMesh(spMesh);
 
     context.shader_updater->SetNodeData(spImgNode.get(), svData);
+    SceneNode standaloneDisplayTransform;
+    bool      hasStandaloneDisplayTransform = false;
     if (hasEffect) {
         auto& scene = *context.scene;
         // currently use addr for unique
@@ -1784,13 +2561,23 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         std::string effect_ppong_a, effect_ppong_b;
         effect_ppong_a = WE_EFFECT_PPONG_PREFIX_A.data() + nodeAddr;
         effect_ppong_b = WE_EFFECT_PPONG_PREFIX_B.data() + nodeAddr;
+        const bool debugAronaRenderTargets = wpimgobj.name == "ARONA_CROP_SHEET";
+        std::string aronaDebugSourceTarget;
+        std::string aronaDebugLastEffectTarget;
         // set image effect
         auto imgEffectLayer = std::make_shared<SceneImageEffectLayer>(
             spImgNode.get(), wpimgobj.size[0], wpimgobj.size[1], effect_ppong_a, effect_ppong_b);
         {
             imgEffectLayer->SetFinalBlend(imgBlendMode);
+            if (useStandalonePuppetFinalDisplay) {
+                imgEffectLayer->SetPublishFinalOutput(false);
+            }
             imgEffectLayer->FinalMesh().ChangeMeshDataFrom(effct_final_mesh);
             imgEffectLayer->FinalNode().CopyTrans(*spImgNode);
+            if (useStandalonePuppetFinalDisplay) {
+                standaloneDisplayTransform.CopyTrans(*spImgNode);
+                hasStandaloneDisplayTransform = true;
+            }
             if (isCompose) {
             } else {
                 spImgNode->CopyTrans(SceneNode());
@@ -1808,10 +2595,39 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 scene.renderTargets[effect_ppong_a].bind = { .enable = true, .screen = true };
             }
             scene.renderTargets[effect_ppong_b] = scene.renderTargets.at(effect_ppong_a);
+            if (debugAronaRenderTargets) {
+                aronaDebugSourceTarget     = "_rt_debug_arona_source_" + nodeAddr;
+                aronaDebugLastEffectTarget =
+                    ResolveEffectPingPongFinalTarget(effect_ppong_a, effect_ppong_b, count_eff);
+                scene.renderTargets[aronaDebugSourceTarget] = {
+                    .width      = scene.renderTargets.at(effect_ppong_a).width,
+                    .height     = scene.renderTargets.at(effect_ppong_a).height,
+                    .allowReuse = false,
+                };
+                scene.debugRenderDumps.push_back({
+                    .label        = "arona-source-puppet",
+                    .renderTarget = aronaDebugSourceTarget,
+                    .path         = "/tmp/papercompany-debug/arona-source-puppet.tga",
+                });
+                scene.debugRenderDumps.push_back({
+                    .label        = "arona-last-effect",
+                    .renderTarget = aronaDebugLastEffectTarget,
+                    .path         = "/tmp/papercompany-debug/arona-last-effect.tga",
+                });
+                scene.debugRenderDumps.push_back({
+                    .label        = "arona-final-default",
+                    .renderTarget = SpecTex_Default.data(),
+                    .path         = "/tmp/papercompany-debug/arona-final-default.tga",
+                });
+                LOG_INFO("registered arona debug render dumps: source=%s last=%s final=%s",
+                         aronaDebugSourceTarget.c_str(),
+                         aronaDebugLastEffectTarget.c_str(),
+                         SpecTex_Default.data());
+            }
         }
 
         int32_t i_eff = -1;
-        for (const auto& wpeffobj : wpimgobj.effects) {
+        for (const auto& wpeffobj : effectObjects) {
             i_eff++;
             if (! wpeffobj.visible) {
                 i_eff--;
@@ -1830,7 +2646,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 fboMap["previous"] = inRT;
                 for (usize i = 0; i < wpeffobj.fbos.size(); i++) {
                     const auto& wpfbo  = wpeffobj.fbos.at(i);
-                    std::string rtname = wpfbo.name + "_" + effaddr;
+                    std::string rtname = CanonicalizeRuntimeRenderTargetName(wpfbo.name, effaddr);
                     if (wpimgobj.fullscreen) {
                         scene.renderTargets[rtname]      = { 2, 2, true };
                         scene.renderTargets[rtname].bind = {
@@ -1851,6 +2667,12 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             }
             // load! effect commands
             {
+                if (debugAronaRenderTargets && i_eff == 0 && ! aronaDebugSourceTarget.empty()) {
+                    imgEffect->commands.push_back({ .cmd      = SceneImageEffect::CmdType::Copy,
+                                                    .dst      = aronaDebugSourceTarget,
+                                                    .src      = inRT,
+                                                    .afterpos = 0 });
+                }
                 for (const auto& el : wpeffobj.commands) {
                     if (el.command != "copy") {
                         LOG_ERROR("Unknown effect command: %s", el.command.c_str());
@@ -1922,7 +2744,23 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
 
                 // load glname from alias and load to constvalue
                 LoadConstvalue(material, wpmat, wpEffShaderInfo);
+                if (wpmat.shader == "genericimage4") {
+                    LOG_INFO("effect stage material loaded: effectIndex=%d shader=%s usePuppet=%d tex0=%s combosSKINNING=%d combosBONECOUNT=%s",
+                             i_eff + 1,
+                             wpmat.shader.c_str(),
+                             wpmat.use_puppet ? 1 : 0,
+                             wpmat.textures.empty() ? "" : wpmat.textures.front().c_str(),
+                             exists(wpEffShaderInfo.combos, "SKINNING") &&
+                                     wpEffShaderInfo.combos.at("SKINNING") != "0"
+                                 ? 1
+                                 : 0,
+                             exists(wpEffShaderInfo.combos, "BONECOUNT")
+                                 ? wpEffShaderInfo.combos.at("BONECOUNT").c_str()
+                                 : "");
+                }
                 auto spMesh = std::make_shared<SceneMesh>();
+                const bool preservePuppetMesh =
+                    routePuppetPrepassThroughAuthoredEffects && puppet && wpmat.use_puppet;
                 {
                     svData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
                     if (puppet && wpmat.use_puppet) {
@@ -1930,11 +2768,14 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                         svData.puppet_layer.prepared(wpimgobj.puppet_layers);
                     }
                 }
+                if (preservePuppetMesh) {
+                    spMesh->ChangeMeshDataFrom(effct_final_mesh);
+                }
                 spMesh->AddMaterial(std::move(material));
                 spEffNode->AddMesh(spMesh);
 
                 context.shader_updater->SetNodeData(spEffNode.get(), svData);
-                imgEffect->nodes.push_back({ matOutRT, spEffNode });
+                imgEffect->nodes.push_back({ matOutRT, spEffNode, preservePuppetMesh });
             }
 
             if (eff_mat_ok)
@@ -1943,8 +2784,185 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 LOG_ERROR("effect \'%s\' failed to load", wpeffobj.name.c_str());
             }
         }
+
+        if (useStandalonePuppetFinalDisplay && puppet) {
+            auto spBaseNode = std::make_shared<SceneNode>();
+
+            if (useStandalonePuppetBaseDisplay) {
+                wpscene::WPMaterial baseSourceMaterial = wpimgobj.material;
+                if (usePuppetChannelMapPrepass && ! sourceMaterial.textures.empty() &&
+                    ! sourceMaterial.textures[0].empty()) {
+                    baseSourceMaterial.textures.resize(std::max<usize>(baseSourceMaterial.textures.size(), 2));
+                    baseSourceMaterial.textures[1] = sourceMaterial.textures[0];
+                    baseSourceMaterial.combos["PAPER_CHANNELMAP_BASE_EXCLUDE"] = 1;
+                    LOG_INFO("native puppet base display applying inverse channelmap alpha mask: image=%s channelMask=%s",
+                             wpimgobj.name.c_str(),
+                             baseSourceMaterial.textures[1].c_str());
+                }
+                WPMdlParser::AddPuppetMatInfo(baseSourceMaterial, *puppet);
+
+                SceneMaterial     baseMaterial;
+                WPShaderValueData baseSvData;
+                WPShaderInfo      baseShaderInfo;
+                baseShaderInfo.baseConstSvs = baseConstSvs;
+                WPMdlParser::AddPuppetShaderInfo(baseShaderInfo, *puppet);
+                if (! LoadMaterial(vfs,
+                                   baseSourceMaterial,
+                                   context.scene.get(),
+                                   spBaseNode.get(),
+                                   &baseMaterial,
+                                   &baseSvData,
+                                   &baseShaderInfo)) {
+                    LOG_ERROR("load standalone puppet base material failed: %s", wpimgobj.name.c_str());
+                } else {
+                    LoadConstvalue(baseMaterial, baseSourceMaterial, baseShaderInfo);
+                    baseSvData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
+                    baseSvData.puppet_layer = WPPuppetLayer(puppet->puppet);
+                    baseSvData.puppet_layer.prepared(wpimgobj.puppet_layers);
+
+                    auto spBaseMesh = std::make_shared<SceneMesh>();
+                    WPMdlParser::GenPuppetMesh(*spBaseMesh, *puppet);
+                    spBaseMesh->AddMaterial(std::move(baseMaterial));
+                    spBaseNode->AddMesh(spBaseMesh);
+                    if (hasStandaloneDisplayTransform) {
+                        spBaseNode->CopyTrans(standaloneDisplayTransform);
+                    }
+                    context.shader_updater->SetNodeData(spBaseNode.get(), baseSvData);
+                    spImgNode->AppendChild(spBaseNode);
+
+                    LOG_INFO("native puppet standalone base display enabled: image=%s tex0=%s",
+                             wpimgobj.name.c_str(),
+                             baseSourceMaterial.textures.empty() ? "" : baseSourceMaterial.textures.front().c_str());
+                    if (usePuppetChannelMapPrepass && ! activePuppetChannelBlendSlots.empty()) {
+                        std::ostringstream activeIndicesStream;
+                        for (size_t i = 0; i < activePuppetChannelBlendSlots.size(); ++i) {
+                            if (i != 0) activeIndicesStream << ", ";
+                            activeIndicesStream << activePuppetChannelBlendSlots[i];
+                        }
+                        LOG_INFO("native puppet standalone base display keeping full mesh under filtered overlay: image=%s activeOverlayIndices=[%s]",
+                                 wpimgobj.name.c_str(),
+                                 activeIndicesStream.str().c_str());
+                    }
+                }
+            }
+
+            if (usePuppetChannelMapPrepass && activePuppetChannelBlendSlots.empty()) {
+                LOG_INFO("native puppet final overlay suppressed because all active channelmap layers are paused or hidden: image=%s",
+                         wpimgobj.name.c_str());
+            } else {
+                auto spFinalNode = std::make_shared<SceneNode>();
+
+                const std::string finalEffectTexture =
+                    ResolveEffectPingPongFinalTarget(effect_ppong_a, effect_ppong_b, count_eff);
+
+                wpscene::WPMaterial finalSourceMaterial = wpimgobj.material;
+                if (finalSourceMaterial.textures.empty()) {
+                    finalSourceMaterial.textures.resize(1);
+                }
+                finalSourceMaterial.textures[0] = finalEffectTexture;
+                if (usePuppetChannelMapPrepass && ! sourceMaterial.textures.empty() &&
+                    ! sourceMaterial.textures[0].empty()) {
+                    finalSourceMaterial.textures.resize(std::max<usize>(finalSourceMaterial.textures.size(), 3));
+                    finalSourceMaterial.textures[1] = sourceMaterial.textures[0];
+                    if (sourceMaterial.textures.size() > 1 && ! sourceMaterial.textures[1].empty()) {
+                        finalSourceMaterial.textures[2] = sourceMaterial.textures[1];
+                    } else if (! wpimgobj.material.textures.empty()) {
+                        finalSourceMaterial.textures[2] = wpimgobj.material.textures[0];
+                    }
+                    finalSourceMaterial.combos["PAPER_CHANNELMAP_ALPHA_MASK"] = 1;
+                    LOG_INFO("native puppet final display applying channelmap/base alpha masks: image=%s channelMask=%s baseMask=%s",
+                             wpimgobj.name.c_str(),
+                             finalSourceMaterial.textures[1].c_str(),
+                             finalSourceMaterial.textures.size() > 2 ? finalSourceMaterial.textures[2].c_str() : "");
+                } else if (! wpimgobj.material.textures.empty() && ! wpimgobj.material.textures[0].empty()) {
+                    finalSourceMaterial.textures.resize(std::max<usize>(finalSourceMaterial.textures.size(), 2));
+                    finalSourceMaterial.textures[1] = wpimgobj.material.textures[0];
+                    finalSourceMaterial.combos["PAPER_BASE_ALPHA_MASK"] = 1;
+                    LOG_INFO("native puppet final display applying base alpha mask: image=%s baseMask=%s",
+                             wpimgobj.name.c_str(),
+                             finalSourceMaterial.textures[1].c_str());
+                }
+                SceneMaterial     finalMaterial;
+                WPShaderValueData finalSvData;
+                WPShaderInfo      finalShaderInfo;
+                finalShaderInfo.baseConstSvs = baseConstSvs;
+                if (usePuppetChannelMapPrepass) {
+                    WPMdlParser::AddPuppetMatInfo(finalSourceMaterial, *puppet);
+                    WPMdlParser::AddPuppetShaderInfo(finalShaderInfo, *puppet);
+                }
+                if (! LoadMaterial(vfs,
+                                   finalSourceMaterial,
+                                   context.scene.get(),
+                                   spFinalNode.get(),
+                                   &finalMaterial,
+                                   &finalSvData,
+                                   &finalShaderInfo)) {
+                    LOG_ERROR("load standalone puppet final material failed: %s", wpimgobj.name.c_str());
+                } else {
+                    LoadConstvalue(finalMaterial, finalSourceMaterial, finalShaderInfo);
+                    finalSvData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
+                    if (usePuppetChannelMapPrepass) {
+                        finalSvData.puppet_layer = WPPuppetLayer(puppet->puppet);
+                        finalSvData.puppet_layer.prepared(wpimgobj.puppet_layers);
+                    }
+
+                    auto spFinalMesh = std::make_shared<SceneMesh>();
+                    bool usingFilteredOverlayMesh = false;
+                    if (usePuppetChannelMapPrepass && ! activePuppetChannelBlendSlots.empty()) {
+                        usingFilteredOverlayMesh =
+                            WPMdlParser::GenPuppetImageSpaceMesh(*spFinalMesh,
+                                                                 *puppet,
+                                                                 { wpimgobj.size[0], wpimgobj.size[1] },
+                                                                 activePuppetChannelBlendSlots);
+                    }
+                    if (! usingFilteredOverlayMesh) {
+                        if (usePuppetChannelMapPrepass) {
+                            WPMdlParser::GenPuppetMesh(*spFinalMesh, *puppet);
+                        } else {
+                            spFinalMesh->ChangeMeshDataFrom(effct_final_mesh);
+                        }
+                    }
+                    spFinalMesh->AddMaterial(std::move(finalMaterial));
+                    spFinalNode->AddMesh(spFinalMesh);
+                    if (hasStandaloneDisplayTransform) {
+                        spFinalNode->CopyTrans(standaloneDisplayTransform);
+                    }
+                    context.shader_updater->SetNodeData(spFinalNode.get(), finalSvData);
+                    spImgNode->AppendChild(spFinalNode);
+
+                    LOG_INFO("native puppet standalone final display enabled: image=%s tex0=%s authoredEffects=%d",
+                             wpimgobj.name.c_str(),
+                             finalEffectTexture.c_str(),
+                             count_eff);
+                    if (usingFilteredOverlayMesh) {
+                        LOG_INFO("native puppet final stage using filtered image-space overlay mesh: image=%s size=%.1fx%.1f",
+                                 wpimgobj.name.c_str(),
+                                 wpimgobj.size[0],
+                                 wpimgobj.size[1]);
+                        std::ostringstream activeIndicesStream;
+                        for (size_t i = 0; i < activePuppetChannelBlendSlots.size(); ++i) {
+                            if (i != 0) activeIndicesStream << ", ";
+                            activeIndicesStream << activePuppetChannelBlendSlots[i];
+                        }
+                        LOG_INFO("native puppet final overlay restricted to active blend slots: image=%s indices=[%s]",
+                                 wpimgobj.name.c_str(),
+                                 activeIndicesStream.str().c_str());
+                    } else if (! usePuppetChannelMapPrepass) {
+                        LOG_INFO("native puppet final stage using flat effect card mesh: image=%s size=%.1fx%.1f",
+                                 wpimgobj.name.c_str(),
+                                 wpimgobj.size[0],
+                                 wpimgobj.size[1]);
+                    } else {
+                        LOG_INFO("native puppet final stage using authored puppet UV mesh: image=%s size=%.1fx%.1f",
+                                 wpimgobj.name.c_str(),
+                                 wpimgobj.size[0],
+                                 wpimgobj.size[1]);
+                    }
+                }
+            }
+        }
     }
-    context.scene->sceneGraph->AppendChild(spImgNode);
+    AttachObjectNode(context, spImgNode, wpimgobj.id, wpimgobj.parent);
 }
 
 struct ParticleChildPtr {
@@ -1995,6 +3013,22 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
 
     auto& particle_obj = *p_particle_obj;
     auto& vfs          = *context.vfs;
+
+    if (! is_child && DebugSkipLayerByName(wppartobj.name)) {
+        LOG_INFO("debug skipping particle layer: name=%s id=%d particle=%s",
+                 wppartobj.name.c_str(),
+                 wppartobj.id,
+                 wppartobj.particle.c_str());
+        return;
+    }
+
+    if (! is_child && IsUnsupportedWorkshopBokehParticle(wppartobj.particle)) {
+        LOG_INFO("suppressing unsupported workshop bokeh particle system: name=%s id=%d particle=%s",
+                 wppartobj.name.c_str(),
+                 wppartobj.id,
+                 wppartobj.particle.c_str());
+        return;
+    }
 
     auto wppartRenderer = particle_obj.renderers.at(0);
     bool render_rope    = sstart_with(wppartRenderer.name, "rope");
@@ -2126,13 +3160,24 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
     if (is_child)
         child_ptr.node_parent->AppendChild(spNode);
     else
-        context.scene->sceneGraph->AppendChild(spNode);
+        AttachObjectNode(context, spNode, wppartobj.id, wppartobj.parent);
+}
+
+void ParseSolidAnchorObj(ParseContext& context, WPSolidAnchorObject& solid_obj) {
+    if (! solid_obj.visible) return;
+
+    auto node = std::make_shared<SceneNode>(Vector3f(solid_obj.origin.data()),
+                                            Vector3f(solid_obj.scale.data()),
+                                            Vector3f(solid_obj.angles.data()));
+    node->ID() = solid_obj.id;
+    AttachObjectNode(context, node, solid_obj.id, solid_obj.parent);
 }
 
 void ParseLightObj(ParseContext& context, wpscene::WPLightObject& light_obj) {
     auto node = std::make_shared<SceneNode>(Vector3f(light_obj.origin.data()),
                                             Vector3f(light_obj.scale.data()),
                                             Vector3f(light_obj.angles.data()));
+    node->ID() = light_obj.id;
 
     context.scene->lights.emplace_back(std::make_unique<SceneLight>(
         Vector3f(light_obj.color.data()), light_obj.radius, light_obj.intensity));
@@ -2140,7 +3185,7 @@ void ParseLightObj(ParseContext& context, wpscene::WPLightObject& light_obj) {
     auto& light = *(context.scene->lights.back());
     light.setNode(node);
 
-    context.scene->sceneGraph->AppendChild(node);
+    AttachObjectNode(context, node, light_obj.id, light_obj.parent);
 }
 
 bool LoadModelFallbackMaterial(fs::VFS& vfs, const std::string& matJsonFile,
@@ -2352,7 +3397,7 @@ void ParseModelObj(ParseContext& context, wpscene::WPModelObject& model_obj) {
         return;
     }
 
-    context.scene->sceneGraph->AppendChild(spNode);
+    AttachObjectNode(context, spNode, model_obj.id, model_obj.parent);
     if (hasStaticSubmeshes) {
         LogStaticModelProjectedBounds(
             context, model_obj, staticBasisChoice, staticFallbackScale, framingSubmeshes);
@@ -2381,6 +3426,17 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
                                             fs::VFS& vfs, audio::SoundManager& sm) {
     nlohmann::json json;
     if (! PARSE_JSON(buf, json)) return nullptr;
+
+    nlohmann::json sceneProperties = ResolveSceneProperties(vfs, m_scene_properties_json);
+    SetActiveScenePropertyState(sceneProperties);
+    struct ClearScenePropertyStateGuard {
+        ~ClearScenePropertyStateGuard() { ClearActiveScenePropertyState(); }
+    } clearScenePropertyStateGuard;
+
+    if (! sceneProperties.empty()) {
+        LOG_INFO("scene property defaults active: count=%zu", sceneProperties.size());
+    }
+
     wpscene::WPScene sc;
     sc.FromJson(json);
     //	LOG_INFO(nlohmann::json(sc).dump(4));
@@ -2391,6 +3447,13 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
     int modelObjectCount = 0;
 
     for (auto& obj : json.at("objects")) {
+        RegisterPuppetPauseDirectives(context, obj);
+        if (obj.contains("image") && obj.at("image").is_string() &&
+            obj.contains("name") && obj.at("name").is_string() &&
+            obj.at("image").get_ref<const std::string&>() == "models/ARONA_CROP_SHEET.json" &&
+            obj.at("name").get_ref<const std::string&>() == "ARONA_CROP_SHEET") {
+            context.has_sleeping_arona_crop_sheet = true;
+        }
         if (obj.contains("image") && ! obj.at("image").is_null()) {
             AddWPObject<wpscene::WPImageObject>(wp_objs, obj, vfs);
         } else if (obj.contains("particle") && ! obj.at("particle").is_null()) {
@@ -2402,6 +3465,8 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
         } else if (obj.contains("model") && ! obj.at("model").is_null()) {
             AddWPObject<wpscene::WPModelObject>(wp_objs, obj, vfs);
             ++modelObjectCount;
+        } else if (IsTransformAnchorObject(obj)) {
+            AddWPObject<WPSolidAnchorObject>(wp_objs, obj, vfs);
         }
     }
 
@@ -2469,8 +3534,19 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
                        [&context](wpscene::WPModelObject& obj) {
                            ParseModelObj(context, obj);
                        },
+                       [&context](WPSolidAnchorObject& obj) {
+                           ParseSolidAnchorObj(context, obj);
+                       },
                    },
                    obj);
+    }
+
+    for (const auto& [parentId, children] : context.deferred_children) {
+        if (! children.empty() && context.object_nodes.count(parentId) == 0) {
+            LOG_INFO("dropping %zu child node(s) for missing parent id=%d",
+                     children.size(),
+                     parentId);
+        }
     }
 
     if (context.scene->sceneGraph->GetChildren().empty() && modelObjectCount > 0) {

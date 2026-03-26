@@ -51,6 +51,7 @@ public:
                                          bool persist = false);
 
     void MarkShareReady(std::string_view key);
+    bool DumpTexture(std::string_view key, std::string_view path);
 
     void RecGenerateMipmaps(vvk::CommandBuffer& cmd, const ImageParameters& image) const;
 

@@ -16,6 +16,7 @@ class SceneMesh;
 struct SceneImageEffectNode {
     std::string                output; // render target
     std::shared_ptr<SceneNode> sceneNode;
+    bool                       preserveMesh { false };
 };
 
 struct SceneImageEffect {
@@ -45,6 +46,7 @@ public:
     SceneMesh&  FinalMesh() const { return *m_final_mesh; }
     SceneNode&  FinalNode() const { return *m_final_node; }
     void        SetFinalBlend(BlendMode m) { m_final_blend = m; }
+    void        SetPublishFinalOutput(bool value) { m_publish_final_output = value; }
 
     void ResolveEffect(const SceneMesh& defualt_mesh, std::string_view effect_cam);
 
@@ -58,6 +60,7 @@ private:
     std::unique_ptr<SceneMesh> m_final_mesh;
     std::unique_ptr<SceneNode> m_final_node;
     BlendMode                  m_final_blend;
+    bool                       m_publish_final_output { true };
 
     std::vector<std::shared_ptr<SceneImageEffect>> m_effects;
 };

@@ -130,6 +130,10 @@
       <label>Resolved scene source kind for the selected Wallpaper Engine project</label>
       <default></default>
     </entry>
+    <entry name="WEScenePropertiesJson" type="String">
+      <label>Serialized Wallpaper Engine user properties for the selected scene project</label>
+      <default></default>
+    </entry>
     <entry name="WESceneExperimentalEnabled" type="Bool">
       <label>Compatibility mirror for the Wallpaper Engine Scene Native content mode</label>
       <default>false</default>

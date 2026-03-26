@@ -17,6 +17,9 @@ inline std::mt19937_64& engine()
 template<typename Distribution, std::floating_point T>
 inline T get(T min, T max)
 {
+    if (max < min) {
+        std::swap(min, max);
+    }
     Distribution distribution(min, max);
     return distribution(engine());
 }
@@ -30,6 +33,9 @@ inline T get(T min, T max)
 template<std::integral T>
 inline T get(T min, T max)
 {
+    if (max < min) {
+        std::swap(min, max);
+    }
     std::uniform_int_distribution<T> distribution(min, max);
     return distribution(engine());
 }

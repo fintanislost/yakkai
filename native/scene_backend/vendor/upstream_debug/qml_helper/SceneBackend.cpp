@@ -324,6 +324,7 @@ void SceneObject::setScenePropertyQurl(std::string_view name, QUrl value) {
 
 QUrl SceneObject::source() const { return m_source; }
 QUrl SceneObject::assets() const { return m_assets; }
+QString SceneObject::scenePropertiesJson() const { return m_scenePropertiesJson; }
 
 int   SceneObject::fps() const { return m_fps; }
 int   SceneObject::fillMode() const { return m_fillMode; }
@@ -342,6 +343,15 @@ void SceneObject::setAssets(const QUrl& assets) {
     if (m_assets == assets) return;
     m_assets = assets;
     setScenePropertyQurl(wallpaper::PROPERTY_ASSETS, m_assets);
+}
+
+void SceneObject::setScenePropertiesJson(const QString& value) {
+    if (m_scenePropertiesJson == value) return;
+    m_scenePropertiesJson = value;
+    SET_PROPERTY(String,
+                 wallpaper::PROPERTY_SCENE_PROPERTIES_JSON,
+                 m_scenePropertiesJson.toStdString());
+    Q_EMIT scenePropertiesJsonChanged();
 }
 
 void SceneObject::setFps(int value) {

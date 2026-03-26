@@ -13,11 +13,15 @@
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
 #include <algorithm>
+#include <cstring>
 #include <iostream>
 #include <chrono>
 #include <ctime>
 #include <numeric>
 #include <cmath>
+#include <unordered_set>
+#include <limits>
+#include <sstream>
 
 using namespace wallpaper;
 using namespace Eigen;
@@ -147,6 +151,65 @@ bool SampleCameraPath(const WPCameraPathAnimation& animation,
     up = segment->keyframes.back().up;
     return true;
 }
+
+template <size_t N>
+std::string FormatBounds(const std::array<float, N>& minValues,
+                         const std::array<float, N>& maxValues) {
+    std::ostringstream oss;
+    oss << "min=(";
+    for (size_t i = 0; i < N; ++i) {
+        if (i != 0) oss << ", ";
+        oss << minValues[i];
+    }
+    oss << ") max=(";
+    for (size_t i = 0; i < N; ++i) {
+        if (i != 0) oss << ", ";
+        oss << maxValues[i];
+    }
+    oss << ")";
+    return oss.str();
+}
+
+struct TriangleStats {
+    size_t largeCount { 0 };
+    float  maxWidth { 0.0f };
+    float  maxHeight { 0.0f };
+    float  maxDiagonal { 0.0f };
+};
+
+TriangleStats ComputeTriangleStats(const std::vector<Eigen::Vector3f>& positions,
+                                   const SceneIndexArray&             indices) {
+    TriangleStats stats;
+    const auto*   raw = reinterpret_cast<const uint16_t*>(indices.Data());
+    const size_t  triangleCount = (indices.RenderDataCount() * 2) / 3;
+    for (size_t triangleIndex = 0; triangleIndex < triangleCount; ++triangleIndex) {
+        const size_t base = triangleIndex * 3;
+        const uint16_t ia = raw[base + 0];
+        const uint16_t ib = raw[base + 1];
+        const uint16_t ic = raw[base + 2];
+        if (ia >= positions.size() || ib >= positions.size() || ic >= positions.size()) {
+            continue;
+        }
+
+        const auto& a = positions[ia];
+        const auto& b = positions[ib];
+        const auto& c = positions[ic];
+        const float minX = std::min({ a.x(), b.x(), c.x() });
+        const float maxX = std::max({ a.x(), b.x(), c.x() });
+        const float minY = std::min({ a.y(), b.y(), c.y() });
+        const float maxY = std::max({ a.y(), b.y(), c.y() });
+        const float width = maxX - minX;
+        const float height = maxY - minY;
+        const float diagonal = std::hypot(width, height);
+        stats.maxWidth = std::max(stats.maxWidth, width);
+        stats.maxHeight = std::max(stats.maxHeight, height);
+        stats.maxDiagonal = std::max(stats.maxDiagonal, diagonal);
+        if (width > 512.0f || height > 512.0f || diagonal > 700.0f) {
+            stats.largeCount++;
+        }
+    }
+    return stats;
+}
 } // namespace
 
 void WPShaderValueUpdater::FrameBegin() {
@@ -241,6 +304,273 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprite
     assert(exists(m_nodeUniformInfoMap, pNode));
     const auto& info = m_nodeUniformInfoMap[pNode];
 
+    if (material->customShader.shader &&
+        (material->customShader.shader->name == "genericimage4" ||
+         material->customShader.shader->name == "puppettexturechannels")) {
+        const std::string shaderName = material->customShader.shader->name;
+        static std::unordered_set<const SceneNode*> loggedDiagnosticNodes;
+        if (! loggedDiagnosticNodes.count(pNode)) {
+            const bool hasNodeData = exists(m_nodeDataMap, pNode);
+            const bool hasPuppetLayer =
+                hasNodeData && m_nodeDataMap.at(pNode).puppet_layer.hasPuppet();
+            LOG_INFO("%s runtime uniforms: hasNodeData=%d hasPuppetLayer=%d has_BONES=%d tex0=%s",
+                     shaderName.c_str(),
+                     hasNodeData ? 1 : 0,
+                     hasPuppetLayer ? 1 : 0,
+                     info.has_BONES ? 1 : 0,
+                     material->textures.empty() ? "" : material->textures.front().c_str());
+
+            if (shaderName == "puppettexturechannels") {
+                std::ostringstream textureLog;
+                textureLog << "[";
+                for (size_t texIndex = 0; texIndex < material->textures.size(); ++texIndex) {
+                    if (texIndex > 0) {
+                        textureLog << ", ";
+                    }
+                    textureLog << texIndex << ":" << material->textures[texIndex];
+                }
+                textureLog << "]";
+                LOG_INFO("puppettexturechannels runtime textures: count=%zu values=%s",
+                         material->textures.size(),
+                         textureLog.str().c_str());
+
+                std::vector<std::string> constKeys;
+                constKeys.reserve(material->customShader.constValues.size());
+                for (const auto& el : material->customShader.constValues) {
+                    constKeys.push_back(el.first);
+                }
+                std::sort(constKeys.begin(), constKeys.end());
+
+                std::ostringstream constKeyLog;
+                constKeyLog << "[";
+                for (size_t i = 0; i < constKeys.size(); ++i) {
+                    if (i > 0) {
+                        constKeyLog << ", ";
+                    }
+                    constKeyLog << constKeys[i];
+                }
+                constKeyLog << "]";
+                LOG_INFO("puppettexturechannels runtime const keys: count=%zu values=%s",
+                         constKeys.size(),
+                         constKeyLog.str().c_str());
+
+                const auto blendIt = material->customShader.constValues.find("g_BlendMap");
+                if (blendIt != material->customShader.constValues.end()) {
+                    std::ostringstream blendLog;
+                    blendLog << "[";
+                    const size_t valueCount = std::min<size_t>(blendIt->second.size(), 16);
+                    for (size_t i = 0; i < valueCount; ++i) {
+                        if (i > 0) {
+                            blendLog << ", ";
+                        }
+                        blendLog << blendIt->second[i];
+                    }
+                    if (blendIt->second.size() > valueCount) {
+                        blendLog << ", ...";
+                    }
+                    blendLog << "]";
+                    LOG_INFO("puppettexturechannels runtime g_BlendMap: count=%zu values=%s",
+                             blendIt->second.size(),
+                             blendLog.str().c_str());
+                } else {
+                    LOG_INFO("puppettexturechannels runtime g_BlendMap missing");
+                }
+            }
+
+            if (pNode->Mesh()->VertexCount() > 0) {
+                const auto& vertex = pNode->Mesh()->GetVertexArray(0);
+                const auto  attrs  = vertex.GetAttrOffsetMap();
+                const std::string positionAttrName(WE_IN_POSITION);
+                const std::string texcoordAttrName(WE_IN_TEXCOORD);
+                const std::string texcoordVec4AttrName(WE_IN_TEXCOORDVEC4);
+                const std::string blendIndexAttrName(WE_IN_BLENDINDICES);
+                if (shaderName == "puppettexturechannels") {
+                    std::vector<std::string> attrKeys;
+                    attrKeys.reserve(attrs.size());
+                    for (const auto& el : attrs) {
+                        attrKeys.push_back(el.first);
+                    }
+                    std::sort(attrKeys.begin(), attrKeys.end());
+
+                    std::ostringstream attrLog;
+                    attrLog << "[";
+                    for (size_t i = 0; i < attrKeys.size(); ++i) {
+                        if (i > 0) {
+                            attrLog << ", ";
+                        }
+                        const auto& attr = attrs.at(attrKeys[i]);
+                        attrLog << attrKeys[i]
+                                << "@"
+                                << attr.offset
+                                << "/"
+                                << static_cast<int>(SceneVertexArray::TypeCount(attr.attr.type));
+                    }
+                    attrLog << "]";
+                    LOG_INFO("puppettexturechannels runtime attrs: stride=%zu values=%s",
+                             vertex.OneSize(),
+                             attrLog.str().c_str());
+                }
+                if (exists(attrs, positionAttrName) && exists(attrs, texcoordAttrName)) {
+                    const auto& posAttr = attrs.at(positionAttrName);
+                    const auto& uvAttr  = attrs.at(texcoordAttrName);
+                    const size_t strideFloats = vertex.OneSize();
+                    const size_t posOffsetFloats = posAttr.offset / sizeof(float);
+                    const size_t uvOffsetFloats  = uvAttr.offset / sizeof(float);
+                    const float* raw = vertex.Data();
+                    const size_t vertexCount = vertex.VertexCount();
+
+                    std::array<float, 3> rawPosMin {
+                        std::numeric_limits<float>::infinity(),
+                        std::numeric_limits<float>::infinity(),
+                        std::numeric_limits<float>::infinity(),
+                    };
+                    std::array<float, 3> rawPosMax {
+                        -std::numeric_limits<float>::infinity(),
+                        -std::numeric_limits<float>::infinity(),
+                        -std::numeric_limits<float>::infinity(),
+                    };
+                    std::array<float, 2> rawUvMin {
+                        std::numeric_limits<float>::infinity(),
+                        std::numeric_limits<float>::infinity(),
+                    };
+                    std::array<float, 2> rawUvMax {
+                        -std::numeric_limits<float>::infinity(),
+                        -std::numeric_limits<float>::infinity(),
+                    };
+
+                    for (size_t vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex) {
+                        const float* posBase = raw + vertexIndex * strideFloats + posOffsetFloats;
+                        const float* uvBase  = raw + vertexIndex * strideFloats + uvOffsetFloats;
+                        for (size_t i = 0; i < 3; ++i) {
+                            rawPosMin[i] = std::min(rawPosMin[i], posBase[i]);
+                            rawPosMax[i] = std::max(rawPosMax[i], posBase[i]);
+                        }
+                        for (size_t i = 0; i < 2; ++i) {
+                            rawUvMin[i] = std::min(rawUvMin[i], uvBase[i]);
+                            rawUvMax[i] = std::max(rawUvMax[i], uvBase[i]);
+                        }
+                    }
+
+                    LOG_INFO("%s runtime mesh bounds: positions=%s texcoords=%s",
+                             shaderName.c_str(),
+                             FormatBounds(rawPosMin, rawPosMax).c_str(),
+                             FormatBounds(rawUvMin, rawUvMax).c_str());
+
+                    if (pNode->Mesh()->IndexCount() > 0) {
+                        std::vector<Eigen::Vector3f> rawPositions(vertexCount);
+                        for (size_t vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex) {
+                            const float* posBase = raw + vertexIndex * strideFloats + posOffsetFloats;
+                            rawPositions[vertexIndex] = Eigen::Vector3f(posBase[0], posBase[1], posBase[2]);
+                        }
+                        const TriangleStats rawStats =
+                            ComputeTriangleStats(rawPositions, pNode->Mesh()->GetIndexArray(0));
+                        LOG_INFO("%s runtime triangle stats: large=%zu maxWidth=%.1f maxHeight=%.1f maxDiagonal=%.1f",
+                                 shaderName.c_str(),
+                                 rawStats.largeCount,
+                                 rawStats.maxWidth,
+                                 rawStats.maxHeight,
+                                 rawStats.maxDiagonal);
+                    }
+                } else if (shaderName == "puppettexturechannels" &&
+                           exists(attrs, positionAttrName) &&
+                           exists(attrs, texcoordVec4AttrName)) {
+                    const auto& posAttr = attrs.at(positionAttrName);
+                    const auto& uv4Attr = attrs.at(texcoordVec4AttrName);
+                    const size_t strideFloats = vertex.OneSize();
+                    const size_t posOffsetFloats = posAttr.offset / sizeof(float);
+                    const size_t uv4OffsetFloats = uv4Attr.offset / sizeof(float);
+                    const float* raw = vertex.Data();
+                    const size_t vertexCount = vertex.VertexCount();
+
+                    std::array<float, 3> rawPosMin {
+                        std::numeric_limits<float>::infinity(),
+                        std::numeric_limits<float>::infinity(),
+                        std::numeric_limits<float>::infinity(),
+                    };
+                    std::array<float, 3> rawPosMax {
+                        -std::numeric_limits<float>::infinity(),
+                        -std::numeric_limits<float>::infinity(),
+                        -std::numeric_limits<float>::infinity(),
+                    };
+                    std::array<float, 2> blendUvMin {
+                        std::numeric_limits<float>::infinity(),
+                        std::numeric_limits<float>::infinity(),
+                    };
+                    std::array<float, 2> blendUvMax {
+                        -std::numeric_limits<float>::infinity(),
+                        -std::numeric_limits<float>::infinity(),
+                    };
+                    std::array<float, 2> baseUvMin {
+                        std::numeric_limits<float>::infinity(),
+                        std::numeric_limits<float>::infinity(),
+                    };
+                    std::array<float, 2> baseUvMax {
+                        -std::numeric_limits<float>::infinity(),
+                        -std::numeric_limits<float>::infinity(),
+                    };
+                    uint32_t minBlendIndex = std::numeric_limits<uint32_t>::max();
+                    uint32_t maxBlendIndex = 0;
+
+                    const bool hasBlendIndices = exists(attrs, blendIndexAttrName);
+                    const size_t blendIndexOffsetFloats =
+                        hasBlendIndices ? attrs.at(blendIndexAttrName).offset / sizeof(float) : 0;
+
+                    for (size_t vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex) {
+                        const float* posBase = raw + vertexIndex * strideFloats + posOffsetFloats;
+                        const float* uv4Base = raw + vertexIndex * strideFloats + uv4OffsetFloats;
+                        for (size_t i = 0; i < 3; ++i) {
+                            rawPosMin[i] = std::min(rawPosMin[i], posBase[i]);
+                            rawPosMax[i] = std::max(rawPosMax[i], posBase[i]);
+                        }
+                        for (size_t i = 0; i < 2; ++i) {
+                            blendUvMin[i] = std::min(blendUvMin[i], uv4Base[i]);
+                            blendUvMax[i] = std::max(blendUvMax[i], uv4Base[i]);
+                            baseUvMin[i] = std::min(baseUvMin[i], uv4Base[i + 2]);
+                            baseUvMax[i] = std::max(baseUvMax[i], uv4Base[i + 2]);
+                        }
+                        if (hasBlendIndices) {
+                            std::array<uint32_t, 4> blendIndices {};
+                            const float* indexBase =
+                                raw + vertexIndex * strideFloats + blendIndexOffsetFloats;
+                            memcpy(blendIndices.data(), indexBase, sizeof(blendIndices));
+                            minBlendIndex = std::min(minBlendIndex, blendIndices[0]);
+                            maxBlendIndex = std::max(maxBlendIndex, blendIndices[0]);
+                        }
+                    }
+
+                    LOG_INFO("puppettexturechannels runtime mesh bounds: positions=%s blendUV=%s baseUV=%s blendIndexRange=[%u,%u]",
+                             FormatBounds(rawPosMin, rawPosMax).c_str(),
+                             FormatBounds(blendUvMin, blendUvMax).c_str(),
+                             FormatBounds(baseUvMin, baseUvMax).c_str(),
+                             minBlendIndex == std::numeric_limits<uint32_t>::max() ? 0u : minBlendIndex,
+                             maxBlendIndex);
+
+                    if (pNode->Mesh()->IndexCount() > 0) {
+                        std::vector<Eigen::Vector3f> rawPositions(vertexCount);
+                        for (size_t vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex) {
+                            const float* posBase = raw + vertexIndex * strideFloats + posOffsetFloats;
+                            rawPositions[vertexIndex] = Eigen::Vector3f(posBase[0], posBase[1], posBase[2]);
+                        }
+                        const TriangleStats rawStats =
+                            ComputeTriangleStats(rawPositions, pNode->Mesh()->GetIndexArray(0));
+                        LOG_INFO("puppettexturechannels runtime triangle stats: large=%zu maxWidth=%.1f maxHeight=%.1f maxDiagonal=%.1f",
+                                 rawStats.largeCount,
+                                 rawStats.maxWidth,
+                                 rawStats.maxHeight,
+                                 rawStats.maxDiagonal);
+                    }
+                } else if (shaderName == "puppettexturechannels") {
+                    LOG_INFO("puppettexturechannels runtime mesh bounds unsupported attr layout: hasPosition=%d hasTexcoord=%d hasTexcoordVec4=%d hasBlendIndices=%d",
+                             exists(attrs, positionAttrName) ? 1 : 0,
+                             exists(attrs, texcoordAttrName) ? 1 : 0,
+                             exists(attrs, texcoordVec4AttrName) ? 1 : 0,
+                             exists(attrs, blendIndexAttrName) ? 1 : 0);
+                }
+            }
+            loggedDiagnosticNodes.insert(pNode);
+        }
+    }
+
     bool hasNodeData = exists(m_nodeDataMap, pNode);
     if (hasNodeData) {
         auto& nodeData = m_nodeDataMap.at(pNode);
@@ -261,6 +591,88 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprite
         }
         if (nodeData.puppet_layer.hasPuppet() && info.has_BONES) {
             auto data = nodeData.puppet_layer.genFrame(m_scene->frameTime);
+            if (material->customShader.shader &&
+                (material->customShader.shader->name == "genericimage4" ||
+                 material->customShader.shader->name == "puppettexturechannels")) {
+                const std::string shaderName = material->customShader.shader->name;
+                static std::unordered_set<const SceneNode*> loggedBoneUploads;
+                if (! loggedBoneUploads.count(pNode)) {
+                    const auto& vertex = pNode->Mesh()->GetVertexArray(0);
+                    const auto  attrs  = vertex.GetAttrOffsetMap();
+                    const std::string positionAttrName(WE_IN_POSITION);
+                    const std::string indexAttrName(WE_IN_BLENDINDICES);
+                    const std::string weightAttrName(WE_IN_BLENDWEIGHTS);
+                    if (exists(attrs, positionAttrName) &&
+                        exists(attrs, indexAttrName) &&
+                        exists(attrs, weightAttrName)) {
+                        const auto& posAttr = attrs.at(positionAttrName);
+                        const auto& indexAttr = attrs.at(indexAttrName);
+                        const auto& weightAttr = attrs.at(weightAttrName);
+                        const size_t strideFloats = vertex.OneSize();
+                        const size_t posOffsetFloats = posAttr.offset / sizeof(float);
+                        const size_t indexOffsetFloats = indexAttr.offset / sizeof(float);
+                        const size_t weightOffsetFloats = weightAttr.offset / sizeof(float);
+                        const float* raw = vertex.Data();
+                        const size_t vertexCount = vertex.VertexCount();
+
+                        std::array<float, 3> skinnedMin {
+                            std::numeric_limits<float>::infinity(),
+                            std::numeric_limits<float>::infinity(),
+                            std::numeric_limits<float>::infinity(),
+                        };
+                        std::array<float, 3> skinnedMax {
+                            -std::numeric_limits<float>::infinity(),
+                            -std::numeric_limits<float>::infinity(),
+                            -std::numeric_limits<float>::infinity(),
+                        };
+                        std::vector<Eigen::Vector3f> skinnedPositions(vertexCount);
+
+                        for (size_t vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex) {
+                            const float* posBase = raw + vertexIndex * strideFloats + posOffsetFloats;
+                            const float* indexBase = raw + vertexIndex * strideFloats + indexOffsetFloats;
+                            const float* weightBase = raw + vertexIndex * strideFloats + weightOffsetFloats;
+
+                            std::array<uint32_t, 4> blendIndices {};
+                            memcpy(blendIndices.data(), indexBase, sizeof(blendIndices));
+
+                            Eigen::Vector3f skinned = Eigen::Vector3f::Zero();
+                            const Eigen::Vector3f pos(posBase[0], posBase[1], posBase[2]);
+                            for (size_t i = 0; i < 4; ++i) {
+                                const float weight = weightBase[i];
+                                const size_t boneIndex = static_cast<size_t>(blendIndices[i]);
+                                if (weight <= 1.0e-6f || boneIndex >= data.size()) {
+                                    continue;
+                                }
+                                skinned += (data[boneIndex] * pos) * weight;
+                            }
+                            skinnedPositions[vertexIndex] = skinned;
+                            for (size_t i = 0; i < 3; ++i) {
+                                skinnedMin[i] = std::min(skinnedMin[i], skinned[i]);
+                                skinnedMax[i] = std::max(skinnedMax[i], skinned[i]);
+                            }
+                        }
+
+                        LOG_INFO("%s runtime skinned bounds: %s",
+                                 shaderName.c_str(),
+                                 FormatBounds(skinnedMin, skinnedMax).c_str());
+                        if (pNode->Mesh()->IndexCount() > 0) {
+                            const TriangleStats skinnedStats =
+                                ComputeTriangleStats(skinnedPositions, pNode->Mesh()->GetIndexArray(0));
+                            LOG_INFO("%s runtime skinned triangle stats: large=%zu maxWidth=%.1f maxHeight=%.1f maxDiagonal=%.1f",
+                                     shaderName.c_str(),
+                                     skinnedStats.largeCount,
+                                     skinnedStats.maxWidth,
+                                     skinnedStats.maxHeight,
+                                     skinnedStats.maxDiagonal);
+                        }
+                    }
+                    LOG_INFO("%s runtime uploading g_Bones: boneMatrices=%zu tex0=%s",
+                             shaderName.c_str(),
+                             data.size(),
+                             material->textures.empty() ? "" : material->textures.front().c_str());
+                    loggedBoneUploads.insert(pNode);
+                }
+            }
             updateOp(G_BONES, std::span<const float> { data[0].data(), data.size() * 16 });
         }
     }
@@ -287,17 +699,14 @@ void WPShaderValueUpdater::UpdateUniforms(SceneNode* pNode, sprite_map_t& sprite
         if (hasNodeData && cam_name != "effect") {
             const auto& nodeData = m_nodeDataMap.at(pNode);
             if (m_parallax.enable) {
-                Vector3f nodePos = pNode->Translate();
                 Vector2f depth(&nodeData.parallaxDepth[0]);
                 Vector2f ortho { (float)m_scene->ortho[0], (float)m_scene->ortho[1] };
-                // flip mouse y axis
+                // Wallpaper Engine parallax is a mouse-relative offset, not a permanent
+                // translation derived from the node's authored world position.
                 Vector2f mouseVec =
                     Scaling(1.0f, -1.0f) * (Vector2f { 0.5f, 0.5f } - Vector2f(&m_mousePos[0]));
-                mouseVec        = mouseVec.cwiseProduct(ortho) * m_parallax.mouseinfluence;
-                Vector3f camPos = camera->GetPosition().cast<float>();
-                Vector2f paraVec =
-                    (nodePos.head<2>() - camPos.head<2>() + mouseVec).cwiseProduct(depth) *
-                    m_parallax.amount;
+                mouseVec = mouseVec.cwiseProduct(ortho) * m_parallax.mouseinfluence;
+                Vector2f paraVec = mouseVec.cwiseProduct(depth) * m_parallax.amount;
                 modelTrans =
                     Affine3d(Translation3d(Vector3d(paraVec.x(), paraVec.y(), 0.0f))).matrix() *
                     modelTrans;

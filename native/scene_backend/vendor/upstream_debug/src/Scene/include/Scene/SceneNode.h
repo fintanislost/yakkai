@@ -32,8 +32,28 @@ public:
     void        SetCamera(const std::string& name) { m_cameraName = name; }
     void        AddMesh(std::shared_ptr<SceneMesh> mesh) { m_mesh = mesh; }
     void        AppendChild(std::shared_ptr<SceneNode> sub) {
+               if (! sub || sub.get() == this) return;
+               if (sub->m_parent == this) return;
+
+               if (sub->m_parent != nullptr) {
+                   auto& siblings = sub->m_parent->m_children;
+                   for (auto it = siblings.begin(); it != siblings.end(); ++it) {
+                       if (it->get() == sub.get()) {
+                           siblings.erase(it);
+                           break;
+                       }
+                   }
+               }
+
                sub->m_parent = this;
                m_children.push_back(sub);
+               sub->MarkTransDirty();
+    }
+    SceneNode* Parent() const { return m_parent; }
+    void       SetVirtualParent(SceneNode* parent) {
+               if (m_parent == parent) return;
+               m_parent = parent;
+               MarkTransDirty();
     }
     Eigen::Matrix4d GetLocalTrans() const;
 

@@ -14,6 +14,10 @@
 #include "vvk/vulkan_wrapper.hpp"
 
 #include <cstdio>
+#include <array>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <optional>
 
 using namespace wallpaper;
@@ -82,6 +86,58 @@ VkSamplerCreateInfo GenSamplerInfo(TextureKey key) {
                                        .borderColor      = VK_BORDER_COLOR_INT_OPAQUE_BLACK,
                                        .unnormalizedCoordinates = (false) };
     return sampler_info;
+}
+
+bool CreateReadbackBuffer(VmaAllocator allocator, std::size_t size,
+                          VmaBufferParameters& buffer) {
+    VkBufferCreateInfo ci {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .pNext = nullptr,
+        .size  = size,
+        .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+    };
+    buffer.req_size = ci.size;
+
+    VmaAllocationCreateInfo vma_info = {};
+    vma_info.usage                   = VMA_MEMORY_USAGE_CPU_ONLY;
+    VVK_CHECK_BOOL_RE(vvk::CreateBuffer(allocator, ci, vma_info, buffer.handle));
+    return true;
+}
+
+bool WriteTga(std::string_view path, std::span<const std::uint8_t> rgba, uint32_t width,
+              uint32_t height) {
+    std::filesystem::path outPath(path);
+    if (outPath.has_parent_path()) {
+        std::error_code ec;
+        std::filesystem::create_directories(outPath.parent_path(), ec);
+    }
+
+    std::ofstream out(outPath, std::ios::binary);
+    if (! out.is_open()) {
+        LOG_ERROR("debug dump open failed: %s", outPath.string().c_str());
+        return false;
+    }
+
+    std::array<std::uint8_t, 18> header {};
+    header[2]  = 2; // uncompressed true-color
+    header[12] = static_cast<std::uint8_t>(width & 0xffu);
+    header[13] = static_cast<std::uint8_t>((width >> 8u) & 0xffu);
+    header[14] = static_cast<std::uint8_t>(height & 0xffu);
+    header[15] = static_cast<std::uint8_t>((height >> 8u) & 0xffu);
+    header[16] = 32;
+    header[17] = 0x28; // top-left origin, 8 alpha bits
+    out.write(reinterpret_cast<const char*>(header.data()), static_cast<std::streamsize>(header.size()));
+
+    std::vector<std::uint8_t> bgra(rgba.size());
+    for (usize i = 0; i + 3 < rgba.size(); i += 4) {
+        bgra[i + 0] = rgba[i + 2];
+        bgra[i + 1] = rgba[i + 1];
+        bgra[i + 2] = rgba[i + 0];
+        bgra[i + 3] = rgba[i + 3];
+    }
+    out.write(reinterpret_cast<const char*>(bgra.data()),
+              static_cast<std::streamsize>(bgra.size()));
+    return out.good();
 }
 
 VkResult TransImgLayout(const vvk::Queue& queue, vvk::CommandBuffer& cmd,
@@ -623,6 +679,130 @@ void TextureCache::MarkShareReady(std::string_view key) {
         query->share_ready = true;
         m_query_map.erase(key.data());
     }
+}
+
+bool TextureCache::DumpTexture(std::string_view key, std::string_view path) {
+    QueryTex* query { nullptr };
+    if (exists(m_query_map, key)) {
+        query = m_query_map.at(std::string(key));
+    } else {
+        for (auto& candidate : m_query_texs) {
+            if (candidate == nullptr) continue;
+            if (candidate->query_keys.count(std::string(key)) == 0) continue;
+            query = candidate.get();
+            break;
+        }
+    }
+
+    if (query == nullptr) {
+        LOG_ERROR("debug dump texture not found in cache: %s", std::string(key).c_str());
+        return false;
+    }
+
+    const auto& image = query->image;
+    if (! image.handle || image.extent.width == 0 || image.extent.height == 0) {
+        LOG_ERROR("debug dump texture invalid: %s", std::string(key).c_str());
+        return false;
+    }
+
+    const std::size_t pixelBytes = static_cast<std::size_t>(image.extent.width) *
+                                   static_cast<std::size_t>(image.extent.height) * 4u;
+    VmaBufferParameters readbackBuffer;
+    if (! CreateReadbackBuffer(m_device.vma_allocator(), pixelBytes, readbackBuffer)) {
+        LOG_ERROR("debug dump buffer allocation failed: %s", std::string(key).c_str());
+        return false;
+    }
+    if (! m_tex_cmd) allocateCmd();
+
+    VkImageSubresourceRange subresourceRange {
+        .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel   = 0,
+        .levelCount     = 1,
+        .baseArrayLayer = 0,
+        .layerCount     = 1,
+    };
+    VkBufferImageCopy copyRegion {
+        .bufferOffset      = 0,
+        .bufferRowLength   = 0,
+        .bufferImageHeight = 0,
+        .imageSubresource =
+            VkImageSubresourceLayers {
+                .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+                .mipLevel       = 0,
+                .baseArrayLayer = 0,
+                .layerCount     = 1,
+            },
+        .imageOffset = { 0, 0, 0 },
+        .imageExtent = { image.extent.width, image.extent.height, 1 },
+    };
+
+    VVK_CHECK_BOOL_RE(m_tex_cmd.Begin(VkCommandBufferBeginInfo {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pNext = nullptr,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    }));
+    {
+        VkImageMemoryBarrier barrier {
+            .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .pNext            = nullptr,
+            .srcAccessMask    = VK_ACCESS_SHADER_READ_BIT,
+            .dstAccessMask    = VK_ACCESS_TRANSFER_READ_BIT,
+            .oldLayout        = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .newLayout        = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            .image            = *image.handle,
+            .subresourceRange = subresourceRange,
+        };
+        m_tex_cmd.PipelineBarrier(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                  VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                  VK_DEPENDENCY_BY_REGION_BIT,
+                                  barrier);
+    }
+    m_tex_cmd.CopyImageToBuffer(*image.handle,
+                                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                *readbackBuffer.handle,
+                                spanone<VkBufferImageCopy> { copyRegion });
+    {
+        VkImageMemoryBarrier barrier {
+            .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .pNext            = nullptr,
+            .srcAccessMask    = VK_ACCESS_TRANSFER_READ_BIT,
+            .dstAccessMask    = VK_ACCESS_SHADER_READ_BIT,
+            .oldLayout        = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            .newLayout        = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .image            = *image.handle,
+            .subresourceRange = subresourceRange,
+        };
+        m_tex_cmd.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                  VK_DEPENDENCY_BY_REGION_BIT,
+                                  barrier);
+    }
+    VVK_CHECK_BOOL_RE(m_tex_cmd.End());
+
+    VkSubmitInfo submitInfo {
+        .sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .pNext              = nullptr,
+        .commandBufferCount = 1,
+        .pCommandBuffers    = m_tex_cmd.address(),
+    };
+    VVK_CHECK_BOOL_RE(m_device.graphics_queue().handle.Submit(submitInfo));
+    VVK_CHECK_BOOL_RE(m_device.handle().WaitIdle());
+
+    std::vector<std::uint8_t> rgba(pixelBytes);
+    void* mapped { nullptr };
+    VVK_CHECK_BOOL_RE(readbackBuffer.handle.MapMemory(&mapped));
+    std::memcpy(rgba.data(), mapped, rgba.size());
+    readbackBuffer.handle.UnMapMemory();
+
+    const bool ok = WriteTga(path, rgba, image.extent.width, image.extent.height);
+    if (ok) {
+        LOG_INFO("debug dump texture wrote: key=%s path=%s size=%ux%u",
+                 std::string(key).c_str(),
+                 std::string(path).c_str(),
+                 image.extent.width,
+                 image.extent.height);
+    }
+    return ok;
 }
 
 void TextureCache::RecGenerateMipmaps(vvk::CommandBuffer& cmd, const ImageParameters& image) const {

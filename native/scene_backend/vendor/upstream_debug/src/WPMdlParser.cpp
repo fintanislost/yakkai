@@ -10,11 +10,23 @@
 #include "WPShaderParser.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 
 using namespace wallpaper;
 
 namespace
 {
+std::array<float, 2> DecodePackedUnorm16x2(uint32_t packed) {
+    const auto decode = [](uint16_t value) {
+        return static_cast<float>(value) / 65535.0f;
+    };
+
+    return {
+        decode(static_cast<uint16_t>(packed & 0xffffu)),
+        decode(static_cast<uint16_t>((packed >> 16) & 0xffffu)),
+    };
+}
 
 WPPuppet::PlayMode ToPlayMode(std::string_view m) {
     if (m == "loop" || m.empty()) return WPPuppet::PlayMode::Loop;
@@ -101,6 +113,232 @@ bool ReadIndicesBlock(fs::IBinaryStream& f, std::vector<std::array<uint16_t, 3>>
         for (auto& v : id) v = f.ReadUint16();
     }
     return true;
+}
+
+idx FindSectionOffset(fs::IBinaryStream&  f,
+                      std::string_view    prefix,
+                      idx                 start,
+                      int32_t&            version) {
+    version = 0;
+
+    if (f.Size() < 9) {
+        return -1;
+    }
+
+    const idx last = f.Size() - 9;
+    if (start < 0) {
+        start = 0;
+    }
+
+    for (idx pos = start; pos <= last; ++pos) {
+        if (! f.SeekSet(pos)) {
+            break;
+        }
+
+        const int32_t parsedVersion = ReadVersion(prefix, f);
+        if (parsedVersion != 0) {
+            version = parsedVersion;
+            return pos;
+        }
+    }
+
+    return -1;
+}
+
+bool SeekSection(fs::IBinaryStream& f, std::string_view prefix, int32_t& version) {
+    const idx start = f.Tell();
+    const idx pos   = FindSectionOffset(f, prefix, start, version);
+    if (pos < 0) {
+        f.SeekSet(start);
+        return false;
+    }
+    if (pos != start) {
+        LOG_INFO("mdl resynced %.*s section from %td to %td",
+                 static_cast<int>(prefix.size()),
+                 prefix.data(),
+                 start,
+                 pos);
+    }
+    f.SeekSet(pos + 9);
+    return true;
+}
+
+bool SeekNextModelSection(fs::IBinaryStream& f,
+                          idx                start,
+                          std::string&       type,
+                          int32_t&           version) {
+    int32_t mdatVersion = 0;
+    int32_t mdlaVersion = 0;
+    const idx mdatPos = FindSectionOffset(f, "MDAT", start, mdatVersion);
+    const idx mdlaPos = FindSectionOffset(f, "MDLA", start, mdlaVersion);
+
+    if (mdatPos < 0 && mdlaPos < 0) {
+        return false;
+    }
+
+    bool useMdat = false;
+    idx  pos     = -1;
+    if (mdatPos >= 0 && (mdlaPos < 0 || mdatPos < mdlaPos)) {
+        useMdat = true;
+        pos     = mdatPos;
+        version = mdatVersion;
+        type    = "MDAT";
+    } else {
+        pos     = mdlaPos;
+        version = mdlaVersion;
+        type    = "MDLA";
+    }
+
+    if (pos != start) {
+        LOG_INFO("mdl resynced %s section from %td to %td", type.c_str(), start, pos);
+    }
+    f.SeekSet(pos + 9);
+    return true;
+}
+
+bool ReadSectionAsciiString(fs::IBinaryStream& f,
+                            idx                section_end,
+                            std::string&       out,
+                            size_t             max_len = 128) {
+    out.clear();
+    while (f.Tell() < section_end) {
+        char c = '\0';
+        if (f.Read(&c, 1) != 1) {
+            return false;
+        }
+        if (c == '\0') {
+            return true;
+        }
+        const unsigned char uc = static_cast<unsigned char>(c);
+        if (uc < 0x20 || uc > 0x7e) {
+            return false;
+        }
+        out.push_back(c);
+        if (out.size() > max_len) {
+            return false;
+        }
+    }
+    return false;
+}
+
+bool IsLikelyPuppetAnimationHeader(fs::IBinaryStream& f,
+                                   idx                pos,
+                                   idx                section_end,
+                                   uint32_t           bone_count) {
+    const idx saved = f.Tell();
+    auto restore = [&]() {
+        f.SeekSet(saved);
+    };
+
+    constexpr idx min_header_size = 4 + 4 + 2 + 2 + 4 + 4 + 4 + 4;
+    if (pos < 0 || pos + min_header_size > section_end || ! f.SeekSet(pos)) {
+        restore();
+        return false;
+    }
+
+    const int32_t anim_id = f.ReadInt32();
+    if (anim_id <= 0 || anim_id > 1000000) {
+        restore();
+        return false;
+    }
+
+    const int32_t header_unk = f.ReadInt32();
+    if (header_unk < 0 || header_unk > 1024) {
+        restore();
+        return false;
+    }
+
+    std::string name;
+    if (! ReadSectionAsciiString(f, section_end, name) || name.empty()) {
+        restore();
+        return false;
+    }
+
+    std::string mode;
+    if (! ReadSectionAsciiString(f, section_end, mode, 16)
+        || (mode != "loop" && mode != "mirror" && mode != "single" && ! mode.empty())) {
+        restore();
+        return false;
+    }
+
+    const float fps = f.ReadFloat();
+    if (! std::isfinite(fps) || fps <= 0.0f || fps > 240.0f) {
+        restore();
+        return false;
+    }
+
+    const int32_t length = f.ReadInt32();
+    if (length <= 0 || length > 100000) {
+        restore();
+        return false;
+    }
+
+    const int32_t extra_unk = f.ReadInt32();
+    if (extra_unk < 0 || extra_unk > 1024) {
+        restore();
+        return false;
+    }
+
+    const uint32_t block_count = f.ReadUint32();
+    const uint32_t max_reasonable_blocks = std::max<uint32_t>(bone_count * 4, 64);
+    if (block_count == 0 || block_count > max_reasonable_blocks) {
+        restore();
+        return false;
+    }
+
+    for (uint32_t i = 0; i < block_count; ++i) {
+        if (f.Tell() + 8 > section_end) {
+            restore();
+            return false;
+        }
+
+        const int32_t bone_id = f.ReadInt32();
+        if (bone_id < 0 || static_cast<uint32_t>(bone_id) > max_reasonable_blocks) {
+            restore();
+            return false;
+        }
+
+        const uint32_t byte_size = f.ReadUint32();
+        if (byte_size == 0 || byte_size % singile_bone_frame != 0) {
+            restore();
+            return false;
+        }
+
+        const uint32_t frame_count = byte_size / singile_bone_frame;
+        if (frame_count < static_cast<uint32_t>(length) || frame_count > static_cast<uint32_t>(length + 2)) {
+            restore();
+            return false;
+        }
+
+        if (f.Tell() + static_cast<idx>(byte_size) > section_end || ! f.SeekCur(byte_size)) {
+            restore();
+            return false;
+        }
+    }
+
+    restore();
+    return true;
+}
+
+bool SeekNextPuppetAnimationHeader(fs::IBinaryStream& f,
+                                   idx                start,
+                                   idx                section_end,
+                                   uint32_t           bone_count) {
+    if (section_end <= start) {
+        return false;
+    }
+
+    for (idx pos = start; pos < section_end; ++pos) {
+        if (! IsLikelyPuppetAnimationHeader(f, pos, section_end, bone_count)) {
+            continue;
+        }
+
+        if (pos != start) {
+            LOG_INFO("mdl resynced MDLA animation header from %td to %td", start, pos);
+        }
+        return f.SeekSet(pos);
+    }
+    return false;
 }
 } // namespace
 
@@ -223,7 +461,13 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
     for (auto& vert : mdl.vertexs) {
         for (auto& v : vert.position) v = f.ReadFloat();
         if (vertex_format == MdlVertexFormat::AlternativeSkinned) {
-            for (int i = 0; i < 7; i++) f.ReadUint32();
+            f.ReadFloat();
+            f.ReadFloat();
+            f.ReadFloat();
+            f.ReadFloat();
+            vert.channelmap_texcoord = DecodePackedUnorm16x2(f.ReadUint32());
+            f.ReadUint32();
+            f.ReadUint32();
         }
         for (auto& v : vert.blend_indices) v = f.ReadUint32();
         for (auto& v : vert.weight) v = f.ReadFloat();
@@ -234,7 +478,10 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
         return false;
     }
 
-    mdl.mdls = ReadMDLVesion(f);
+    if (! SeekSection(f, "MDLS", mdl.mdls)) {
+        LOG_ERROR("mdl missing MDLS section: %s", str_path.c_str());
+        return false;
+    }
 
     size_t bones_file_end = f.ReadUint32();
     (void)bones_file_end;
@@ -259,7 +506,7 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
                       bone.parent,
                       i,
                       str_path.c_str());
-            return false;
+            bone.parent = 0xFFFFFFFFu;
         }
 
         uint32_t size = f.ReadUint32();
@@ -311,57 +558,51 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
         }
     }
 
-    // sometimes there can be one or more zero bytes and/or MDAT sections containing
-    // attachments before the MDLA section, so we need to skip them
-    std::string mdType = "";
-    std::string mdVersion;
-    
-    do {
-        std::string mdPrefix = f.ReadStr();
+    // there can be zero padding or unknown blocks between MDLS and MDLA. Walk
+    // forward to the next real section marker instead of assuming contiguous layout.
+    std::string mdType;
+    int32_t     mdVersion = 0;
+    idx         sectionSearchStart = f.Tell();
+    while (SeekNextModelSection(f, sectionSearchStart, mdType, mdVersion)) {
+        if (mdType == "MDAT") {
+            f.ReadUint32(); // skip 4 bytes
+            uint32_t num_attachments = f.ReadUint16(); // number of attachments in the MDAT section
 
-        // sometimes there can be other garbage in this gap, so we need to 
-        // skip over that as well
-        if(mdPrefix.length() == 8){
-            mdType = mdPrefix.substr(0, 4);
-            mdVersion = mdPrefix.substr(4, 4);
-
-            if(mdType == "MDAT"){
-                f.ReadUint32(); // skip 4 bytes
-                uint32_t num_attachments = f.ReadUint16(); // number of attachments in the MDAT section
-
-                for(int i = 0; i < num_attachments; i++){
-                    f.ReadUint16(); // skip 2 bytes
-                    std::string attachment_name = f.ReadStr(); // attachment name
-                    int bytesToRead = mdat_attachment_data_byte_length;
-                    for(int j = 0; j < bytesToRead; j++){
-                        f.ReadUint8();
-                    }
-
+            for (uint32_t i = 0; i < num_attachments; i++) {
+                f.ReadUint16(); // skip 2 bytes
+                std::string attachment_name = f.ReadStr(); // attachment name
+                (void)attachment_name;
+                for (uint32_t j = 0; j < mdat_attachment_data_byte_length; j++) {
+                    f.ReadUint8();
                 }
             }
+            sectionSearchStart = f.Tell();
+            continue;
         }
-    } while (mdType != "MDLA");
-    
 
-    if(mdType == "MDLA" && mdVersion.length() > 0){
-        mdl.mdla = std::stoi(mdVersion);
+        if (mdType == "MDLA") {
+            mdl.mdla = mdVersion;
+        }
+        break;
+    }
+
+    if (mdType == "MDLA" && mdl.mdla > 0) {
         if (mdl.mdla != 0) {
             uint end_size = f.ReadUint32();
-            (void)end_size;
+            idx mdla_section_end = f.Size();
+            if (end_size > 0 && end_size < static_cast<uint>(f.Size()) && end_size > static_cast<uint>(f.Tell())) {
+                mdla_section_end = static_cast<idx>(end_size + 1);
+            }
 
             uint anim_num = f.ReadUint32();
             anims.resize(anim_num);
             for (auto& anim : anims) {
-                // there can be a variable number of 32-bit 0s between animations
-                anim.id = 0;
-                while(anim.id == 0){
-                    anim.id = f.ReadInt32();
-                }
-    
-                if (anim.id <= 0) {
-                    LOG_ERROR("wrong anime id %d", anim.id);
+                if (! SeekNextPuppetAnimationHeader(f, f.Tell(), mdla_section_end, bones_num)) {
+                    LOG_ERROR("failed to locate puppet animation header starting from %td", f.Tell());
                     return false;
                 }
+
+                anim.id = f.ReadInt32();
                 f.ReadInt32();
                 anim.name   = f.ReadStr();
                 if(anim.name.empty()){
@@ -387,29 +628,6 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
                         for (auto& v : frame.position) v = f.ReadFloat();
                         for (auto& v : frame.angle) v = f.ReadFloat();
                         for (auto& v : frame.scale) v = f.ReadFloat();
-                    }
-                }
-                
-                // in the alternative MDL format there are 2 empty bytes followed
-                // by a variable number of 32-bit 0s between animations. We'll read
-                // the two bytes now so that the cursor is aligned to read through the
-                // 32-bit 0s in the next iteration
-                if(alt_mdl_format)
-                {
-                    f.ReadUint8();
-                    f.ReadUint8();    
-                }
-                else if(mdl.mdla == 3){
-                    // In MDLA version 3 there is an extra 8-bit zero between animations.
-                    // This will cause the parser to be misaligned moving forward if we don't handle it here.
-                    f.ReadUint8();
-                }
-                else{
-                    uint32_t unk_extra_uint = f.ReadUint32();
-                    for (uint i = 0; i < unk_extra_uint; i++) {
-                        f.ReadFloat();
-                        // data is like: {"$$hashKey":"object:2110","frame":1,"name":"random_anim"}
-                        std::string unk_extra = f.ReadStr();
                     }
                 }
             }
@@ -467,6 +685,330 @@ void WPMdlParser::GenPuppetMesh(SceneMesh& mesh,
 
 void WPMdlParser::GenPuppetMesh(SceneMesh& mesh, const WPMdl& mdl) {
     GenPuppetMesh(mesh, WPMdl::Submesh { mdl.mat_json_file, mdl.vertexs, mdl.indices }, Eigen::Matrix3f::Identity());
+}
+
+bool WPMdlParser::GenPuppetMesh(SceneMesh&                mesh,
+                                const WPMdl&              mdl,
+                                std::span<const uint32_t> activePrimaryBlendSlots,
+                                bool                      includeFullyActiveTriangles) {
+    auto buildFilteredSubmesh = [&](WPMdl::Submesh& outSubmesh) {
+        if (activePrimaryBlendSlots.empty()) {
+            return false;
+        }
+
+        std::array<bool, 64> activeSlotMask {};
+        for (const uint32_t slot : activePrimaryBlendSlots) {
+            activeSlotMask[std::min<size_t>(slot, activeSlotMask.size() - 1)] = true;
+        }
+
+        std::vector<uint32_t> remappedVertexIndices(mdl.vertexs.size(), std::numeric_limits<uint32_t>::max());
+        std::vector<WPMdl::Vertex> filteredVertices;
+        std::vector<std::array<uint16_t, 3>> filteredIndices;
+
+        auto hasMeaningfulActiveWeight = [&activeSlotMask](const WPMdl::Vertex& vertex) {
+            constexpr float kMinActiveBlendWeight = 0.5f;
+            float           activeWeight = 0.0f;
+            for (size_t i = 0; i < vertex.blend_indices.size() && i < vertex.weight.size(); ++i) {
+                const size_t slot = std::min<size_t>(vertex.blend_indices[i], activeSlotMask.size() - 1);
+                if (! activeSlotMask[slot]) {
+                    continue;
+                }
+                activeWeight += std::max(0.0f, vertex.weight[i]);
+            }
+            return activeWeight >= kMinActiveBlendWeight;
+        };
+
+        for (const auto& tri : mdl.indices) {
+            size_t activeVertexCount = 0;
+            for (const uint16_t vertexIndex : tri) {
+                if (vertexIndex < mdl.vertexs.size() &&
+                    hasMeaningfulActiveWeight(mdl.vertexs[vertexIndex])) {
+                    activeVertexCount++;
+                }
+            }
+            const bool isOverlayTriangle = activeVertexCount >= 2;
+            const bool keepTriangle = includeFullyActiveTriangles ? isOverlayTriangle : ! isOverlayTriangle;
+            if (! keepTriangle) {
+                continue;
+            }
+
+            std::array<uint16_t, 3> remappedTri {};
+            bool                    triValid = true;
+            for (size_t corner = 0; corner < tri.size(); ++corner) {
+                const uint16_t sourceIndex = tri[corner];
+                if (sourceIndex >= mdl.vertexs.size()) {
+                    triValid = false;
+                    break;
+                }
+
+                uint32_t& remappedIndex = remappedVertexIndices[sourceIndex];
+                if (remappedIndex == std::numeric_limits<uint32_t>::max()) {
+                    remappedIndex = static_cast<uint32_t>(filteredVertices.size());
+                    filteredVertices.push_back(mdl.vertexs[sourceIndex]);
+                }
+                if (remappedIndex > std::numeric_limits<uint16_t>::max()) {
+                    triValid = false;
+                    break;
+                }
+                remappedTri[corner] = static_cast<uint16_t>(remappedIndex);
+            }
+
+            if (triValid) {
+                filteredIndices.push_back(remappedTri);
+            }
+        }
+
+        if (filteredVertices.empty() || filteredIndices.empty()) {
+            return false;
+        }
+
+        outSubmesh =
+            WPMdl::Submesh { mdl.mat_json_file, std::move(filteredVertices), std::move(filteredIndices) };
+        return true;
+    };
+
+    WPMdl::Submesh filteredSubmesh;
+    if (! buildFilteredSubmesh(filteredSubmesh)) {
+        GenPuppetMesh(mesh, mdl);
+        return activePrimaryBlendSlots.empty();
+    }
+
+    GenPuppetMesh(mesh, filteredSubmesh, Eigen::Matrix3f::Identity());
+    return true;
+}
+
+void WPMdlParser::GenPuppetImageSpaceMesh(SceneMesh&                  mesh,
+                                          const WPMdl&                mdl,
+                                          const std::array<float, 2>& imageSize) {
+    SceneVertexArray vertex({ { WE_IN_POSITION.data(), VertexType::FLOAT3 },
+                              { WE_IN_BLENDINDICES.data(), VertexType::UINT4 },
+                              { WE_IN_BLENDWEIGHTS.data(), VertexType::FLOAT4 },
+                              { WE_IN_TEXCOORD.data(), VertexType::FLOAT2 } },
+                            mdl.vertexs.size());
+
+    const float width = std::max(imageSize[0], 1.0f);
+    const float height = std::max(imageSize[1], 1.0f);
+
+    std::array<float, 16> one_vert {};
+    for (uint i = 0; i < mdl.vertexs.size(); i++) {
+        auto v = mdl.vertexs[i];
+
+        const std::array<float, 2> image_texcoord {
+            (v.position[0] + width * 0.5f) / width,
+            1.0f - ((v.position[1] + height * 0.5f) / height),
+        };
+
+        std::fill(one_vert.begin(), one_vert.end(), 0.0f);
+        memcpy(one_vert.data() + 4 * 0, v.position.data(), sizeof(v.position));
+        memcpy(one_vert.data() + 4 * 1, v.blend_indices.data(), sizeof(v.blend_indices));
+        memcpy(one_vert.data() + 4 * 2, v.weight.data(), sizeof(v.weight));
+        memcpy(one_vert.data() + 4 * 3, image_texcoord.data(), sizeof(image_texcoord));
+        vertex.SetVertexs(i, one_vert);
+    }
+
+    std::vector<uint32_t> indices;
+    size_t                u16_count = mdl.indices.size() * 3;
+    indices.resize(u16_count / 2 + 1);
+    memcpy(indices.data(), mdl.indices.data(), u16_count * sizeof(uint16_t));
+
+    mesh.AddVertexArray(std::move(vertex));
+    mesh.AddIndexArray(SceneIndexArray(indices));
+}
+
+bool WPMdlParser::GenPuppetImageSpaceMesh(SceneMesh&                  mesh,
+                                          const WPMdl&                mdl,
+                                          const std::array<float, 2>& imageSize,
+                                          std::span<const uint32_t>   activePrimaryBlendSlots,
+                                          bool                        includeFullyActiveTriangles) {
+    auto buildFilteredSubmesh = [&](WPMdl::Submesh& outSubmesh) {
+        if (activePrimaryBlendSlots.empty()) {
+            return false;
+        }
+
+        std::array<bool, 64> activeSlotMask {};
+        for (const uint32_t slot : activePrimaryBlendSlots) {
+            activeSlotMask[std::min<size_t>(slot, activeSlotMask.size() - 1)] = true;
+        }
+
+        std::vector<uint32_t> remappedVertexIndices(mdl.vertexs.size(), std::numeric_limits<uint32_t>::max());
+        std::vector<WPMdl::Vertex> filteredVertices;
+        std::vector<std::array<uint16_t, 3>> filteredIndices;
+
+        auto hasMeaningfulActiveWeight = [&activeSlotMask](const WPMdl::Vertex& vertex) {
+            constexpr float kMinActiveBlendWeight = 0.5f;
+            float           activeWeight = 0.0f;
+            for (size_t i = 0; i < vertex.blend_indices.size() && i < vertex.weight.size(); ++i) {
+                const size_t slot = std::min<size_t>(vertex.blend_indices[i], activeSlotMask.size() - 1);
+                if (! activeSlotMask[slot]) {
+                    continue;
+                }
+                activeWeight += std::max(0.0f, vertex.weight[i]);
+            }
+            return activeWeight >= kMinActiveBlendWeight;
+        };
+
+        for (const auto& tri : mdl.indices) {
+            size_t activeVertexCount = 0;
+            for (const uint16_t vertexIndex : tri) {
+                if (vertexIndex < mdl.vertexs.size() &&
+                    hasMeaningfulActiveWeight(mdl.vertexs[vertexIndex])) {
+                    activeVertexCount++;
+                }
+            }
+            const bool isOverlayTriangle = activeVertexCount >= 2;
+            const bool keepTriangle = includeFullyActiveTriangles ? isOverlayTriangle : ! isOverlayTriangle;
+            if (! keepTriangle) {
+                continue;
+            }
+
+            std::array<uint16_t, 3> remappedTri {};
+            bool                    triValid = true;
+            for (size_t corner = 0; corner < tri.size(); ++corner) {
+                const uint16_t sourceIndex = tri[corner];
+                if (sourceIndex >= mdl.vertexs.size()) {
+                    triValid = false;
+                    break;
+                }
+
+                uint32_t& remappedIndex = remappedVertexIndices[sourceIndex];
+                if (remappedIndex == std::numeric_limits<uint32_t>::max()) {
+                    remappedIndex = static_cast<uint32_t>(filteredVertices.size());
+                    filteredVertices.push_back(mdl.vertexs[sourceIndex]);
+                }
+                if (remappedIndex > std::numeric_limits<uint16_t>::max()) {
+                    triValid = false;
+                    break;
+                }
+                remappedTri[corner] = static_cast<uint16_t>(remappedIndex);
+            }
+
+            if (triValid) {
+                filteredIndices.push_back(remappedTri);
+            }
+        }
+
+        if (filteredVertices.empty() || filteredIndices.empty()) {
+            return false;
+        }
+
+        outSubmesh =
+            WPMdl::Submesh { mdl.mat_json_file, std::move(filteredVertices), std::move(filteredIndices) };
+        return true;
+    };
+
+    WPMdl::Submesh filteredSubmesh;
+    if (! buildFilteredSubmesh(filteredSubmesh)) {
+        GenPuppetImageSpaceMesh(mesh, mdl, imageSize);
+        return activePrimaryBlendSlots.empty();
+    }
+
+    WPMdl filteredMdl = mdl;
+    filteredMdl.vertexs = std::move(filteredSubmesh.vertexs);
+    filteredMdl.indices = std::move(filteredSubmesh.indices);
+    GenPuppetImageSpaceMesh(mesh, filteredMdl, imageSize);
+    return true;
+}
+
+void WPMdlParser::GenPuppetChannelMapMesh(SceneMesh& mesh, const WPMdl& mdl) {
+    GenPuppetChannelMapMesh(mesh, mdl, {});
+}
+
+void WPMdlParser::GenPuppetChannelMapBaseUvMesh(SceneMesh&                  mesh,
+                                                const WPMdl&                mdl,
+                                                const std::array<float, 2>& imageSize) {
+    SceneVertexArray vertex({ { WE_IN_POSITION.data(), VertexType::FLOAT3 },
+                              { WE_IN_BLENDINDICES.data(), VertexType::UINT4 },
+                              { WE_IN_BLENDWEIGHTS.data(), VertexType::FLOAT4 },
+                              { WE_IN_TEXCOORDVEC4.data(), VertexType::FLOAT4 } },
+                            mdl.vertexs.size());
+
+    const float width = std::max(imageSize[0], 1.0f);
+    const float height = std::max(imageSize[1], 1.0f);
+
+    std::array<float, 16> one_vert {};
+    for (uint i = 0; i < mdl.vertexs.size(); i++) {
+        const auto& in = mdl.vertexs[i];
+        const std::array<float, 3> uv_space_position {
+            (in.texcoord[0] - 0.5f) * width,
+            (0.5f - in.texcoord[1]) * height,
+            0.0f,
+        };
+        const std::array<float, 4> texcoord_vec4 {
+            in.channelmap_texcoord[0],
+            in.channelmap_texcoord[1],
+            in.texcoord[0],
+            in.texcoord[1],
+        };
+
+        std::fill(one_vert.begin(), one_vert.end(), 0.0f);
+        memcpy(one_vert.data() + 4 * 0, uv_space_position.data(), sizeof(uv_space_position));
+        memcpy(one_vert.data() + 4 * 1, in.blend_indices.data(), sizeof(in.blend_indices));
+        memcpy(one_vert.data() + 4 * 2, in.weight.data(), sizeof(in.weight));
+        memcpy(one_vert.data() + 4 * 3, texcoord_vec4.data(), sizeof(texcoord_vec4));
+        vertex.SetVertexs(i, one_vert);
+    }
+
+    std::vector<uint32_t> indices;
+    size_t                u16_count = mdl.indices.size() * 3;
+    indices.resize(u16_count / 2 + 1);
+    memcpy(indices.data(), mdl.indices.data(), u16_count * sizeof(uint16_t));
+
+    mesh.AddVertexArray(std::move(vertex));
+    mesh.AddIndexArray(SceneIndexArray(indices));
+}
+
+void WPMdlParser::GenPuppetChannelMapMesh(SceneMesh&                       mesh,
+                                          const WPMdl&                     mdl,
+                                          std::span<const Eigen::Affine3f> bone_affines) {
+    SceneVertexArray vertex({ { WE_IN_POSITION.data(), VertexType::FLOAT3 },
+                              { WE_IN_BLENDINDICES.data(), VertexType::UINT4 },
+                              { WE_IN_BLENDWEIGHTS.data(), VertexType::FLOAT4 },
+                              { WE_IN_TEXCOORDVEC4.data(), VertexType::FLOAT4 } },
+                            mdl.vertexs.size());
+
+    std::array<float, 16> one_vert {};
+    for (uint i = 0; i < mdl.vertexs.size(); i++) {
+        auto        in = mdl.vertexs[i];
+        const std::array<float, 4> texcoord_vec4 {
+            in.channelmap_texcoord[0],
+            in.channelmap_texcoord[1],
+            in.texcoord[0],
+            in.texcoord[1],
+        };
+
+        if (! bone_affines.empty()) {
+            Eigen::Vector3f skinned = Eigen::Vector3f::Zero();
+            float           totalWeight = 0.0f;
+            for (usize j = 0; j < in.weight.size(); ++j) {
+                const float weight = in.weight[j];
+                const usize boneIndex = static_cast<usize>(in.blend_indices[j]);
+                if (weight <= 1.0e-6f || boneIndex >= bone_affines.size()) {
+                    continue;
+                }
+                skinned += (bone_affines[boneIndex] * Eigen::Vector3f(in.position.data())) * weight;
+                totalWeight += weight;
+            }
+            if (totalWeight > 1.0e-6f) {
+                skinned /= totalWeight;
+                std::copy_n(skinned.data(), 3, in.position.begin());
+            }
+        }
+
+        std::fill(one_vert.begin(), one_vert.end(), 0.0f);
+        memcpy(one_vert.data() + 4 * 0, in.position.data(), sizeof(in.position));
+        memcpy(one_vert.data() + 4 * 1, in.blend_indices.data(), sizeof(in.blend_indices));
+        memcpy(one_vert.data() + 4 * 2, in.weight.data(), sizeof(in.weight));
+        memcpy(one_vert.data() + 4 * 3, texcoord_vec4.data(), sizeof(texcoord_vec4));
+        vertex.SetVertexs(i, one_vert);
+    }
+
+    std::vector<uint32_t> indices;
+    size_t                u16_count = mdl.indices.size() * 3;
+    indices.resize(u16_count / 2 + 1);
+    memcpy(indices.data(), mdl.indices.data(), u16_count * sizeof(uint16_t));
+
+    mesh.AddVertexArray(std::move(vertex));
+    mesh.AddIndexArray(SceneIndexArray(indices));
 }
 
 void WPMdlParser::GenStaticMesh(SceneMesh& mesh,

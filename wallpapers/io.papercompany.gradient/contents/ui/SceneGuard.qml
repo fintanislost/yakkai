@@ -12,6 +12,7 @@ Item {
     property string logPrefix: "[Paper Gradient]"
     property url sceneSource: ""
     property string sceneSourceKind: ""
+    property string scenePropertiesJson: "{}"
     property string projectTitle: ""
     property string assetsPath: ""
     property string emptyMessage: qsTr("Select a Wallpaper Engine scene wallpaper in the wallpaper settings.")
@@ -23,6 +24,7 @@ Item {
     property string pendingRestartReason: ""
     property url runtimeSceneSource: ""
     property string runtimeAssetsPath: ""
+    property string runtimeScenePropertiesJson: "{}"
     property int runtimeFillModeValue: 0
     property bool runtimeMouseInputEnabled: false
 
@@ -40,6 +42,7 @@ Item {
     function syncRuntimeInputs() {
         runtimeSceneSource = sceneSource
         runtimeAssetsPath = assetsPath
+        runtimeScenePropertiesJson = scenePropertiesJson
         runtimeFillModeValue = fillModeValue
         runtimeMouseInputEnabled = mouseInputEnabled
     }
@@ -88,6 +91,10 @@ Item {
         }
     }
     onExperimentalEnabledChanged: log("scene guard experimentalEnabled=" + experimentalEnabled)
+    onScenePropertiesJsonChanged: {
+        log("scene guard scenePropertiesJson length=" + String(scenePropertiesJson).length)
+        scheduleRuntimeRestartIfReady("scenePropertiesJsonChanged")
+    }
     onMouseInputEnabledChanged: {
         log("scene guard mouseInputEnabled=" + mouseInputEnabled)
         scheduleRuntimeRestartIfReady("mouseInputEnabledChanged")
@@ -147,6 +154,7 @@ Item {
             logPrefix: root.logPrefix
             sceneSource: root.runtimeSceneSource
             assetsPath: root.runtimeAssetsPath
+            scenePropertiesJson: root.runtimeScenePropertiesJson
             fillModeValue: root.runtimeFillModeValue
             muted: root.muted
             mouseInputEnabled: root.runtimeMouseInputEnabled

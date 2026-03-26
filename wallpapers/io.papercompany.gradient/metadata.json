@@ -7,6 +7,9 @@
                 "Name": "Papercompany"
             }
         ],
+        "ServiceTypes": [
+            "Plasma/Wallpaper"
+        ],
         "Description": "A configurable gradient, local video, and Wallpaper Engine media wallpaper for KDE Plasma 6",
         "Icon": "preferences-desktop-wallpaper",
         "Id": "io.papercompany.gradient",
@@ -14,5 +17,6 @@
         "Name": "Paper Gradient",
         "Version": "0.9.0"
     },
-    "X-KDE-ParentApp": "org.kde.plasmashell"
+    "X-KDE-ParentApp": "org.kde.plasmashell",
+    "X-Plasma-MainScript": "ui/main.qml"
 }

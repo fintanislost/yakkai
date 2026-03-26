@@ -1,8 +1,102 @@
 #include "WPImageObject.h"
 #include "Utils/Logging.h"
 #include "Fs/VFS.h"
+#include "Core/StringHelper.hpp"
 
 using namespace wallpaper::wpscene;
+
+namespace
+{
+bool StringContainsAnyToken(std::string_view value,
+                            std::initializer_list<std::string_view> tokens) {
+    for (std::string_view token : tokens) {
+        if (value.find(token) != std::string_view::npos) return true;
+    }
+    return false;
+}
+
+bool IsUtilityUiImagePath(std::string_view path) {
+    return path == "models/util/solidlayer.json" || path == "models/util/projectlayer.json" ||
+           path == "models/util/fullscreenlayer.json" || wallpaper::sstart_with(path, "models/workshop/");
+}
+
+bool PropertyRequiresUnsupportedMediaIntegrationRuntime(const nlohmann::json& value) {
+    if (! value.is_object()) return false;
+
+    auto scriptIt = value.find("script");
+    if (scriptIt != value.end() && scriptIt->is_string()) {
+        const auto& script = scriptIt->get_ref<const std::string&>();
+        if (StringContainsAnyToken(script,
+                                   {
+                                       "shared.mi",
+                                       "mediaintegration",
+                                       "MediaPlaybackEvent",
+                                       "mediaThumbnailChanged",
+                                       "mediaTimelineChanged",
+                                       "mediaPlaybackChanged",
+                                       "cursorClick",
+                                       "localStorage",
+                                       "getTextureAnimation(",
+                                   })) {
+            return true;
+        }
+    }
+
+    auto userIt = value.find("user");
+    if (userIt != value.end() && userIt->is_string()) {
+        const auto& user = userIt->get_ref<const std::string&>();
+        if (wallpaper::sstart_with(user, "mediaintegration")) return true;
+    }
+
+    return false;
+}
+
+bool JsonRequiresUnsupportedMediaIntegrationRuntime(const nlohmann::json& value) {
+    if (PropertyRequiresUnsupportedMediaIntegrationRuntime(value)) {
+        return true;
+    }
+
+    if (value.is_object()) {
+        for (const auto& item : value.items()) {
+            if (JsonRequiresUnsupportedMediaIntegrationRuntime(item.value())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    if (value.is_array()) {
+        for (const auto& item : value) {
+            if (JsonRequiresUnsupportedMediaIntegrationRuntime(item)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    if (value.is_string()) {
+        const auto& str = value.get_ref<const std::string&>();
+        return StringContainsAnyToken(str,
+                                      {
+                                          "$mediaThumbnail",
+                                          "$mediaPreviousThumbnail",
+                                          "MediaPlaybackEvent",
+                                          "mediaThumbnailChanged",
+                                          "mediaTimelineChanged",
+                                          "mediaPlaybackChanged",
+                                          "shared.mi",
+                                      });
+    }
+
+    return false;
+}
+
+bool RequiresUnsupportedMediaIntegrationRuntime(const nlohmann::json& json, std::string_view imagePath) {
+    if (! IsUtilityUiImagePath(imagePath)) return false;
+
+    return JsonRequiresUnsupportedMediaIntegrationRuntime(json);
+}
+} // namespace
 
 
 bool WPEffectCommand::FromJson(const nlohmann::json& json) {
@@ -146,7 +240,16 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
     GET_JSON_NAME_VALUE_NOWARN(jImage, "fullscreen", fullscreen);
 	GET_JSON_NAME_VALUE_NOWARN(json, "name", name);
 	GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
+	GET_JSON_NAME_VALUE_NOWARN(json, "parent", parent);
 	GET_JSON_NAME_VALUE_NOWARN(json, "colorBlendMode", colorBlendMode);
+    if (RequiresUnsupportedMediaIntegrationRuntime(json, image)) {
+        visible = false;
+        LOG_INFO("suppressing unsupported media integration image layer: name=%s id=%d image=%s",
+                 name.c_str(),
+                 id,
+                 image.c_str());
+        return true;
+    }
 	if(!fullscreen) {
 		GET_JSON_NAME_VALUE(json, "origin", origin);	
 		GET_JSON_NAME_VALUE(json, "angles", angles);	
@@ -193,6 +296,7 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
         for(const auto& jLayer:json.at("animationlayers")) {
              WPPuppetLayer::AnimationLayer layer;
              GET_JSON_NAME_VALUE(jLayer, "animation", layer.id);
+             GET_JSON_NAME_VALUE_NOWARN(jLayer, "name", layer.name);
              GET_JSON_NAME_VALUE(jLayer, "blend", layer.blend);
              GET_JSON_NAME_VALUE(jLayer, "rate", layer.rate);
              GET_JSON_NAME_VALUE_NOWARN(jLayer, "visible", layer.visible);

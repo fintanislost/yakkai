@@ -1,5 +1,6 @@
 #pragma once
 #include <unordered_map>
+#include <vector>
 
 #include "SceneTexture.h"
 #include "SceneRenderTarget.h"
@@ -20,6 +21,13 @@ class VFS;
 }
 class Scene : NoCopy, NoMove {
 public:
+    struct DebugRenderDump {
+        std::string label;
+        std::string renderTarget;
+        std::string path;
+        bool        completed { false };
+    };
+
     Scene();
     ~Scene();
 
@@ -39,6 +47,7 @@ public:
     std::string scene_id { "unknown_id" };
 
     bool first_frame_ok { false };
+    std::vector<DebugRenderDump> debugRenderDumps;
 
     SceneMesh default_effect_mesh;
 

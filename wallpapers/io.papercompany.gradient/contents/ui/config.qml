@@ -59,6 +59,7 @@ Kirigami.FormLayout {
     property string cfg_WESceneProjectTitle
     property string cfg_WESceneSource
     property string cfg_WESceneSourceKind
+    property string cfg_WEScenePropertiesJson
     property bool cfg_WESceneExperimentalEnabled
     property bool cfg_WESceneMouseInput
 
@@ -193,6 +194,7 @@ Kirigami.FormLayout {
             root.cfg_WESceneProjectTitle = ""
             root.cfg_WESceneSource = ""
             root.cfg_WESceneSourceKind = ""
+            root.cfg_WEScenePropertiesJson = ""
         } else {
             root.cfg_WEVideoProjectPath = ""
             root.cfg_WEVideoProjectTitle = ""
@@ -222,6 +224,7 @@ Kirigami.FormLayout {
             root.cfg_WESceneProjectTitle = item.title
             root.cfg_WESceneSource = item.sourcePath
             root.cfg_WESceneSourceKind = item.sourceKind ?? ""
+            root.cfg_WEScenePropertiesJson = item.propertiesJson ?? "{}"
             return
         }
 

@@ -17,6 +17,7 @@ class SceneObject : public QQuickItem {
     Q_OBJECT
     Q_PROPERTY(QUrl source READ source WRITE setSource NOTIFY sourceChanged)
     Q_PROPERTY(QUrl assets READ assets WRITE setAssets)
+    Q_PROPERTY(QString scenePropertiesJson READ scenePropertiesJson WRITE setScenePropertiesJson NOTIFY scenePropertiesJsonChanged)
     Q_PROPERTY(int fps READ fps WRITE setFps NOTIFY fpsChanged)
     Q_PROPERTY(int fillMode READ fillMode WRITE setFillMode NOTIFY fillModeChanged)
     Q_PROPERTY(float speed READ speed WRITE setSpeed NOTIFY speedChanged)
@@ -36,8 +37,10 @@ public:
 
     QUrl source() const;
     QUrl assets() const;
+    QString scenePropertiesJson() const;
     void setSource(const QUrl& source);
     void setAssets(const QUrl& assets);
+    void setScenePropertiesJson(const QString& value);
 
     int   fps() const;
     int   fillMode() const;
@@ -71,6 +74,7 @@ public slots:
 
 signals:
     void sourceChanged();
+    void scenePropertiesJsonChanged();
     void fpsChanged();
     void fillModeChanged();
     void speedChanged();
@@ -80,6 +84,7 @@ signals:
 private:
     QUrl m_source;
     QUrl m_assets;
+    QString m_scenePropertiesJson;
 
     int   m_fps { 15 };
     int   m_fillMode { FillMode::ASPECTCROP };

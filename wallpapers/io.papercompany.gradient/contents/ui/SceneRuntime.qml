@@ -14,6 +14,7 @@ Item {
     property string logPrefix: "[Paper Gradient]"
     property url sceneSource: ""
     property string assetsPath: ""
+    property string scenePropertiesJson: "{}"
     property int fillModeValue: 0
     property bool muted: true
     property bool mouseInputEnabled: false
@@ -118,6 +119,7 @@ Item {
         log("scene runtime sceneSource=" + String(sceneSource))
     }
     onAssetsPathChanged: log("scene runtime assetsPath=" + assetsPath)
+    onScenePropertiesJsonChanged: log("scene runtime scenePropertiesJson length=" + String(scenePropertiesJson).length)
     onMutedChanged: log("scene runtime muted=" + muted)
     onFillModeValueChanged: applyFillMode()
     onMouseInputEnabledChanged: applyMouseInput()
@@ -154,6 +156,7 @@ Item {
         anchors.fill: parent
         source: root.sceneSource
         assets: root.assetsUrl(root.assetsPath)
+        scenePropertiesJson: root.scenePropertiesJson
         fillMode: PaperSceneModule.PaperSceneViewer.AspectCrop
         fps: 30
         speed: 1.0

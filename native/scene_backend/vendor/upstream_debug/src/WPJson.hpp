@@ -39,4 +39,7 @@ GetJsonValue(const char* file, const char* func, int line, const nlohmann::json&
 
 bool ParseJson(const char* file, const char* func, int line, const std::string& source,
                nlohmann::json& result);
+
+void SetActiveScenePropertyState(const nlohmann::json& properties);
+void ClearActiveScenePropertyState();
 } // namespace wallpaper

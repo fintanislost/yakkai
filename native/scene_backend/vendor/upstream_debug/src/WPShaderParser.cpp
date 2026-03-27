@@ -31,6 +31,7 @@ namespace
 static constexpr const char* pre_shader_code = R"(#version 150
 #extension GL_EXT_spec_constant_composites : enable
 #define GLSL 1
+#define HLSL 1
 #define highp
 
 #define CAST2(x) (vec2(x))

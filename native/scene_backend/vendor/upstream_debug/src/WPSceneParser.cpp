@@ -2259,14 +2259,6 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                  wpimgobj.name.c_str(), wpimgobj.id);
         return;
     }
-    // Skip solidlayer effect overlays (audio bars, visualizers) — the effect
-    // chain produces visible artifacts without audio data, and the screen-space
-    // UV sampling has a Y-flip issue in the Vulkan renderer.
-    if (wpimgobj.image == "models/util/solidlayer.json" && ! wpimgobj.effects.empty()) {
-        LOG_INFO("skipping solidlayer effect overlay: name=%s id=%d effects=%zu",
-                 wpimgobj.name.c_str(), wpimgobj.id, wpimgobj.effects.size());
-        return;
-    }
     if (DebugSkipLayerByName(wpimgobj.name)) {
         LOG_INFO("debug skipping image layer: name=%s id=%d image=%s",
                  wpimgobj.name.c_str(),

@@ -13,6 +13,7 @@
 #include "Vulkan/ShaderComp.hpp"
 
 #include <regex>
+#include <fstream>
 #include <stack>
 #include <charconv>
 #include <string>
@@ -28,6 +29,7 @@ namespace
 {
 
 static constexpr const char* pre_shader_code = R"(#version 150
+#extension GL_EXT_spec_constant_composites : enable
 #define GLSL 1
 #define highp
 
@@ -45,8 +47,6 @@ static constexpr const char* pre_shader_code = R"(#version 150
 #define ddx dFdx
 #define ddy(x) dFdy(-(x))
 #define saturate(x) (clamp(x, 0.0, 1.0))
-
-#define max(x, y) max(y, x)
 
 #define float1 float
 #define float2 vec2
@@ -288,6 +288,36 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
         src = std::regex_replace(src, re_require, "$1//#require $2$3");
     }
 
+    // Fix unbalanced #if/#endif — some workshop shaders have extra #endif
+    // that WE's preprocessor ignores but glslang rejects.
+    {
+        int depth = 0;
+        std::string::size_type pos = 0;
+        while (pos < src.size()) {
+            auto lineEnd = src.find('\n', pos);
+            if (lineEnd == std::string::npos) lineEnd = src.size();
+            auto line = src.substr(pos, lineEnd - pos);
+            // Trim leading whitespace for directive detection
+            auto trimmed = line.find_first_not_of(" \t");
+            if (trimmed != std::string::npos) {
+                auto directive = line.substr(trimmed);
+                if (directive.compare(0, 3, "#if") == 0 &&
+                    (directive.size() <= 3 || directive[3] == ' ' || directive[3] == 'd' || directive[3] == 'n')) {
+                    depth++;
+                } else if (directive.compare(0, 6, "#endif") == 0) {
+                    if (depth > 0) {
+                        depth--;
+                    } else {
+                        // Unmatched #endif — comment it out
+                        src.replace(pos + trimmed, 6, "//" "endif");
+                        LOG_INFO("commented out unmatched #endif at source offset %zu", pos);
+                    }
+                }
+            }
+            pos = lineEnd + 1;
+        }
+    }
+
     glslang::TShader::ForbidIncluder includer;
     glslang::TShader                 shader(ToGLSL(type));
     const EShMessages emsg { (EShMessages)(EShMsgDefault | EShMsgSpvRules | EShMsgRelaxedErrors |
@@ -303,6 +333,44 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
                       emsg,
                       &res,
                       includer);
+
+    // Fix mutable varying: WE shaders (OpenGL) write to varying inputs in
+    // fragment shaders, but GLSL 150 core `in` variables are read-only.
+    // Create local mutable copies for any `in` variable that is assigned.
+    if (type == ShaderType::FRAGMENT) {
+        std::regex re_in_decl(R"((\s+)(in)\s+([\w]+)\s+([\w]+)\s*;)");
+        std::smatch m;
+        std::string patched = res;
+        std::string mainInit;
+        auto searchStart = patched.cbegin();
+        while (std::regex_search(searchStart, patched.cend(), m, re_in_decl)) {
+            std::string varName = m[4].str();
+            std::string varType = m[3].str();
+            // Check if this variable is assigned anywhere in the source
+            std::regex re_assign("\\b" + varName + R"(\s*[\.\[]?\s*[xyzwrgba]*\s*[\]]?\s*[+\-\*\/]?=)");
+            if (std::regex_search(res, re_assign)) {
+                // Rename the in declaration and add a local copy
+                std::string prefixed = "_wp_in_" + varName;
+                patched = std::regex_replace(patched,
+                    std::regex("\\bin\\s+" + varType + "\\s+" + varName + "\\s*;"),
+                    "in " + varType + " " + prefixed + ";");
+                mainInit += "  " + varType + " " + varName + " = " + prefixed + ";\n";
+                LOG_INFO("patched mutable varying: %s %s -> local copy from %s",
+                         varType.c_str(), varName.c_str(), prefixed.c_str());
+            }
+            searchStart = m.suffix().first;
+        }
+        if (! mainInit.empty()) {
+            auto mainPos = patched.find("void main()");
+            if (mainPos != std::string::npos) {
+                auto bracePos = patched.find('{', mainPos);
+                if (bracePos != std::string::npos) {
+                    patched.insert(bracePos + 1, "\n" + mainInit);
+                }
+            }
+            res = patched;
+        }
+    }
 
     std::regex re_io(R"(.+\s(in|out)\s[\s\w]+\s(\w+)\s*;)", std::regex::ECMAScript);
     for (auto it = std::sregex_iterator(res.begin(), res.end(), re_io);

@@ -2327,8 +2327,6 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         }
     }
 
-    const bool useSleepingAronaFlatCardFallback = false;
-
     // wpimgobj.origin[1] = context.ortho_h - wpimgobj.origin[1];
     auto spImgNode = std::make_shared<SceneNode>(Vector3f(wpimgobj.origin.data()),
                                                  Vector3f(wpimgobj.scale.data()),
@@ -2342,19 +2340,16 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     ShaderValueMap baseConstSvs = context.global_base_uniforms;
     WPShaderInfo   shaderInfo;
     wpscene::WPMaterial sourceMaterial = wpimgobj.material;
-    // Direct puppet rendering for ARONA_CROP_SHEET — skip authored effects,
-    // render puppet mesh directly with the crop-sheet texture. The effect chain
-    // has unresolved composition issues that will be addressed separately.
-    const bool useDirectPuppetForArona =
-        puppet && hasEffect && wpimgobj.name == "ARONA_CROP_SHEET";
-    if (useDirectPuppetForArona) {
+    // Skip authored effects for ARONA_CROP_SHEET — the effect chain produces
+    // wrong colors when a puppet mesh is used as the FinalMesh after effect
+    // resolution (suspected vertex attribute layout mismatch at draw time).
+    if (puppet && hasEffect && wpimgobj.name == "ARONA_CROP_SHEET") {
         LOG_INFO("using direct puppet rendering for %s: disabling %d authored effects",
                  wpimgobj.name.c_str(), count_eff);
         count_eff = 0;
         hasEffect = false;
         effectObjects.clear();
     }
-    const bool useUpstreamPuppetEffectBaseline = false;
     bool                  usePuppetChannelMapPrepass { false };
     bool                  routePuppetPrepassThroughAuthoredEffects { false };
     bool                  useStandalonePuppetFinalDisplay { false };
@@ -2365,12 +2360,8 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     {
         if (! hasEffect) {
             svData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
-            if (puppet && ! useSleepingAronaFlatCardFallback) {
+            if (puppet) {
                 WPMdlParser::AddPuppetShaderInfo(shaderInfo, *puppet);
-            } else if (useSleepingAronaFlatCardFallback) {
-                LOG_INFO("using sleeping arona flat card source fallback: image=%s shader=%s",
-                         wpimgobj.name.c_str(),
-                         sourceMaterial.shader.c_str());
             }
         }
 
@@ -2383,7 +2374,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         baseConstSvs["g_UserAlpha"]  = wpimgobj.alpha;
         baseConstSvs["g_Brightness"] = wpimgobj.brightness;
 
-        if (puppet && hasEffect && ! useUpstreamPuppetEffectBaseline) {
+        if (puppet && hasEffect) {
             usePuppetChannelMapPrepass =
                 TryPreparePuppetChannelMapPrepass(wpimgobj,
                                                   *puppet,
@@ -2406,11 +2397,6 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 svData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
                 WPMdlParser::AddPuppetShaderInfo(shaderInfo, *puppet);
             }
-        }
-        if (useUpstreamPuppetEffectBaseline) {
-            LOG_INFO("using upstream-compatible puppet+effects baseline: image=%s authoredEffects=%d",
-                     wpimgobj.name.c_str(),
-                     count_eff);
         }
 
         shaderInfo.baseConstSvs = baseConstSvs;
@@ -2463,29 +2449,9 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             mapRate       = { r[2] / r[0], r[3] / r[1] };
         }
 
-        if (puppet && ! useSleepingAronaFlatCardFallback) {
+        if (puppet) {
             if (hasEffect) {
-                if (useUpstreamPuppetEffectBaseline) {
-                    GenCardMesh(mesh,
-                                { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] },
-                                mapRate);
-                    WPMdlParser::GenPuppetMesh(effct_final_mesh, *puppet);
-
-                    wpscene::WPImageEffect puppet_effect;
-                    wpscene::WPMaterial    puppet_mat = wpimgobj.material;
-                    if (puppet_mat.textures.empty()) {
-                        puppet_mat.textures.resize(1);
-                    }
-                    puppet_mat.textures[0] = "";
-                    WPMdlParser::AddPuppetMatInfo(puppet_mat, *puppet);
-                    puppet_effect.visible = true;
-                    puppet_effect.materials.push_back(puppet_mat);
-                    effectObjects.push_back(puppet_effect);
-                    LOG_INFO("appending upstream puppet effect publish node: image=%s authoredEffects=%d totalEffects=%zu",
-                             wpimgobj.name.c_str(),
-                             count_eff,
-                             effectObjects.size());
-                } else if (usePuppetChannelMapPrepass) {
+                if (usePuppetChannelMapPrepass) {
                     WPMdlParser::GenPuppetChannelMapBaseUvMesh(mesh,
                                                                *puppet,
                                                                { wpimgobj.size[0], wpimgobj.size[1] });
@@ -2519,7 +2485,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 WPMdlParser::GenPuppetMesh(mesh, *puppet);
             }
         }
-        if (! puppet || useSleepingAronaFlatCardFallback) {
+        if (! puppet) {
             GenCardMesh(mesh, { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] }, mapRate);
             GenCardMesh(effct_final_mesh,
                         { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] });

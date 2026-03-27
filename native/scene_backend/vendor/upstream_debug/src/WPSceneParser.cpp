@@ -65,9 +65,7 @@ struct ParseContext {
     std::unordered_map<int32_t, std::shared_ptr<SceneNode>> object_nodes;
     std::unordered_map<int32_t, std::vector<std::shared_ptr<SceneNode>>> deferred_children;
     std::unordered_map<std::string, std::unordered_set<std::string>> paused_puppet_animations;
-    bool                                                          has_sleeping_arona_crop_sheet {
-        false
-    };
+    bool has_puppet_objects { false };
 
     ShaderValueMap             global_base_uniforms;
     std::shared_ptr<SceneNode> effect_camera_node;
@@ -2256,12 +2254,9 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
 void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     auto& wpimgobj = img_obj;
     if (! wpimgobj.visible) return;
-    if (context.has_sleeping_arona_crop_sheet &&
-        wpimgobj.image == "models/util/composelayer.json" &&
-        wpimgobj.name == "Adjustable Composition Layer") {
-        LOG_INFO("skipping sleeping arona adjustable composition layer: name=%s id=%d",
-                 wpimgobj.name.c_str(),
-                 wpimgobj.id);
+    if (wpimgobj.image == "models/util/composelayer.json") {
+        LOG_INFO("skipping composelayer (not implemented): name=%s id=%d",
+                 wpimgobj.name.c_str(), wpimgobj.id);
         return;
     }
     if (DebugSkipLayerByName(wpimgobj.name)) {
@@ -2340,14 +2335,19 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     ShaderValueMap baseConstSvs = context.global_base_uniforms;
     WPShaderInfo   shaderInfo;
     wpscene::WPMaterial sourceMaterial = wpimgobj.material;
-    // Skip all authored effects for this scene — the two-pass puppet pipeline
-    // and the effect chain both have unresolved rendering issues.
+    // Skip all authored effects in scenes with puppet objects — the effect
+    // chain causes wrong colors on puppet FinalMesh and background effect
+    // brightness variations expose puppet mesh crop-sheet tile seams.
     // Force additive blend on flare layers so they don't render as opaque black.
-    if (hasEffect && context.has_sleeping_arona_crop_sheet) {
-        const bool isFlareLayer =
+    if (hasEffect && context.has_puppet_objects) {
+        // Detect flare/effect layers that need additive blend to hide their
+        // black backgrounds. Matches "flare" in name or hex-hash-only names
+        // (auto-generated WE effect elements like lens flares).
+        const bool looksLikeFlare =
             wpimgobj.name.find("flare") != std::string::npos ||
-            wpimgobj.name == "c7884e6807cf62bb85f8d8b67942cec4";
-        if (isFlareLayer) {
+            (wpimgobj.name.size() >= 16 &&
+             wpimgobj.name.find_first_not_of("0123456789abcdef") == std::string::npos);
+        if (looksLikeFlare) {
             sourceMaterial.blending = "additive";
         }
         count_eff = 0;
@@ -3417,12 +3417,6 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
 
     for (auto& obj : json.at("objects")) {
         RegisterPuppetPauseDirectives(context, obj);
-        if (obj.contains("image") && obj.at("image").is_string() &&
-            obj.contains("name") && obj.at("name").is_string() &&
-            obj.at("image").get_ref<const std::string&>() == "models/ARONA_CROP_SHEET.json" &&
-            obj.at("name").get_ref<const std::string&>() == "ARONA_CROP_SHEET") {
-            context.has_sleeping_arona_crop_sheet = true;
-        }
         if (obj.contains("image") && ! obj.at("image").is_null()) {
             AddWPObject<wpscene::WPImageObject>(wp_objs, obj, vfs);
         } else if (obj.contains("particle") && ! obj.at("particle").is_null()) {
@@ -3436,6 +3430,14 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
             ++modelObjectCount;
         } else if (IsTransformAnchorObject(obj)) {
             AddWPObject<WPSolidAnchorObject>(wp_objs, obj, vfs);
+        }
+    }
+
+    for (const auto& obj : wp_objs) {
+        if (const auto* img = std::get_if<wpscene::WPImageObject>(&obj);
+            img != nullptr && ! img->puppet.empty()) {
+            context.has_puppet_objects = true;
+            break;
         }
     }
 

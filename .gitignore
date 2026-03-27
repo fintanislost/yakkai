@@ -6,3 +6,4 @@
 /Makefile
 /wallpapers/io.papercompany.gradient/contents/imports/
 *.user
+*.dev.md

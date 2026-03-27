@@ -11,6 +11,10 @@ if(PAPER_ENABLE_VENDORED_SCENE_BACKEND)
     find_package(Vulkan QUIET)
     find_package(Threads QUIET)
     find_library(paper_scene_lz4_library NAMES lz4)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(FFMPEG IMPORTED_TARGET libavformat libavcodec libswscale libavutil)
+    endif()
 
     if(Vulkan_FOUND AND Threads_FOUND AND paper_scene_lz4_library)
         if(EXISTS "${paper_scene_glslang_root}/CMakeLists.txt")
@@ -103,6 +107,14 @@ if(PAPER_ENABLE_VENDORED_SCENE_BACKEND)
                 "${paper_scene_lz4_library}"
                 ${CMAKE_DL_LIBS}
         )
+
+        if(FFMPEG_FOUND)
+            target_link_libraries(papercompany_scene_vendor PUBLIC PkgConfig::FFMPEG)
+            target_compile_definitions(papercompany_scene_vendor PUBLIC PAPER_HAS_FFMPEG=1)
+            message(STATUS "Paper scene backend: FFmpeg video texture support enabled")
+        else()
+            message(STATUS "Paper scene backend: FFmpeg not found, video textures disabled")
+        endif()
 
         set(PAPER_SCENE_USE_VENDORED_BACKEND ON)
         else()

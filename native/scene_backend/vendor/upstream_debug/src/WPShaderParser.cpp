@@ -372,7 +372,7 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
         }
     }
 
-    std::regex re_io(R"(.+\s(in|out)\s[\s\w]+\s(\w+)\s*;)", std::regex::ECMAScript);
+    std::regex re_io(R"([^\n]+\s(in|out)\s[\s\w]+\s(\w+)\s*;)", std::regex::ECMAScript);
     for (auto it = std::sregex_iterator(res.begin(), res.end(), re_io);
          it != std::sregex_iterator();
          it++) {

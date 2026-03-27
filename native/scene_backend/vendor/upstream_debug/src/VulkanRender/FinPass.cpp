@@ -101,6 +101,12 @@ void FinPass::prepare(Scene& scene, const Device& device, RenderingResources& rr
         if (auto opt = device.tex_cache().Query(tex_name, ToTexKey(rt), ! rt.allowReuse);
             opt.has_value()) {
             m_desc.vk_result = opt.value();
+            LOG_INFO("finpass prepare: result texture bound: sampler=%p view=%p extent=%ux%u",
+                     (void*)m_desc.vk_result.sampler, (void*)m_desc.vk_result.view,
+                     m_desc.vk_result.extent.width, m_desc.vk_result.extent.height);
+        } else {
+            LOG_ERROR("finpass prepare: FAILED to query result texture '%s' — output will be garbage",
+                      tex_name.c_str());
         }
     }
     std::vector<Uni_ShaderSpv> spvs;

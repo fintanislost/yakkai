@@ -497,16 +497,34 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
                     return nullptr;
                 }
             }
-            // is image container
+            // is image container (texb=3): try stbi decode, fall back to raw
             if (img.header.extraHeader["texb"].val == 3 && img.header.type != ImageType::UNKNOWN) {
                 int32_t w, h, n;
                 auto*   data =
                     stbi_load_from_memory((const unsigned char*)result, src_size, &w, &h, &n, 4);
+                if (data == nullptr) {
+                    // Detect container format from magic bytes for diagnostics
+                    const bool isMp4 = src_size >= 12 &&
+                        result[4] == 'f' && result[5] == 't' && result[6] == 'y' && result[7] == 'p';
+                    const bool isWebP = src_size >= 12 &&
+                        result[0] == 'R' && result[1] == 'I' && result[2] == 'F' && result[3] == 'F' &&
+                        result[8] == 'W' && result[9] == 'E' && result[10] == 'B' && result[11] == 'P';
+                    LOG_ERROR("unsupported texture container for '%s': size=%d header=%dx%d format=%s",
+                              img.key.c_str(), src_size, img.header.width, img.header.height,
+                              isMp4 ? "MP4 video (needs video decoder)" :
+                              isWebP ? "WebP (needs libwebp)" : "unknown");
+                }
                 mipmap.data = ImageDataPtr((uint8_t*)data, [](uint8_t* data) {
                     stbi_image_free((unsigned char*)data);
                 });
-                src_size    = w * h * 4;
+                src_size    = (data != nullptr) ? w * h * 4 : 0;
             } else {
+                // Raw pixel data — check for embedded video/unsupported containers
+                if (src_size >= 12 &&
+                    result[4] == 'f' && result[5] == 't' && result[6] == 'y' && result[7] == 'p') {
+                    LOG_ERROR("embedded MP4 video texture '%s': size=%d %dx%d (video decoding not supported)",
+                              img.key.c_str(), src_size, mipmap.width, mipmap.height);
+                }
                 mipmap.data = ImageDataPtr(new uint8_t[(usize)src_size], [](uint8_t* data) {
                     delete[] data;
                 });

@@ -628,6 +628,12 @@ TextureCache::TextureCache(const Device& device): m_device(device) {}
 TextureCache::~TextureCache() {};
 
 void TextureCache::Clear() {
+    // Stop all video decode threads before clearing textures
+    for (auto& entry : m_video_textures) {
+        if (entry.decoder) entry.decoder->Stop();
+    }
+    m_video_textures.clear();
+
     m_tex_map.clear();
     m_query_texs.clear();
     m_query_map.clear();
@@ -930,6 +936,15 @@ void TextureCache::RegisterVideoTexture(const std::string& key,
     }
     auto& image = slots.slots.front();
 
+    // Verify dimensions match between GPU texture and decoder output
+    if (static_cast<int>(image.extent.width) != decoder->Width() ||
+        static_cast<int>(image.extent.height) != decoder->Height()) {
+        LOG_ERROR("video texture '%s' dimension mismatch: GPU %ux%u vs decoder %dx%d",
+                  key.c_str(), image.extent.width, image.extent.height,
+                  decoder->Width(), decoder->Height());
+        return;
+    }
+
     // Allocate a persistent staging buffer for per-frame uploads
     size_t frame_size = static_cast<size_t>(image.extent.width) * image.extent.height * 4;
     VmaBufferParameters staging {};
@@ -980,7 +995,7 @@ void TextureCache::UpdateAllVideoTextures(vvk::CommandBuffer& cmd) {
                 .image            = entry.image.handle,
                 .subresourceRange = subresRange,
             };
-            cmd.PipelineBarrier(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            cmd.PipelineBarrier(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                                 VK_PIPELINE_STAGE_TRANSFER_BIT,
                                 VK_DEPENDENCY_BY_REGION_BIT,
                                 barrier);

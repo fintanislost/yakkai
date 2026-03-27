@@ -521,13 +521,14 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
                 });
                 src_size    = (data != nullptr) ? w * h * 4 : 0;
             } else {
-                // Check for embedded video (MP4 in .tex container)
-                const bool isMp4 = src_size >= 12 &&
-                    result[4] == 'f' && result[5] == 't' && result[6] == 'y' && result[7] == 'p';
+                // texb=3 with type=UNKNOWN: could be video (MP4/WebM/MKV) or raw pixel data.
+                // Try FFmpeg for any data where stbi failed and size doesn't match raw RGBA.
                 bool videoHandled = false;
+                const i32 expectedRawSize = mipmap.width * mipmap.height * 4;
+                const bool sizeMismatch = src_size != expectedRawSize && src_size > expectedRawSize;
 
 #ifdef PAPER_HAS_FFMPEG
-                if (isMp4 && ! img.video_decoder) {
+                if (sizeMismatch && ! img.video_decoder) {
                     auto decoder = std::make_shared<VideoFrameDecoder>(
                         (const uint8_t*)result, src_size, mipmap.width, mipmap.height);
                     if (decoder->IsValid()) {
@@ -536,7 +537,6 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
                             mipmap.width = decoder->Width();
                             mipmap.height = decoder->Height();
                             src_size = decoder->Width() * decoder->Height() * 4;
-                            // Copy first frame data — decoder owns the original
                             mipmap.data = ImageDataPtr(new uint8_t[(usize)src_size], [](uint8_t* p) { delete[] p; });
                             std::copy(firstFrame.get(), firstFrame.get() + src_size, mipmap.data.get());
                             img.video_decoder = decoder;
@@ -544,14 +544,17 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
                             decoder->Start();
                             videoHandled = true;
                             LOG_INFO("video texture decoded: name=%s %dx%d", img.key.c_str(), mipmap.width, mipmap.height);
+                        } else {
+                            LOG_ERROR("video texture '%s': FFmpeg opened but first frame decode failed", img.key.c_str());
                         }
                     }
                 }
-#endif
-                if (isMp4 && ! videoHandled) {
-                    LOG_ERROR("embedded MP4 video texture '%s': size=%d %dx%d (video decoding not available)",
-                              img.key.c_str(), src_size, mipmap.width, mipmap.height);
+#else
+                if (sizeMismatch) {
+                    LOG_ERROR("texture '%s': data size %d doesn't match %dx%d RGBA (%d bytes), FFmpeg not available",
+                              img.key.c_str(), src_size, mipmap.width, mipmap.height, expectedRawSize);
                 }
+#endif
 
                 if (! videoHandled) {
                     mipmap.data = ImageDataPtr(new uint8_t[(usize)src_size], [](uint8_t* data) {

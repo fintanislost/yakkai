@@ -210,7 +210,9 @@ VideoFrameDecoder::DataPtr VideoFrameDecoder::DecodeNextFrame() {
 }
 
 void VideoFrameDecoder::SeekToStart() {
-    av_seek_frame(m_ff->fmt_ctx, m_ff->video_stream_idx, 0, AVSEEK_FLAG_BACKWARD);
+    if (av_seek_frame(m_ff->fmt_ctx, m_ff->video_stream_idx, 0, AVSEEK_FLAG_BACKWARD) < 0) {
+        LOG_INFO("video decoder: seek to start failed, resetting read position");
+    }
     avcodec_flush_buffers(m_ff->codec_ctx);
     m_ff->mem_ctx.pos = 0;
 }
@@ -222,8 +224,8 @@ VideoFrameDecoder::DataPtr VideoFrameDecoder::DecodeFirstFrame() {
 }
 
 VideoFrameDecoder::DataPtr VideoFrameDecoder::TryGetFrame() {
+    std::lock_guard lock(m_frameMutex);
     if (m_hasNewFrame.exchange(false)) {
-        std::lock_guard lock(m_frameMutex);
         m_front = m_back;
     }
     return m_front;
@@ -243,6 +245,7 @@ void VideoFrameDecoder::Stop() {
 void VideoFrameDecoder::DecodeLoop() {
     SeekToStart();
     auto next_frame_time = std::chrono::steady_clock::now();
+    int  consecutive_failures = 0;
 
     while (m_running) {
         auto now = std::chrono::steady_clock::now();
@@ -255,15 +258,17 @@ void VideoFrameDecoder::DecodeLoop() {
 
         auto frame = DecodeNextFrame();
         if (! frame) {
-            // End of video — loop
             SeekToStart();
             frame = DecodeNextFrame();
-            if (! frame) {
-                // Truly failed
-                LOG_ERROR("video decoder: decode loop failed to produce frame after seek");
+        }
+        if (! frame) {
+            if (++consecutive_failures >= 3) {
+                LOG_ERROR("video decoder: giving up after %d consecutive decode failures", consecutive_failures);
                 break;
             }
+            continue;
         }
+        consecutive_failures = 0;
 
         {
             std::lock_guard lock(m_frameMutex);

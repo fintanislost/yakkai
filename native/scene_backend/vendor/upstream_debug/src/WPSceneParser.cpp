@@ -2340,21 +2340,19 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     ShaderValueMap baseConstSvs = context.global_base_uniforms;
     WPShaderInfo   shaderInfo;
     wpscene::WPMaterial sourceMaterial = wpimgobj.material;
-    // Skip all authored effects for this scene — the effect chain causes
-    // puppet mesh seam artifacts and wrong colors. Lens flare layers that
-    // depend on effects for additive blend are suppressed below instead.
+    // Skip all authored effects for this scene — the two-pass puppet pipeline
+    // and the effect chain both have unresolved rendering issues.
+    // Force additive blend on flare layers so they don't render as opaque black.
     if (hasEffect && context.has_sleeping_arona_crop_sheet) {
+        const bool isFlareLayer =
+            wpimgobj.name.find("flare") != std::string::npos ||
+            wpimgobj.name == "c7884e6807cf62bb85f8d8b67942cec4";
+        if (isFlareLayer) {
+            sourceMaterial.blending = "additive";
+        }
         count_eff = 0;
         hasEffect = false;
         effectObjects.clear();
-    }
-    // Suppress lens flare layers that render as opaque black without their
-    // effect chain (they need additive blend which comes from effects).
-    if (context.has_sleeping_arona_crop_sheet && ! hasEffect &&
-        (wpimgobj.name.find("flare") != std::string::npos ||
-         wpimgobj.name == "c7884e6807cf62bb85f8d8b67942cec4")) {
-        LOG_INFO("suppressing flare layer without effect chain: name=%s id=%d", wpimgobj.name.c_str(), wpimgobj.id);
-        return;
     }
     bool                  usePuppetChannelMapPrepass { false };
     bool                  routePuppetPrepassThroughAuthoredEffects { false };
@@ -2847,14 +2845,9 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                              wpimgobj.name.c_str(),
                              finalSourceMaterial.textures[1].c_str(),
                              finalSourceMaterial.textures.size() > 2 ? finalSourceMaterial.textures[2].c_str() : "");
-                } else if (! wpimgobj.material.textures.empty() && ! wpimgobj.material.textures[0].empty()) {
-                    finalSourceMaterial.textures.resize(std::max<usize>(finalSourceMaterial.textures.size(), 2));
-                    finalSourceMaterial.textures[1] = wpimgobj.material.textures[0];
-                    finalSourceMaterial.combos["PAPER_BASE_ALPHA_MASK"] = 1;
-                    LOG_INFO("native puppet final display applying base alpha mask: image=%s baseMask=%s",
-                             wpimgobj.name.c_str(),
-                             finalSourceMaterial.textures[1].c_str());
                 }
+                // Non-channelmap path: the effect chain output already has correct
+                // alpha from the puppet source render — no additional masking needed.
                 SceneMaterial     finalMaterial;
                 WPShaderValueData finalSvData;
                 WPShaderInfo      finalShaderInfo;
@@ -2873,6 +2866,9 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     LOG_ERROR("load standalone puppet final material failed: %s", wpimgobj.name.c_str());
                 } else {
                     LoadConstvalue(finalMaterial, finalSourceMaterial, finalShaderInfo);
+                    // Force Translucent blend so the effect chain's alpha channel
+                    // correctly composites over the scene (transparent areas pass through).
+                    finalMaterial.blenmode = BlendMode::Translucent;
                     finalSvData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
                     if (usePuppetChannelMapPrepass) {
                         finalSvData.puppet_layer = WPPuppetLayer(puppet->puppet);

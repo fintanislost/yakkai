@@ -2340,12 +2340,12 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     ShaderValueMap baseConstSvs = context.global_base_uniforms;
     WPShaderInfo   shaderInfo;
     wpscene::WPMaterial sourceMaterial = wpimgobj.material;
-    // Skip all authored effects for this scene — the effect chain produces
-    // visible seam artifacts on the puppet mesh (crop-sheet tile boundaries
-    // become visible when background layers have brightness variations from
-    // pulse/waterwaves effects). The puppet-through-effect-chain path also
-    // has an unresolved color issue. Base rendering without effects is correct.
-    if (hasEffect && context.has_sleeping_arona_crop_sheet) {
+    // Skip effects for the ARONA_CROP_SHEET puppet — the puppet mesh as
+    // effect chain FinalMesh produces wrong colors after resolution.
+    // Other layers keep their effects (flares need them for additive blend).
+    if (puppet && hasEffect && wpimgobj.name == "ARONA_CROP_SHEET") {
+        LOG_INFO("skipping %d authored effects for %s (puppet bypass)",
+                 count_eff, wpimgobj.name.c_str());
         count_eff = 0;
         hasEffect = false;
         effectObjects.clear();

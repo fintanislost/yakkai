@@ -2340,15 +2340,21 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     ShaderValueMap baseConstSvs = context.global_base_uniforms;
     WPShaderInfo   shaderInfo;
     wpscene::WPMaterial sourceMaterial = wpimgobj.material;
-    // Skip effects for the ARONA_CROP_SHEET puppet — the puppet mesh as
-    // effect chain FinalMesh produces wrong colors after resolution.
-    // Other layers keep their effects (flares need them for additive blend).
-    if (puppet && hasEffect && wpimgobj.name == "ARONA_CROP_SHEET") {
-        LOG_INFO("skipping %d authored effects for %s (puppet bypass)",
-                 count_eff, wpimgobj.name.c_str());
+    // Skip all authored effects for this scene — the effect chain causes
+    // puppet mesh seam artifacts and wrong colors. Lens flare layers that
+    // depend on effects for additive blend are suppressed below instead.
+    if (hasEffect && context.has_sleeping_arona_crop_sheet) {
         count_eff = 0;
         hasEffect = false;
         effectObjects.clear();
+    }
+    // Suppress lens flare layers that render as opaque black without their
+    // effect chain (they need additive blend which comes from effects).
+    if (context.has_sleeping_arona_crop_sheet && ! hasEffect &&
+        (wpimgobj.name.find("flare") != std::string::npos ||
+         wpimgobj.name == "c7884e6807cf62bb85f8d8b67942cec4")) {
+        LOG_INFO("suppressing flare layer without effect chain: name=%s id=%d", wpimgobj.name.c_str(), wpimgobj.id);
+        return;
     }
     bool                  usePuppetChannelMapPrepass { false };
     bool                  routePuppetPrepassThroughAuthoredEffects { false };

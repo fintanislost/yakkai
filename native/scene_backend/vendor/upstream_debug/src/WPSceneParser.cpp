@@ -2327,17 +2327,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         }
     }
 
-    const bool useSleepingAronaPlainPuppetFallback =
-        puppet && hasEffect && wpimgobj.name == "ARONA_CROP_SHEET";
-    const bool useSleepingAronaFlatCardFallback = useSleepingAronaPlainPuppetFallback;
-    if (useSleepingAronaPlainPuppetFallback) {
-        LOG_INFO("using sleeping arona plain puppet fallback: image=%s disablingAuthoredEffects=%d",
-                 wpimgobj.name.c_str(),
-                 count_eff);
-        count_eff = 0;
-        hasEffect = false;
-        effectObjects.clear();
-    }
+    const bool useSleepingAronaFlatCardFallback = false;
 
     // wpimgobj.origin[1] = context.ortho_h - wpimgobj.origin[1];
     auto spImgNode = std::make_shared<SceneNode>(Vector3f(wpimgobj.origin.data()),
@@ -2352,8 +2342,19 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     ShaderValueMap baseConstSvs = context.global_base_uniforms;
     WPShaderInfo   shaderInfo;
     wpscene::WPMaterial sourceMaterial = wpimgobj.material;
-    const bool            useUpstreamPuppetEffectBaseline =
+    // Direct puppet rendering for ARONA_CROP_SHEET — skip authored effects,
+    // render puppet mesh directly with the crop-sheet texture. The effect chain
+    // has unresolved composition issues that will be addressed separately.
+    const bool useDirectPuppetForArona =
         puppet && hasEffect && wpimgobj.name == "ARONA_CROP_SHEET";
+    if (useDirectPuppetForArona) {
+        LOG_INFO("using direct puppet rendering for %s: disabling %d authored effects",
+                 wpimgobj.name.c_str(), count_eff);
+        count_eff = 0;
+        hasEffect = false;
+        effectObjects.clear();
+    }
+    const bool useUpstreamPuppetEffectBaseline = false;
     bool                  usePuppetChannelMapPrepass { false };
     bool                  routePuppetPrepassThroughAuthoredEffects { false };
     bool                  useStandalonePuppetFinalDisplay { false };

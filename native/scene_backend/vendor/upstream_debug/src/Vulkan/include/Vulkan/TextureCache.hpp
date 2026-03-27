@@ -4,11 +4,15 @@
 #include "Type.hpp"
 #include "Core/NoCopyMove.hpp"
 #include "Core/MapSet.hpp"
+#include "vvk/vulkan_wrapper.hpp"
+
+#include <memory>
 
 namespace wallpaper
 {
 
 class Image;
+class VideoFrameDecoder;
 
 namespace vulkan
 {
@@ -55,6 +59,10 @@ public:
 
     void RecGenerateMipmaps(vvk::CommandBuffer& cmd, const ImageParameters& image) const;
 
+    // Video texture support — per-frame pixel updates from VideoFrameDecoder
+    void RegisterVideoTexture(const std::string& key, std::shared_ptr<VideoFrameDecoder> decoder);
+    void UpdateAllVideoTextures(vvk::CommandBuffer& cmd);
+
 private:
     std::optional<VmaImageParameters> CreateTex(TextureKey);
     void                              allocateCmd();
@@ -74,6 +82,14 @@ private:
     };
     std::vector<std::unique_ptr<QueryTex>> m_query_texs;
     Map<std::string, QueryTex*>            m_query_map;
+
+    struct VideoTexEntry {
+        std::string                        key;
+        std::shared_ptr<VideoFrameDecoder> decoder;
+        VmaBufferParameters                staging_buf {};
+        ImageParameters                    image {};
+    };
+    std::vector<VideoTexEntry> m_video_textures;
 };
 
 } // namespace vulkan

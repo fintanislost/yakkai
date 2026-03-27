@@ -6,6 +6,7 @@
 #include "Util.hpp"
 
 #include "Image.hpp"
+#include "VideoFrameDecoder.hpp"
 #include "Core/MapSet.hpp"
 #include "Core/ArrayHelper.hpp"
 #include "Utils/AutoDeletor.hpp"
@@ -908,4 +909,114 @@ void TextureCache::RecGenerateMipmaps(vvk::CommandBuffer& cmd, const ImageParame
                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                         VK_DEPENDENCY_BY_REGION_BIT,
                         barrier);
+}
+
+void TextureCache::RegisterVideoTexture(const std::string& key,
+                                        std::shared_ptr<VideoFrameDecoder> decoder) {
+    // Check if already registered
+    for (const auto& entry : m_video_textures) {
+        if (entry.key == key) return;
+    }
+
+    // Find the existing GPU texture for this key
+    if (! exists(m_tex_map, key)) {
+        LOG_ERROR("video texture '%s' not found in texture cache", key.c_str());
+        return;
+    }
+    auto& slots = m_tex_map.at(key);
+    if (slots.slots.empty()) {
+        LOG_ERROR("video texture '%s' has no GPU slots", key.c_str());
+        return;
+    }
+    auto& image = slots.slots.front();
+
+    // Allocate a persistent staging buffer for per-frame uploads
+    size_t frame_size = static_cast<size_t>(image.extent.width) * image.extent.height * 4;
+    VmaBufferParameters staging {};
+    if (! CreateStagingBuffer(m_device.vma_allocator(), frame_size, staging)) {
+        LOG_ERROR("failed to allocate video staging buffer for '%s': %zu bytes", key.c_str(), frame_size);
+        return;
+    }
+
+    VideoTexEntry entry;
+    entry.key = key;
+    entry.decoder = std::move(decoder);
+    entry.staging_buf = std::move(staging);
+    entry.image = image;
+    m_video_textures.push_back(std::move(entry));
+    LOG_INFO("registered video texture: key=%s %ux%u staging=%zu bytes",
+             key.c_str(), image.extent.width, image.extent.height, frame_size);
+}
+
+void TextureCache::UpdateAllVideoTextures(vvk::CommandBuffer& cmd) {
+    for (auto& entry : m_video_textures) {
+        auto frame = entry.decoder->TryGetFrame();
+        if (! frame) continue;
+
+        size_t frame_size = static_cast<size_t>(entry.image.extent.width) * entry.image.extent.height * 4;
+
+        // Copy decoded frame to staging buffer
+        void* mapped = nullptr;
+        VVK_CHECK(entry.staging_buf.handle.MapMemory(&mapped));
+        memcpy(mapped, frame.get(), frame_size);
+        entry.staging_buf.handle.UnMapMemory();
+
+        // Transition image to transfer destination
+        VkImageSubresourceRange subresRange {
+            .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel   = 0,
+            .levelCount     = 1,
+            .baseArrayLayer = 0,
+            .layerCount     = 1,
+        };
+        {
+            VkImageMemoryBarrier barrier {
+                .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                .pNext            = nullptr,
+                .srcAccessMask    = VK_ACCESS_SHADER_READ_BIT,
+                .dstAccessMask    = VK_ACCESS_TRANSFER_WRITE_BIT,
+                .oldLayout        = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                .newLayout        = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                .image            = entry.image.handle,
+                .subresourceRange = subresRange,
+            };
+            cmd.PipelineBarrier(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                VK_DEPENDENCY_BY_REGION_BIT,
+                                barrier);
+        }
+
+        // Copy staging buffer to image
+        VkBufferImageCopy copy {
+            .imageSubresource = VkImageSubresourceLayers {
+                .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+                .mipLevel       = 0,
+                .baseArrayLayer = 0,
+                .layerCount     = 1,
+            },
+            .imageExtent = { entry.image.extent.width, entry.image.extent.height, 1 },
+        };
+        cmd.CopyBufferToImage(*entry.staging_buf.handle,
+                              entry.image.handle,
+                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                              copy);
+
+        // Transition back to shader read
+        {
+            VkImageMemoryBarrier barrier {
+                .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                .pNext            = nullptr,
+                .srcAccessMask    = VK_ACCESS_TRANSFER_WRITE_BIT,
+                .dstAccessMask    = VK_ACCESS_SHADER_READ_BIT,
+                .oldLayout        = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                .newLayout        = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                .image            = entry.image.handle,
+                .subresourceRange = subresRange,
+            };
+            cmd.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                VK_DEPENDENCY_BY_REGION_BIT,
+                                barrier);
+        }
+    }
 }

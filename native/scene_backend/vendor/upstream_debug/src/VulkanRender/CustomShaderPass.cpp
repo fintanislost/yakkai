@@ -247,6 +247,9 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             auto image = scene.imageParser->Parse(tex_name);
             if (image) {
                 img_slots = device.tex_cache().CreateTex(*image);
+                if (image->video_decoder) {
+                    device.tex_cache().RegisterVideoTexture(tex_name, image->video_decoder);
+                }
                 if (diagPass) {
                     const auto createdSlots = img_slots.slots.size();
                     const auto parsedSlots  = image->slots.size();

@@ -366,6 +366,7 @@ void VulkanRender::Impl::drawFrameSwapchain(Scene& scene) {
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     });
     m_dyn_buf->recordUpload(rr.command);
+    m_device->tex_cache().UpdateAllVideoTextures(rr.command);
     for (auto* p : m_passes) {
         if (p->prepared()) {
             p->execute(*m_device, rr);
@@ -418,6 +419,7 @@ void VulkanRender::Impl::drawFrameOffscreen(Scene& scene) {
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     });
     m_dyn_buf->recordUpload(rr.command);
+    m_device->tex_cache().UpdateAllVideoTextures(rr.command);
 
     for (auto* p : m_passes) {
         if (p->prepared()) {

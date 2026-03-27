@@ -98,10 +98,14 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
             material.blenmode = m_final_blend;
             last_output->sceneNode->SetCamera(std::string());
             last_output->sceneNode->SetVirtualParent(m_worldNode ? m_worldNode->Parent() : nullptr);
-            LOG_INFO("effect final output using last effect stage only: totalEffects=%zu hasWorldNode=%d hasParent=%d",
+            const auto finalMeshInfo = describe_mesh(*m_final_mesh);
+            LOG_INFO("effect final output: totalEffects=%zu blend=%d hasWorldNode=%d hasParent=%d finalMeshVerts=%zu tex0=%s",
                      m_effects.size(),
+                     static_cast<int>(m_final_blend),
                      m_worldNode ? 1 : 0,
-                     (m_worldNode && m_worldNode->Parent()) ? 1 : 0);
+                     (m_worldNode && m_worldNode->Parent()) ? 1 : 0,
+                     finalMeshInfo[2],
+                     material.textures.empty() ? "" : material.textures.front().c_str());
             last_output->sceneNode->CopyTrans(*m_final_node);
             mesh.ChangeMeshDataFrom(*m_final_mesh);
             if (debugLongEffectChain) {

@@ -14,6 +14,8 @@
 namespace wallpaper
 {
 
+class VideoFrameDecoder;
+
 union ImageExtra {
     int32_t val { 0 };
     char    str[125];
@@ -65,6 +67,9 @@ struct Image : NoCopy, NoMove {
     ImageHeader       header;
     std::vector<Slot> slots;
     std::string       key;
+
+    // Non-null for embedded video textures (MP4 in .tex container)
+    std::shared_ptr<VideoFrameDecoder> video_decoder;
 };
 
 } // namespace wallpaper

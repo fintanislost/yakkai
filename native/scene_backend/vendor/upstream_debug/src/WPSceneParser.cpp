@@ -2340,12 +2340,12 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     ShaderValueMap baseConstSvs = context.global_base_uniforms;
     WPShaderInfo   shaderInfo;
     wpscene::WPMaterial sourceMaterial = wpimgobj.material;
-    // Skip authored effects for ARONA_CROP_SHEET — the effect chain produces
-    // wrong colors when a puppet mesh is used as the FinalMesh after effect
-    // resolution (suspected vertex attribute layout mismatch at draw time).
-    if (puppet && hasEffect && wpimgobj.name == "ARONA_CROP_SHEET") {
-        LOG_INFO("using direct puppet rendering for %s: disabling %d authored effects",
-                 wpimgobj.name.c_str(), count_eff);
+    // Skip all authored effects — the effect chain produces wrong colors
+    // (dark/tinted output). Diagnostic step to isolate whether the base
+    // genericimage4 rendering is correct without effects.
+    if (hasEffect) {
+        LOG_INFO("skipping %d authored effects for %s (global effect bypass)",
+                 count_eff, wpimgobj.name.c_str());
         count_eff = 0;
         hasEffect = false;
         effectObjects.clear();

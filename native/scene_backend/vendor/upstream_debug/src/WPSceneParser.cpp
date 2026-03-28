@@ -65,7 +65,13 @@ struct ParseContext {
     std::unordered_map<int32_t, std::shared_ptr<SceneNode>> object_nodes;
     std::unordered_map<int32_t, std::vector<std::shared_ptr<SceneNode>>> deferred_children;
     std::unordered_map<std::string, std::unordered_set<std::string>> paused_puppet_animations;
+
+    // Scene type detection — determines which rendering pipeline is used.
+    // Detected during object scan before rendering begins.
+    enum class SceneType { Standard, Puppet, Video };
+    SceneType scene_type { SceneType::Standard };
     bool has_puppet_objects { false };
+    bool has_video_textures { false };
 
     ShaderValueMap             global_base_uniforms;
     std::shared_ptr<SceneNode> effect_camera_node;
@@ -3440,13 +3446,28 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
         }
     }
 
+    // Detect scene type from parsed objects.
+    // Note: video textures are detected later during texture parsing (MP4 in
+    // .tex container), so has_video_textures is set during ParseImageObj, not here.
     for (const auto& obj : wp_objs) {
-        if (const auto* img = std::get_if<wpscene::WPImageObject>(&obj);
-            img != nullptr && ! img->puppet.empty()) {
-            context.has_puppet_objects = true;
-            break;
+        if (const auto* img = std::get_if<wpscene::WPImageObject>(&obj)) {
+            if (! img->puppet.empty()) {
+                context.has_puppet_objects = true;
+            }
         }
     }
+    if (context.has_puppet_objects) {
+        context.scene_type = ParseContext::SceneType::Puppet;
+    } else if (context.has_video_textures) {
+        context.scene_type = ParseContext::SceneType::Video;
+    } else {
+        context.scene_type = ParseContext::SceneType::Standard;
+    }
+    LOG_INFO("scene type: %s (puppet=%d video=%d)",
+             context.scene_type == ParseContext::SceneType::Puppet ? "Puppet" :
+             context.scene_type == ParseContext::SceneType::Video ? "Video" : "Standard",
+             context.has_puppet_objects ? 1 : 0,
+             context.has_video_textures ? 1 : 0);
 
     if (modelObjectCount > 0) {
         LOG_INFO("scene contains %d model object(s); using the experimental static model fallback",

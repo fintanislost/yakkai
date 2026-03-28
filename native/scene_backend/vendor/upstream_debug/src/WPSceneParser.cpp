@@ -2348,11 +2348,15 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         const bool isFlareOrLens =
             wpimgobj.name.find("flare") != std::string::npos ||
             wpimgobj.name.find("lense") != std::string::npos ||
-            wpimgobj.name.find("lens") != std::string::npos ||
-            (wpimgobj.name.size() >= 16 &&
-             wpimgobj.name.find_first_not_of("0123456789abcdef") == std::string::npos);
+            wpimgobj.name.find("lens") != std::string::npos;
+        const bool isHashElement =
+            wpimgobj.name.size() >= 16 &&
+            wpimgobj.name.find_first_not_of("0123456789abcdef") == std::string::npos;
+        if (isHashElement) {
+            return; // hex-hash layers render as opaque blocks without effect chain
+        }
         if (isFlareOrLens) {
-            return; // flare textures have alpha=0, can't render without effect chain
+            sourceMaterial.blending = "additive"; // parsed to Additive, overridden below
         }
         count_eff = 0;
         hasEffect = false;
@@ -2420,6 +2424,11 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             return;
         };
         LoadConstvalue(material, sourceMaterial, shaderInfo);
+
+        // Override to AdditiveNoAlpha for flare layers with alpha=0 textures
+        if (material.blenmode == BlendMode::Additive && context.has_puppet_objects) {
+            material.blenmode = BlendMode::AdditiveNoAlpha;
+        }
     }
 
     for (const auto& cs : sourceMaterial.constantshadervalues) {

@@ -8,3 +8,4 @@
 *.user
 *.dev.md
 *.todo.md
+/smoke-tests/*.png

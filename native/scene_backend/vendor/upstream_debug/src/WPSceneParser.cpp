@@ -2335,12 +2335,31 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     ShaderValueMap baseConstSvs = context.global_base_uniforms;
     WPShaderInfo   shaderInfo;
     wpscene::WPMaterial sourceMaterial = wpimgobj.material;
-    // Only strip effects for the puppet layer itself — all other layers
-    // (backgrounds, flares, particles) keep their full effect chains.
-    if (puppet && hasEffect) {
-        count_eff = 0;
-        hasEffect = false;
-        effectObjects.clear();
+    // =========================================================================
+    // PUPPET SCENE EFFECT BYPASS — DO NOT MODIFY WITHOUT REGRESSION TESTING
+    // Smoke test: smoke-tests/3228578419-sleeping-arona.png
+    //
+    // Puppet scenes have a broken effect chain (puppet mesh as FinalMesh
+    // produces wrong colors, LUT/blur effects produce washed-out output).
+    // Strip effects for all layers EXCEPT flare/lens/hash layers, which need
+    // their effect chain for alpha processing and screen-space compositing.
+    //
+    // This block ONLY runs when has_puppet_objects is true. Non-puppet scenes
+    // (video, standard) are NOT affected and use the full effect pipeline.
+    // =========================================================================
+    if (context.has_puppet_objects && hasEffect) {
+        const bool isFlareOrLens =
+            wpimgobj.name.find("flare") != std::string::npos ||
+            wpimgobj.name.find("lense") != std::string::npos ||
+            wpimgobj.name.find("lens") != std::string::npos;
+        const bool isHashElement =
+            wpimgobj.name.size() >= 16 &&
+            wpimgobj.name.find_first_not_of("0123456789abcdef") == std::string::npos;
+        if (! isFlareOrLens && ! isHashElement) {
+            count_eff = 0;
+            hasEffect = false;
+            effectObjects.clear();
+        }
     }
     bool                  usePuppetChannelMapPrepass { false };
     bool                  routePuppetPrepassThroughAuthoredEffects { false };

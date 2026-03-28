@@ -2335,20 +2335,24 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     ShaderValueMap baseConstSvs = context.global_base_uniforms;
     WPShaderInfo   shaderInfo;
     wpscene::WPMaterial sourceMaterial = wpimgobj.material;
-    // Skip all authored effects in scenes with puppet objects — the effect
-    // chain causes wrong colors on puppet FinalMesh and background effect
-    // brightness variations expose puppet mesh crop-sheet tile seams.
-    // Force additive blend on flare layers so they don't render as opaque black.
-    if (hasEffect && context.has_puppet_objects) {
-        // Detect flare/effect layers that need additive blend to hide their
-        // black backgrounds. Matches "flare" in name or hex-hash-only names
-        // (auto-generated WE effect elements like lens flares).
-        const bool looksLikeFlare =
+    // Two rendering paths based on scene type:
+    //
+    // Puppet scenes (has_puppet_objects): strip all effects and skip flare/lens
+    // layers. The puppet mesh as effect chain FinalMesh has unresolved color
+    // issues, and flare layers need script execution + full effect chain for
+    // their alpha processing (scripts set alpha, colorBlendMode composites).
+    //
+    // Non-puppet scenes: full effect chain with HLSL screen-space UV fix.
+    // Video textures, solidlayer overlays, and all effects render normally.
+    if (context.has_puppet_objects && hasEffect) {
+        const bool isFlareOrLens =
             wpimgobj.name.find("flare") != std::string::npos ||
+            wpimgobj.name.find("lense") != std::string::npos ||
+            wpimgobj.name.find("lens") != std::string::npos ||
             (wpimgobj.name.size() >= 16 &&
              wpimgobj.name.find_first_not_of("0123456789abcdef") == std::string::npos);
-        if (looksLikeFlare) {
-            sourceMaterial.blending = "additive";
+        if (isFlareOrLens) {
+            return; // flare textures have alpha=0, can't render without effect chain
         }
         count_eff = 0;
         hasEffect = false;

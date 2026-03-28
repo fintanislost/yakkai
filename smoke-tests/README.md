@@ -42,6 +42,18 @@ build/native/scene_harness/paper_scene_harness --backend paper \
   --fill crop --capture smoke-tests/3327063360-shiroko-video.png --capture-delay-ms 20000
 ```
 
+## Scene types
+
+The renderer detects scene type during object scan and uses different pipelines:
+
+| Type | Detection | Pipeline | Example |
+|------|-----------|----------|---------|
+| Puppet | Image object with `.puppet` field | Effects stripped (except flares), direct puppet mesh | Sleeping Arona |
+| Video | Embedded MP4 in .tex container | Full effects + FFmpeg decode | Shiroko Night |
+| Standard | Neither | Full effect pipeline | Zero Two |
+
+See `ARONA_SITREP.md` for detailed puppet scene constraints.
+
 ## Git state
 
-Baselined at commit `8c0d7a4` on master (2026-03-28).
+Updated at branch `fix-arona-shader-regression` (2026-03-28).

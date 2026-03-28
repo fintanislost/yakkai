@@ -6,3 +6,4 @@
 - Do not create commits unless the user explicitly asks for one.
 - Do not merge branches into master unless the user explicitly asks for it.
 - When verifying scene renders against smoke tests, do a thorough visual comparison: check camera angle, visible elements (desk, background, character position), color balance, and composition — not just "first frame ok". Ask the user if unsure whether the output matches.
+- Before modifying shader preprocessing, effect chain logic, or blend modes, read `ARONA_SITREP.md` for context on the puppet scene rendering constraints. Run `smoke-tests/run.sh` before and after changes.

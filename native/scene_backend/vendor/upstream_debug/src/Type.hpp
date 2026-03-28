@@ -62,8 +62,7 @@ enum class BlendMode
     Disable,
     Translucent,
     Additive,
-    Normal,
-    AdditiveNoAlpha
+    Normal
 };
 
 enum class ShaderType

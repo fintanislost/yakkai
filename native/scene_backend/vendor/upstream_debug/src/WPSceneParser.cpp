@@ -2335,29 +2335,9 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     ShaderValueMap baseConstSvs = context.global_base_uniforms;
     WPShaderInfo   shaderInfo;
     wpscene::WPMaterial sourceMaterial = wpimgobj.material;
-    // Two rendering paths based on scene type:
-    //
-    // Puppet scenes (has_puppet_objects): strip all effects and skip flare/lens
-    // layers. The puppet mesh as effect chain FinalMesh has unresolved color
-    // issues, and flare layers need script execution + full effect chain for
-    // their alpha processing (scripts set alpha, colorBlendMode composites).
-    //
-    // Non-puppet scenes: full effect chain with HLSL screen-space UV fix.
-    // Video textures, solidlayer overlays, and all effects render normally.
-    if (context.has_puppet_objects && hasEffect) {
-        const bool isFlareOrLens =
-            wpimgobj.name.find("flare") != std::string::npos ||
-            wpimgobj.name.find("lense") != std::string::npos ||
-            wpimgobj.name.find("lens") != std::string::npos;
-        const bool isHashElement =
-            wpimgobj.name.size() >= 16 &&
-            wpimgobj.name.find_first_not_of("0123456789abcdef") == std::string::npos;
-        if (isHashElement) {
-            return; // hex-hash layers render as opaque blocks without effect chain
-        }
-        if (isFlareOrLens) {
-            sourceMaterial.blending = "additive"; // parsed to Additive, overridden below
-        }
+    // Only strip effects for the puppet layer itself — all other layers
+    // (backgrounds, flares, particles) keep their full effect chains.
+    if (puppet && hasEffect) {
         count_eff = 0;
         hasEffect = false;
         effectObjects.clear();
@@ -2424,11 +2404,6 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             return;
         };
         LoadConstvalue(material, sourceMaterial, shaderInfo);
-
-        // Override to AdditiveNoAlpha for flare layers with alpha=0 textures
-        if (material.blenmode == BlendMode::Additive && context.has_puppet_objects) {
-            material.blenmode = BlendMode::AdditiveNoAlpha;
-        }
     }
 
     for (const auto& cs : sourceMaterial.constantshadervalues) {

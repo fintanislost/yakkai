@@ -37,6 +37,7 @@ if (context.has_puppet_objects && hasEffect) {
 3. Hex-hash layers (16+ hex chars) KEEP their effects
 4. ALL other layers get effects stripped
 5. The puppet layer itself also gets effects stripped (separate check: `if (puppet && hasEffect)`)
+6. Flare/lens/hash layers with `alpha == 0.0` get alpha forced to `1.0` (script-controlled visibility workaround)
 
 ### Regression history
 This scene has broken repeatedly during development. Common failure modes:
@@ -44,7 +45,7 @@ This scene has broken repeatedly during development. Common failure modes:
 1. **Washed-out blue background** — caused by LUT/blur effects running through the pipeline. Fix: strip effects for non-flare layers.
 2. **Black diamond overlay** — `c7884e...` hex-hash layer rendering with opaque black background. Fix: keep its effect chain (it's a lens flare component).
 3. **White rectangle** — flare layer with wrong blend mode. Fix: keep effect chain for proper alpha processing.
-4. **Invisible flares** — flare textures have alpha=0, SRC_ALPHA blend makes them invisible without effect chain. Fix: keep flare effect chains.
+4. **Invisible flares** — flare textures have alpha=0 (script-controlled visibility). Fix: keep flare effect chains AND force `alpha=1.0` for flare/lens/hash layers in the puppet bypass. The shader cache can mask this bug — always verify with a fresh cache (`rm -rf ~/.cache/wescene-renderer/3228578419/spvs01/`).
 5. **Puppet mesh tile seams** — background pulse effects create brightness variations visible through puppet mesh gaps. Fix: strip background effects.
 6. **Missing desk/background** — global effect changes (like HLSL define in fragment shaders) affecting lighting normals. Fix: HLSL only in common header, let each shader handle its own fragment HLSL blocks.
 

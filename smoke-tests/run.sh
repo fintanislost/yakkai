@@ -21,6 +21,14 @@ fi
 cp build/native/scene_backend/libpapercompany_scene_backend.so \
    build/qml/io/papercompany/scene/libpapercompany_scene_backend.so 2>/dev/null || true
 
+# Clear shader cache so smoke tests verify the actual pipeline, not stale SPIR-V.
+# Cached shaders have masked regressions before (invisible flares, wrong colors).
+CACHE_DIR="$HOME/.cache/wescene-renderer"
+if [ -d "$CACHE_DIR" ]; then
+    echo "Clearing shader cache at $CACHE_DIR"
+    rm -rf "$CACHE_DIR"/*/spvs01/
+fi
+
 PASS=0
 FAIL=0
 UPDATE="${1:-}"

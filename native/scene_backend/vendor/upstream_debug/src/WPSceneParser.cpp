@@ -72,6 +72,7 @@ struct ParseContext {
     SceneType scene_type { SceneType::Standard };
     bool has_puppet_objects { false };
     bool has_video_textures { false };
+    int  puppet_parse_successes { 0 };
 
     ShaderValueMap             global_base_uniforms;
     std::shared_ptr<SceneNode> effect_camera_node;
@@ -2326,6 +2327,9 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             LOG_ERROR("puppet has no bones: %s", wpimgobj.puppet.c_str());
             puppet = nullptr;
         }
+        if (puppet) {
+            context.puppet_parse_successes++;
+        }
     }
 
     // wpimgobj.origin[1] = context.ortho_h - wpimgobj.origin[1];
@@ -2350,6 +2354,10 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     // Strip effects for all layers EXCEPT flare/lens/hash layers, which need
     // their effect chain for alpha processing and screen-space compositing.
     //
+    // Flare/lens layers have alpha=0 in the scene JSON (script-controlled
+    // visibility). Since we don't execute WE scripts, force alpha=1 so they
+    // render. Their blend mode (colorBlendMode) handles compositing.
+    //
     // This block ONLY runs when has_puppet_objects is true. Non-puppet scenes
     // (video, standard) are NOT affected and use the full effect pipeline.
     // =========================================================================
@@ -2365,6 +2373,8 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             count_eff = 0;
             hasEffect = false;
             effectObjects.clear();
+        } else if (wpimgobj.alpha == 0.0f) {
+            wpimgobj.alpha = 1.0f;
         }
     }
     bool                  usePuppetChannelMapPrepass { false };
@@ -3446,9 +3456,9 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
         }
     }
 
-    // Detect scene type from parsed objects.
-    // Note: video textures are detected later during texture parsing (MP4 in
-    // .tex container), so has_video_textures is set during ParseImageObj, not here.
+    // Detect puppet references. Actual parse success is tracked during
+    // ParseImageObj — if all puppets fail to parse, scene_type is downgraded
+    // to Standard after parsing completes.
     for (const auto& obj : wp_objs) {
         if (const auto* img = std::get_if<wpscene::WPImageObject>(&obj)) {
             if (! img->puppet.empty()) {
@@ -3538,6 +3548,15 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
                        },
                    },
                    obj);
+    }
+
+    // Post-parse fixup: if scene was detected as Puppet but NO puppets
+    // actually parsed, downgrade to Standard. This prevents the effect bypass
+    // from activating for scenes with broken/unsupported puppet MDL formats.
+    if (context.has_puppet_objects && context.puppet_parse_successes == 0) {
+        LOG_INFO("all puppet parses failed — downgrading scene type from Puppet to Standard");
+        context.has_puppet_objects = false;
+        context.scene_type = ParseContext::SceneType::Standard;
     }
 
     for (const auto& [parentId, children] : context.deferred_children) {

@@ -586,6 +586,9 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
         break;
     }
 
+    LOG_INFO("mdl parse: mdType=%s mdVersion=%d pos=%td fileSize=%td bones=%u",
+             mdType.c_str(), mdVersion, f.Tell(), f.Size(), bones_num);
+
     if (mdType == "MDLA" && mdl.mdla > 0) {
         if (mdl.mdla != 0) {
             uint end_size = f.ReadUint32();
@@ -595,10 +598,13 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
             }
 
             uint anim_num = f.ReadUint32();
+            LOG_INFO("mdl MDLA: version=%d end_size=%u section_end=%td anim_num=%u pos=%td",
+                     mdl.mdla, end_size, mdla_section_end, anim_num, f.Tell());
             anims.resize(anim_num);
             for (auto& anim : anims) {
                 if (! SeekNextPuppetAnimationHeader(f, f.Tell(), mdla_section_end, bones_num)) {
-                    LOG_ERROR("failed to locate puppet animation header starting from %td", f.Tell());
+                    LOG_ERROR("failed to locate puppet animation header starting from %td (section_end=%td bones=%u)",
+                              f.Tell(), mdla_section_end, bones_num);
                     return false;
                 }
 

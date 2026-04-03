@@ -3635,7 +3635,10 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
             {
                 const auto& ov = opacityProp.at("value");
                 if (ov.is_number()) opacity = ov.get<float>();
-                else if (ov.is_string()) opacity = std::stof(ov.get<std::string>());
+                else if (ov.is_string()) {
+                    try { opacity = std::stof(ov.get<std::string>()); }
+                    catch (...) { opacity = 1.0f; }
+                }
             }
             context.pending_tint_overlays.push_back({ col, opacity });
             LOG_INFO("detected tint overlay property: %s color=(%.3f,%.3f,%.3f) opacity=%.2f",

@@ -568,8 +568,8 @@ inline bool _GetJsonValue(const nlohmann::json& json, T& value) {
             return true;
         }
         if (njson.is_string()) {
-            value = static_cast<T>(std::llround(std::stod(njson.get<std::string>())));
-            return true;
+            try { value = static_cast<T>(std::llround(std::stod(njson.get<std::string>()))); return true; }
+            catch (...) { return false; }
         }
     } else if constexpr (std::is_floating_point_v<T>) {
         if (njson.is_number()) {
@@ -577,8 +577,8 @@ inline bool _GetJsonValue(const nlohmann::json& json, T& value) {
             return true;
         }
         if (njson.is_string()) {
-            value = static_cast<T>(std::stod(njson.get<std::string>()));
-            return true;
+            try { value = static_cast<T>(std::stod(njson.get<std::string>())); return true; }
+            catch (...) { return false; }
         }
     }
 

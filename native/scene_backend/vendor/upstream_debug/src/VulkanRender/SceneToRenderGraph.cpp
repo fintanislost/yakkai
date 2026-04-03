@@ -199,6 +199,8 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
                 }
 
                 if (url == output) {
+                    LOG_INFO("render graph: self-write detected: tex[%zu]=%s, adding copy",
+                             i, url.c_str());
                     builder.markSelfWrite(input);
                     input = rg::addCopyPass(rgraph, input);
                 }

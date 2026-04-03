@@ -47,6 +47,7 @@ public:
     SceneNode&  FinalNode() const { return *m_final_node; }
     void        SetFinalBlend(BlendMode m) { m_final_blend = m; }
     void        SetPublishFinalOutput(bool value) { m_publish_final_output = value; }
+    void        SetFullscreen(bool value) { fullscreen = value; }
 
     void ResolveEffect(const SceneMesh& defualt_mesh, std::string_view effect_cam);
 

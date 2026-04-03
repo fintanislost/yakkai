@@ -48,7 +48,24 @@ if(PAPER_ENABLE_VENDORED_SCENE_BACKEND)
         list(APPEND paper_scene_vendor_sources
             "${paper_scene_vendor_root}/third_party/glad/src/glad.c"
             "${paper_scene_vendor_root}/third_party/SPIRV-Reflect/spirv_reflect.c"
+            "${paper_scene_vendor_root}/third_party/quickjs/quickjs.c"
+            "${paper_scene_vendor_root}/third_party/quickjs/libregexp.c"
+            "${paper_scene_vendor_root}/third_party/quickjs/libunicode.c"
+            "${paper_scene_vendor_root}/third_party/quickjs/cutils.c"
+            "${paper_scene_vendor_root}/third_party/quickjs/dtoa.c"
         )
+        foreach(_qjs_src
+            "${paper_scene_vendor_root}/third_party/quickjs/quickjs.c"
+            "${paper_scene_vendor_root}/third_party/quickjs/libregexp.c"
+            "${paper_scene_vendor_root}/third_party/quickjs/libunicode.c"
+            "${paper_scene_vendor_root}/third_party/quickjs/cutils.c"
+            "${paper_scene_vendor_root}/third_party/quickjs/dtoa.c"
+        )
+            set_source_files_properties("${_qjs_src}" PROPERTIES
+                COMPILE_OPTIONS "-Wno-all;-Wno-extra;-fvisibility=hidden"
+                COMPILE_DEFINITIONS "CONFIG_VERSION=\"2025-04-26\""
+            )
+        endforeach()
         set(paper_scene_vendor_include_dirs
             "${paper_scene_vendor_root}"
             "${paper_scene_vendor_root}/src/Audio/include"
@@ -68,6 +85,7 @@ if(PAPER_ENABLE_VENDORED_SCENE_BACKEND)
             "${paper_scene_vendor_root}/third_party/nlohmann/include"
             "${paper_scene_vendor_root}/third_party/SPIRV-Reflect"
             "${paper_scene_vendor_root}/third_party/SPIRV-Reflect/include"
+            "${paper_scene_vendor_root}/third_party/quickjs"
         )
 
         foreach(paper_scene_vendor_header IN LISTS paper_scene_vendor_headers)

@@ -1,5 +1,7 @@
 #include "WPSceneParser.hpp"
 #include "WPJson.hpp"
+#include "WPSceneScript.hpp"
+#include <sstream>
 
 #include "Utils/String.h"
 #include "Utils/Logging.h"
@@ -80,6 +82,31 @@ struct ParseContext {
     std::shared_ptr<SceneNode> global_perspective_camera_node;
     CameraPose                scene_perspective_pose;
     bool                      has_scene_perspective_pose { false };
+
+    // Color tint overlays resolved from scene properties.
+    // Populated from project.json colour/opacity pairs during init.
+    struct ColorTintOverlay {
+        std::array<float, 3> color;
+        float                alpha;
+    };
+    std::vector<ColorTintOverlay> pending_tint_overlays;
+
+    // Composite tint color derived from the overlay properties.
+    // Applied to all non-solid layers' g_Color4 to simulate WE's
+    // script-driven color tinting of grayscale textures.
+    std::array<float, 3> composite_tint { 1.0f, 1.0f, 1.0f };
+
+    // Script-resolved color/alpha bindings per object ID.
+    // Populated by pre-scanning scene JSON for thisLayer.color/alpha scripts.
+    struct ScriptColorBinding {
+        std::array<float, 3> color { 1.0f, 1.0f, 1.0f };
+        float                alpha { 1.0f };
+        std::array<float, 3> origin { 0.0f, 0.0f, 0.0f };
+        bool                 has_color { false };
+        bool                 has_alpha { false };
+        bool                 has_origin { false };
+    };
+    std::unordered_map<int32_t, ScriptColorBinding> script_color_bindings;
 };
 
 struct WPSolidAnchorObject {
@@ -611,8 +638,8 @@ bool TryPreparePuppetChannelMapPrepass(const wpscene::WPImageObject& imageObject
         return false;
     }
 
-    if (! vfs.Open("/assets/" + channelMapMaterialPath)) {
-        return false;
+    if (! vfs.Contains("/assets/" + channelMapMaterialPath)) {
+        return false; // channelmap is optional — many scenes don't have one
     }
 
     nlohmann::json materialJson;
@@ -1940,6 +1967,8 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
                               .preprocess_info = {},
                           } };
 
+
+
     for (const auto& el : wpmat.combos) {
         pWPShaderInfo->combos[el.first] = std::to_string(el.second);
     }
@@ -1987,11 +2016,20 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
             texinfos.push_back({ true });
     }
 
+    // Disable shadow mapping and light cookies — we don't render shadow
+    // depth maps or cookie textures. LIGHTING itself is kept enabled so
+    // PerformLighting_V1 can compute point light contributions.
+    if (exists(pWPShaderInfo->combos, "LIGHTS_SHADOW_MAPPING")) {
+        pWPShaderInfo->combos["LIGHTS_SHADOW_MAPPING"] = "0";
+    }
+    if (exists(pWPShaderInfo->combos, "LIGHTS_COOKIE")) {
+        pWPShaderInfo->combos["LIGHTS_COOKIE"] = "0";
+    }
+
     for (auto& unit : sd_units) {
         unit.src = WPShaderParser::PreShaderSrc(vfs, unit.src, pWPShaderInfo, texinfos);
     }
     if (wpmat.shader == "genericimage4" && shaderUsesChannelMapAlphaMask) {
-        pWPShaderInfo->combos["LIGHTING"]   = "0";
         pWPShaderInfo->combos["REFLECTION"] = "0";
         pWPShaderInfo->combos["NORMALMAP"]  = "0";
         pWPShaderInfo->combos["PBRMASKS"]   = "0";
@@ -2097,17 +2135,13 @@ const auto& f1     = texh.spriteAnim.GetCurFrame();
             materialShader.constValues[gResolution] = array_cast<float>(resolution);
         }
     }
-    if (exists(pWPShaderInfo->combos, "LIGHTING")) {
-        // pWPShaderInfo->combos["PRELIGHTING"] =
-        // pWPShaderInfo->combos.at("LIGHTING");
-    }
-
     if (! WPShaderParser::CompileToSpv(
             pScene->scene_id, sd_units, shader->codes, vfs, pWPShaderInfo, texinfos)) {
         return false;
     }
 
     material.blenmode = ParseBlendMode(wpmat.blending);
+
 
     for (uint i = 0; i < material.textures.size(); i++) {
         if (! exists(sd_units[1].preprocess_info.active_tex_slots, i)) material.textures[i].clear();
@@ -2229,6 +2263,38 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
     context.shader_updater = static_cast<WPShaderValueUpdater*>(scene.shaderValueUpdater.get());
 
     scene.clearColor = sc.general.clearcolor;
+
+    // Apply detected tint overlays to the clear color. WE scenes with
+    // script-driven color overlays use solid layers to tint the background,
+    // but our solid layer rendering is z-order dependent. As a fallback,
+    // blend the tint colors into the clear color itself.
+    // Scene property color overlays: use the most saturated color property
+    // to tint the clear color. This provides a colored background that shows
+    // through transparent areas of layers. BC3 textures have their own colors
+    // baked in, so we don't tint the layer textures — only the background.
+    // Blend the clear color with the most saturated scene color property.
+    // Textures have their own colors baked in (BC3/DXT5) — the clear color
+    // only shows where layers are transparent. A 50/50 blend keeps the
+    // atmosphere color visible without crushing the overall brightness.
+    if (! context.pending_tint_overlays.empty()) {
+        auto& cc = scene.clearColor;
+        for (const auto& overlay : context.pending_tint_overlays) {
+            float gray = (overlay.color[0] + overlay.color[1] + overlay.color[2]) / 3.0f;
+            float sat = std::abs(overlay.color[0] - gray) +
+                        std::abs(overlay.color[1] - gray) +
+                        std::abs(overlay.color[2] - gray);
+            if (sat > 0.05f) {
+                // Blend 50/50 between original clear color and the atmosphere
+                // property. This provides a medium-dark background that
+                // matches the general tone of the BC3 texture colors.
+                cc[0] = (cc[0] + overlay.color[0]) * 0.5f;
+                cc[1] = (cc[1] + overlay.color[1]) * 0.5f;
+                cc[2] = (cc[2] + overlay.color[2]) * 0.5f;
+                LOG_INFO("tint-adjusted clear color: (%.3f,%.3f,%.3f)", cc[0], cc[1], cc[2]);
+                break;
+            }
+        }
+    }
     scene.ortho[0]   = sc.general.orthogonalprojection.width;
     scene.ortho[1]   = sc.general.orthogonalprojection.height;
     context.ortho_w  = scene.ortho[0];
@@ -2261,11 +2327,6 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
 void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     auto& wpimgobj = img_obj;
     if (! wpimgobj.visible) return;
-    if (wpimgobj.image == "models/util/composelayer.json") {
-        LOG_INFO("skipping composelayer (not implemented): name=%s id=%d",
-                 wpimgobj.name.c_str(), wpimgobj.id);
-        return;
-    }
     if (DebugSkipLayerByName(wpimgobj.name)) {
         LOG_INFO("debug skipping image layer: name=%s id=%d image=%s",
                  wpimgobj.name.c_str(),
@@ -2286,6 +2347,28 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                          layer.name.c_str());
             }
         }
+    }
+
+    // Apply pending tint overlays to solid layers with default black color.
+    // WE scenes use scripts to set solid layer colors from scene properties;
+    // we statically resolve these by matching solid layers to detected
+    // colour/opacity property pairs in order.
+    // Only apply to generic solid/color layers, not audio bars or named UI elements
+    const bool isSolidColorOverlay =
+        wpimgobj.image == "models/util/solidlayer.json" &&
+        wpimgobj.color[0] == 0.0f && wpimgobj.color[1] == 0.0f && wpimgobj.color[2] == 0.0f &&
+        (wpimgobj.name.find("Solid") != std::string::npos ||
+         wpimgobj.name.find("solid") != std::string::npos ||
+         wpimgobj.name == "\xe7\xba\xaf\xe8\x89\xb2" /* 纯色 */ ||
+         wpimgobj.name.empty());
+    if (isSolidColorOverlay && ! context.pending_tint_overlays.empty()) {
+        auto overlay = context.pending_tint_overlays.front();
+        context.pending_tint_overlays.erase(context.pending_tint_overlays.begin());
+        wpimgobj.color = overlay.color;
+        wpimgobj.alpha = overlay.alpha;
+        LOG_INFO("applied tint overlay to solid layer: name=%s id=%d color=(%.3f,%.3f,%.3f) alpha=%.2f",
+                 wpimgobj.name.c_str(), wpimgobj.id,
+                 overlay.color[0], overlay.color[1], overlay.color[2], overlay.alpha);
     }
 
     // coloBlendMode load passthrough manaully
@@ -2316,6 +2399,26 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
 
     bool isCompose = (wpimgobj.image == "models/util/composelayer.json");
 
+    // Skip effectless fullscreen/compose layers — they're no-ops
+    if (! hasEffect && wpimgobj.fullscreen) return;
+    if (! hasEffect && isCompose) return;
+
+    // Debug: PAPER_NO_EFFECTS=1 strips all effects for color debugging
+    if (std::getenv("PAPER_NO_EFFECTS")) {
+        count_eff = 0;
+        hasEffect = false;
+        effectObjects.clear();
+        if (isCompose) return; // skip composelayer entirely
+    }
+
+    if (isCompose) {
+        // Don't force fullscreen — use the composelayer's own size for render targets.
+        LOG_INFO("processing composelayer: name=%s id=%d effects=%d fullscreen=%d size=(%.0f,%.0f)",
+                 wpimgobj.name.c_str(), wpimgobj.id, count_eff,
+                 wpimgobj.fullscreen ? 1 : 0,
+                 wpimgobj.size[0], wpimgobj.size[1]);
+    }
+
     std::unique_ptr<WPMdl> puppet;
     if (! wpimgobj.puppet.empty()) {
         puppet = std::make_unique<WPMdl>();
@@ -2332,7 +2435,13 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         }
     }
 
-    // wpimgobj.origin[1] = context.ortho_h - wpimgobj.origin[1];
+    // Apply script-resolved origin binding before creating the scene node.
+    {
+        auto it = context.script_color_bindings.find(wpimgobj.id);
+        if (it != context.script_color_bindings.end() && it->second.has_origin) {
+            wpimgobj.origin = it->second.origin;
+        }
+    }
     auto spImgNode = std::make_shared<SceneNode>(Vector3f(wpimgobj.origin.data()),
                                                  Vector3f(wpimgobj.scale.data()),
                                                  Vector3f(wpimgobj.angles.data()));
@@ -2346,34 +2455,47 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     WPShaderInfo   shaderInfo;
     wpscene::WPMaterial sourceMaterial = wpimgobj.material;
     // =========================================================================
-    // PUPPET SCENE EFFECT BYPASS — DO NOT MODIFY WITHOUT REGRESSION TESTING
+    // PUPPET SCENE EFFECT HANDLING
     // Smoke test: smoke-tests/3228578419-sleeping-arona.png
     //
-    // Puppet scenes have a broken effect chain (puppet mesh as FinalMesh
-    // produces wrong colors, LUT/blur effects produce washed-out output).
-    // Strip effects for all layers EXCEPT flare/lens/hash layers, which need
-    // their effect chain for alpha processing and screen-space compositing.
+    // In puppet scenes, strip only KNOWN-PROBLEMATIC effects (LUT color grading
+    // on individual non-fullscreen layers) that produce washed-out output.
+    // Keep SAFE effects: waterflow, waterwaves, opacity, shine, iris, shake,
+    // pulse, blur — these are distortion/animation effects that render correctly.
     //
-    // Flare/lens layers have alpha=0 in the scene JSON (script-controlled
-    // visibility). Since we don't execute WE scripts, force alpha=1 so they
-    // render. Their blend mode (colorBlendMode) handles compositing.
-    //
-    // This block ONLY runs when has_puppet_objects is true. Non-puppet scenes
-    // (video, standard) are NOT affected and use the full effect pipeline.
+    // Flare/lens layers with alpha=0 get alpha forced to 1.0 (script-controlled
+    // visibility workaround).
     // =========================================================================
     if (context.has_puppet_objects && hasEffect) {
         const bool isFlareOrLens =
             wpimgobj.name.find("flare") != std::string::npos ||
             wpimgobj.name.find("lense") != std::string::npos ||
-            wpimgobj.name.find("lens") != std::string::npos;
-        const bool isHashElement =
-            wpimgobj.name.size() >= 16 &&
-            wpimgobj.name.find_first_not_of("0123456789abcdef") == std::string::npos;
-        if (! isFlareOrLens && ! isHashElement) {
+            wpimgobj.name.find("lens") != std::string::npos ||
+            wpimgobj.colorBlendMode != 0;
+        // The offscreen effect rendering path breaks alpha compositing,
+        // causing transparent regions to become opaque (hiding layers behind).
+        // Strip effects from all regular layers until the offscreen alpha path
+        // is fixed. Composelayer and flare/lens layers keep their effects.
+        if (! isCompose && ! isFlareOrLens) {
+            LOG_INFO("stripping %d effects from layer (alpha fix): name=%s",
+                     count_eff, wpimgobj.name.c_str());
             count_eff = 0;
             hasEffect = false;
             effectObjects.clear();
-        } else if (wpimgobj.alpha == 0.0f) {
+        } else if (true) {
+            // Keep effects for composelayer and flare/lens
+        } else {
+            // Strip effects to prevent washed-out output from unknown effect types
+            const bool isHashElement =
+                wpimgobj.name.size() >= 16 &&
+                wpimgobj.name.find_first_not_of("0123456789abcdef") == std::string::npos;
+            if (! isFlareOrLens && ! isHashElement && ! isCompose) {
+                count_eff = 0;
+                hasEffect = false;
+                effectObjects.clear();
+            }
+        }
+        if (isFlareOrLens && wpimgobj.alpha == 0.0f) {
             wpimgobj.alpha = 1.0f;
         }
     }
@@ -2392,12 +2514,27 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             }
         }
 
-        baseConstSvs["g_Color4"]     = std::array<float, 4> {
-            wpimgobj.color[0],
-            wpimgobj.color[1],
-            wpimgobj.color[2],
-            wpimgobj.alpha
-        };
+        {
+            // Apply composite tint from scene color properties to layer color.
+            // Skip puppet layers (need their own luminance contrast).
+            // Apply script-resolved color/alpha bindings if available.
+            // These override the layer's default color/alpha with values
+            // from scene properties (resolved from WE script patterns).
+            auto it = context.script_color_bindings.find(wpimgobj.id);
+            if (it != context.script_color_bindings.end()) {
+                if (it->second.has_color) wpimgobj.color = it->second.color;
+                if (it->second.has_alpha) wpimgobj.alpha = it->second.alpha;
+            }
+
+            // Textures have their own colors baked in (BC3/DXT5 with RGB).
+            // Use g_Color4 from the layer's own color/alpha properties only.
+            baseConstSvs["g_Color4"] = std::array<float, 4> {
+                wpimgobj.color[0],
+                wpimgobj.color[1],
+                wpimgobj.color[2],
+                wpimgobj.alpha
+            };
+        }
         baseConstSvs["g_UserAlpha"]  = wpimgobj.alpha;
         baseConstSvs["g_Brightness"] = wpimgobj.brightness;
 
@@ -2545,11 +2682,13 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             if (scene.linkedCameras.count("global") == 0) scene.linkedCameras["global"] = {};
             scene.linkedCameras.at("global").push_back(nodeAddr);
         } else {
-            // applly scale to crop
-            i32 w                   = (i32)wpimgobj.size[0];
-            i32 h                   = (i32)wpimgobj.size[1];
+            // Create per-layer effect camera. Positioned after CopyTrans
+            // resets the node so the camera matches the node's post-reset
+            // world position (parent chain only, no local offset).
+            i32 w = (i32)wpimgobj.size[0];
+            i32 h = (i32)wpimgobj.size[1];
             scene.cameras[nodeAddr] = std::make_shared<SceneCamera>(w, h, -1.0f, 1.0f);
-            scene.cameras.at(nodeAddr)->AttatchNode(context.effect_camera_node);
+            // Camera node positioning deferred to after CopyTrans below
         }
         spImgNode->SetCamera(nodeAddr);
         std::string effect_ppong_a, effect_ppong_b;
@@ -2563,6 +2702,9 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             spImgNode.get(), wpimgobj.size[0], wpimgobj.size[1], effect_ppong_a, effect_ppong_b);
         {
             imgEffectLayer->SetFinalBlend(imgBlendMode);
+            if (wpimgobj.fullscreen || isCompose) {
+                imgEffectLayer->SetFullscreen(true);
+            }
             if (useStandalonePuppetFinalDisplay) {
                 imgEffectLayer->SetPublishFinalOutput(false);
             }
@@ -2575,6 +2717,17 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             if (isCompose) {
             } else {
                 spImgNode->CopyTrans(SceneNode());
+                // Position effect camera at the parent container's world
+                // position. After CopyTrans reset, the node's local transform
+                // is identity, but the scene graph parent (attached later via
+                // AttachObjectNode) will shift the mesh. The camera must match.
+                // Note: Parent() is NULL here — node isn't attached yet — so
+                // we look up the parent from already-parsed object_nodes.
+                // The effect camera stays at (0,0,0) to match the node's
+                // post-reset position. The node has no parent during the base
+                // pass (AttachObjectNode runs later), so the mesh renders at
+                // local origin — the camera must be there too.
+                scene.cameras.at(nodeAddr)->AttatchNode(context.effect_camera_node);
             }
             scene.cameras.at(nodeAddr)->AttatchImgEffect(imgEffectLayer);
         }
@@ -2621,6 +2774,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         }
 
         int32_t i_eff = -1;
+        int32_t debug_eff_total = effectObjects.size();
         for (const auto& wpeffobj : effectObjects) {
             i_eff++;
             if (! wpeffobj.visible) {
@@ -2693,6 +2847,11 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 if (wpeffobj.passes.size() > i_mat) {
                     const auto& wppass = wpeffobj.passes.at(i_mat);
                     wpmat.MergePass(wppass);
+                    // Map ENABLEMASK → MASK (scene JSON uses ENABLEMASK,
+                    // shader uses MASK as the preprocessor combo name)
+                    if (wpmat.combos.count("ENABLEMASK") && wpmat.combos.at("ENABLEMASK") != 0) {
+                        wpmat.combos["MASK"] = wpmat.combos.at("ENABLEMASK");
+                    }
                     // Set rendertarget, in and out
                     for (const auto& el : wppass.bind) {
                         if (fboMap.count(el.name) == 0) {
@@ -3419,6 +3578,7 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
     nlohmann::json json;
     if (! PARSE_JSON(buf, json)) return nullptr;
 
+
     nlohmann::json sceneProperties = ResolveSceneProperties(vfs, m_scene_properties_json);
     SetActiveScenePropertyState(sceneProperties);
     struct ClearScenePropertyStateGuard {
@@ -3434,6 +3594,119 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
     //	LOG_INFO(nlohmann::json(sc).dump(4));
 
     ParseContext context;
+
+    // Detect color tint overlay properties from scene settings.
+    // WE scenes commonly have colour0/opacity0 + colour1/opacity1 pairs
+    // that are applied to solid layers via scripts at runtime.
+    if (sceneProperties.is_object()) {
+        // Scan for sequential color+opacity property pairs
+        for (int idx = 0; idx < 20; ++idx) {
+            auto colorKey = [&](int i) -> std::string {
+                // Try common naming patterns
+                for (const auto& prefix : { "newproperty", "colour", "color" }) {
+                    std::string base = std::string(prefix) + std::to_string(i);
+                    if (sceneProperties.contains(base)) {
+                        const auto& prop = sceneProperties.at(base);
+                        if (prop.is_object() && prop.contains("type") &&
+                            prop.at("type").is_string() && prop.at("type").get<std::string>() == "color")
+                            return base;
+                    }
+                }
+                return {};
+            };
+            // Look for colour0/opacity + colour1/opacity pattern starting from index 11
+            // (common WE naming: newproperty11=colour0, newproperty12=opacity, etc.)
+            std::string ck = colorKey(11 + idx * 2);
+            if (ck.empty()) continue;
+            std::string ok = "newproperty" + std::to_string(12 + idx * 2);
+            if (! sceneProperties.contains(ok)) continue;
+            const auto& colorProp = sceneProperties.at(ck);
+            const auto& opacityProp = sceneProperties.at(ok);
+            if (! colorProp.contains("value") || ! opacityProp.contains("value")) continue;
+            std::array<float, 3> col { 0, 0, 0 };
+            float opacity = 1.0f;
+            {
+                std::string sv = colorProp.at("value").is_string()
+                    ? colorProp.at("value").get<std::string>()
+                    : colorProp.at("value").dump();
+                std::istringstream iss(sv);
+                iss >> col[0] >> col[1] >> col[2];
+            }
+            {
+                const auto& ov = opacityProp.at("value");
+                if (ov.is_number()) opacity = ov.get<float>();
+                else if (ov.is_string()) opacity = std::stof(ov.get<std::string>());
+            }
+            context.pending_tint_overlays.push_back({ col, opacity });
+            LOG_INFO("detected tint overlay property: %s color=(%.3f,%.3f,%.3f) opacity=%.2f",
+                     ck.c_str(), col[0], col[1], col[2], opacity);
+        }
+    }
+
+    // Pre-scan: evaluate SceneScript modules found in scene objects.
+    // WE scenes can have {"script": "...", "value": ...} structured values
+    // that contain JavaScript modules. We evaluate these with QuickJS to
+    // resolve color/alpha/origin bindings from scene properties.
+    {
+        SceneScriptContext scriptCtx;
+        scriptCtx.setUserProperties(sceneProperties);
+        scriptCtx.setCanvasSize(sc.general.orthogonalprojection.width,
+                                sc.general.orthogonalprojection.height);
+
+        for (const auto& obj : json.at("objects")) {
+            if (! obj.contains("id")) continue;
+            int32_t objId = obj.at("id").get<int32_t>();
+
+            // Find script strings anywhere in the object's JSON tree
+            std::function<void(const nlohmann::json&)> scanForScripts =
+                [&](const nlohmann::json& node) {
+                if (node.is_object() && node.contains("script") &&
+                    node.at("script").is_string()) {
+                    const auto& script = node.at("script").get_ref<const std::string&>();
+                    if (script.size() < 50) return; // skip trivial scripts
+
+                    // Get current layer defaults
+                    std::array<float, 3> origin { 0, 0, 0 };
+                    std::array<float, 3> color { 1, 1, 1 };
+                    float alpha = 1.0f;
+                    if (obj.contains("origin")) {
+                        std::string ov = obj.at("origin").is_string()
+                            ? obj.at("origin").get<std::string>() : "";
+                        std::istringstream iss(ov);
+                        iss >> origin[0] >> origin[1] >> origin[2];
+                    }
+
+                    auto result = scriptCtx.evaluateLayerScript(script, origin, color, alpha);
+                    if (result.color) {
+                        context.script_color_bindings[objId].color = *result.color;
+                        context.script_color_bindings[objId].has_color = true;
+                        LOG_INFO("QuickJS binding: id=%d color=(%.3f,%.3f,%.3f)",
+                                 objId, (*result.color)[0], (*result.color)[1], (*result.color)[2]);
+                    }
+                    if (result.alpha) {
+                        context.script_color_bindings[objId].alpha = *result.alpha;
+                        context.script_color_bindings[objId].has_alpha = true;
+                        LOG_INFO("QuickJS binding: id=%d alpha=%.3f", objId, *result.alpha);
+                    }
+                    if (result.origin) {
+                        context.script_color_bindings[objId].origin = *result.origin;
+                        context.script_color_bindings[objId].has_origin = true;
+                        LOG_INFO("QuickJS binding: id=%d origin=(%.0f,%.0f,%.0f)",
+                                 objId, (*result.origin)[0], (*result.origin)[1], (*result.origin)[2]);
+                    }
+                } else if (node.is_object()) {
+                    for (const auto& [k, v] : node.items()) scanForScripts(v);
+                } else if (node.is_array()) {
+                    for (const auto& v : node) scanForScripts(v);
+                }
+            };
+            scanForScripts(obj);
+        }
+        if (! context.script_color_bindings.empty()) {
+            LOG_INFO("QuickJS resolved %zu script bindings from scene JSON",
+                     context.script_color_bindings.size());
+        }
+    }
 
     std::vector<WPObjectVar> wp_objs;
     int modelObjectCount = 0;

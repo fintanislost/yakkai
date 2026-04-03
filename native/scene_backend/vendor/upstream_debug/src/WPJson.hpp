@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <nlohmann/json_fwd.hpp>
+#include <optional>
 #include <string_view>
 #include <type_traits>
 
@@ -42,4 +43,5 @@ bool ParseJson(const char* file, const char* func, int line, const std::string& 
 
 void SetActiveScenePropertyState(const nlohmann::json& properties);
 void ClearActiveScenePropertyState();
+std::optional<nlohmann::json> LookupUserPropertyValue(std::string_view name);
 } // namespace wallpaper

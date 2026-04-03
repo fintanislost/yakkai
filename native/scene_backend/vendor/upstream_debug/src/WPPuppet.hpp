@@ -93,6 +93,7 @@ public:
         double blend { 1.0f };
         bool   visible { true };
         bool   paused { false };
+        bool   additive { false };
         double cur_time { 0.0f };
     };
 

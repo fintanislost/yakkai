@@ -453,34 +453,72 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
     usize image_count = (usize)_image_count;
 
     img.slots.resize(image_count);
+    // TEXB v4: flat structure — {unknown(4), unknown(4), format(4), width(4), height(4),
+    //           lz4_flag(4), decomp_size(4), comp_size(4), payload...}
+    // TEXB v1-v3: per-slot mipmap loop — {mipmap_count, [width, height, [lz4, decomp], size, data]...}
+    const bool isTexbV4 = img.header.extraHeader["texb"].val >= 4;
+
     for (usize i_image = 0; i_image < image_count; i_image++) {
         auto& img_slot = img.slots[i_image];
         auto& mipmaps  = img_slot.mipmaps;
 
-        usize mipmap_count = (usize)std::max<i32>(file.ReadInt32(), 0);
-        mipmaps.resize(mipmap_count);
-        // load image
-        for (usize i_mipmap = 0; i_mipmap < mipmap_count; i_mipmap++) {
-            auto& mipmap  = mipmaps.at(i_mipmap);
-            mipmap.width  = file.ReadInt32();
-            mipmap.height = file.ReadInt32();
-            if (i_mipmap == 0) {
-                img_slot.width  = mipmap.width;
-                img_slot.height = mipmap.height;
-                SetHeaderPow2(img.header, mipmap.width, mipmap.height);
-            }
+        bool    LZ4_compressed    = false;
+        int32_t decompressed_size = 0;
+        i32     src_size          = 0;
 
-            bool    LZ4_compressed    = false;
-            int32_t decompressed_size = 0;
-            // check compress
-            if (img.header.extraHeader["texb"].val > 1) {
-                LZ4_compressed    = file.ReadInt32() == 1;
-                decompressed_size = file.ReadInt32();
-            }
+        if (isTexbV4) {
+            // TEXB v4 flat format
+            file.ReadInt32(); // unknown (0xFFFFFFFF)
+            file.ReadInt32(); // unknown (0)
+            file.ReadInt32(); // v4 format ID (different numbering from TEXI; TEXI is authoritative)
+            i32 v4_width  = file.ReadInt32();
+            i32 v4_height = file.ReadInt32();
+            LZ4_compressed    = file.ReadInt32() == 1;
+            decompressed_size = file.ReadInt32();
+            src_size          = file.ReadInt32();
 
-            i32 src_size = file.ReadInt32();
-            if (src_size <= 0 || mipmap.width <= 0 || mipmap.height <= 0 || decompressed_size < 0)
+            mipmaps.resize(1);
+            auto& mipmap  = mipmaps[0];
+            mipmap.width  = v4_width;
+            mipmap.height = v4_height;
+            img_slot.width  = v4_width;
+            img_slot.height = v4_height;
+            SetHeaderPow2(img.header, v4_width, v4_height);
+
+            if (src_size <= 0 || v4_width <= 0 || v4_height <= 0)
                 return nullptr;
+        } else {
+            // TEXB v1-v3 mipmap loop
+            usize mipmap_count = (usize)std::max<i32>(file.ReadInt32(), 0);
+            mipmaps.resize(mipmap_count);
+        }
+
+        usize mip_start = isTexbV4 ? 0 : 0;
+        usize mip_end   = isTexbV4 ? 1 : mipmaps.size();
+
+        for (usize i_mipmap = mip_start; i_mipmap < mip_end; i_mipmap++) {
+            auto& mipmap = mipmaps.at(i_mipmap);
+
+            if (! isTexbV4) {
+                mipmap.width  = file.ReadInt32();
+                mipmap.height = file.ReadInt32();
+                if (i_mipmap == 0) {
+                    img_slot.width  = mipmap.width;
+                    img_slot.height = mipmap.height;
+                    SetHeaderPow2(img.header, mipmap.width, mipmap.height);
+                }
+
+                LZ4_compressed    = false;
+                decompressed_size = 0;
+                if (img.header.extraHeader["texb"].val > 1) {
+                    LZ4_compressed    = file.ReadInt32() == 1;
+                    decompressed_size = file.ReadInt32();
+                }
+
+                src_size = file.ReadInt32();
+                if (src_size <= 0 || mipmap.width <= 0 || mipmap.height <= 0 || decompressed_size < 0)
+                    return nullptr;
+            }
 
             char* result;
             result = new char[(usize)src_size];

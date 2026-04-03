@@ -110,27 +110,25 @@ std::span<const Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer,
             double t = info.t;
             double one_t   = 1.0f - info.t;
 
-            // break up the delta quaternions from the animation start quaternion
-            // blend the starting quaternion using the reduced blending factor
-            // blend the delta using the full blending factor
             auto frame_a_quat_delta = frame_a.quaternion * frame_base.quaternion.conjugate();
             auto frame_b_quat_delta = frame_b.quaternion * frame_base.quaternion.conjugate();
-            quat *= frame_a_quat_delta.slerp(info.t, frame_b_quat_delta).slerp(1.0 - layer.anim_layer.blend, ident) 
-                * frame_base.quaternion.slerp(1.0 - (layer.blend), ident);
-                       
-            // break up the delta positions from the animation start position
-            // blend the starting position using the reduced blending factor
-            // blend the delta using the full blending factor
             auto frame_a_pos_delta = frame_a.position - frame_base.position;
             auto frame_b_pos_delta = frame_b.position - frame_base.position;
-            trans += (layer.blend * frame_base.position) + (layer.anim_layer.blend * (frame_a_pos_delta * one_t + frame_b_pos_delta * t));
+            auto frame_a_scale_delta = frame_a.scale - frame_base.scale;
+            auto frame_b_scale_delta = frame_b.scale - frame_base.scale;
 
-            // break up the delta scales from the animation start scale
-            // blend the starting scale using the reduced blending factor
-            // blend the delta using the full blending factor
-            auto& frame_a_scale_delta = frame_a.scale - frame_base.scale;
-            auto& frame_b_scale_delta = frame_b.scale - frame_base.scale;
-            scale += (layer.blend * frame_base.scale) + (layer.anim_layer.blend * (frame_a_scale_delta * one_t + frame_b_scale_delta * info.t));
+            if (alayer.additive) {
+                // Additive: only add the interpolated delta, no base contribution
+                quat *= frame_a_quat_delta.slerp(info.t, frame_b_quat_delta).slerp(1.0 - layer.blend, ident);
+                trans += layer.blend * (frame_a_pos_delta * one_t + frame_b_pos_delta * t);
+                scale += layer.blend * (frame_a_scale_delta * one_t + frame_b_scale_delta * info.t);
+            } else {
+                // Non-additive: blend base + delta
+                quat *= frame_a_quat_delta.slerp(info.t, frame_b_quat_delta).slerp(1.0 - layer.anim_layer.blend, ident)
+                    * frame_base.quaternion.slerp(1.0 - layer.blend, ident);
+                trans += (layer.blend * frame_base.position) + (layer.anim_layer.blend * (frame_a_pos_delta * one_t + frame_b_pos_delta * t));
+                scale += (layer.blend * frame_base.scale) + (layer.anim_layer.blend * (frame_a_scale_delta * one_t + frame_b_scale_delta * info.t));
+            }
         }
         affine.pretranslate(trans);
         affine.rotate(quat.slerp(global_blend, ident).cast<float>());
@@ -187,9 +185,10 @@ void WPPuppetLayer::prepared(std::span<AnimationLayer> alayers) {
     double& blend = m_global_blend;
     double& total_blend = m_total_blend;
 
+    // Only non-additive layers participate in blend normalization
     total_blend = 0.0;
     for (int i = 0; i < alayers.size(); i++) {
-        if(alayers[i].visible){
+        if (alayers[i].visible && ! alayers[i].additive) {
             total_blend += alayers[i].blend;
         }
     }
@@ -207,13 +206,13 @@ void WPPuppetLayer::prepared(std::span<AnimationLayer> alayers) {
             double &total_blend = m_total_blend;
 
             if (ok) {
-                if (total_blend > 1.0)
-                {
+                if (layer.additive) {
+                    // Additive layers use their blend weight directly
+                    cur_blend = layer.blend;
+                } else if (total_blend > 1.0) {
                     cur_blend = layer.blend / total_blend;
                     blend = 0.0;
-                }
-                else
-                {
+                } else {
                     cur_blend = blend * layer.blend;
                     blend *= 1.0f - layer.blend;
                     blend = blend < 0.0f ? 0.0f : blend;

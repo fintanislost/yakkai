@@ -244,7 +244,6 @@ void WPParticleRawGener::GenGLData(std::span<const std::unique_ptr<ParticleInsta
     */
     particle_num += GenParticleData(instances, specOp, opt, sv);
 
-    // LOG_INFO("num: %d", particle_num);
 
     u16 indexNum = (si.DataCount() * 2) / 6;
     if (particle_num > indexNum) {

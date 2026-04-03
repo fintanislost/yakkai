@@ -96,18 +96,28 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
         auto& material      = *mesh.Material();
         {
             material.blenmode = m_final_blend;
-            last_output->sceneNode->SetCamera(std::string());
-            last_output->sceneNode->SetVirtualParent(m_worldNode ? m_worldNode->Parent() : nullptr);
-            const auto finalMeshInfo = describe_mesh(*m_final_mesh);
-            LOG_INFO("effect final output: totalEffects=%zu blend=%d hasWorldNode=%d hasParent=%d finalMeshVerts=%zu tex0=%s",
-                     m_effects.size(),
-                     static_cast<int>(m_final_blend),
-                     m_worldNode ? 1 : 0,
-                     (m_worldNode && m_worldNode->Parent()) ? 1 : 0,
-                     finalMeshInfo[2],
-                     material.textures.empty() ? "" : material.textures.front().c_str());
-            last_output->sceneNode->CopyTrans(*m_final_node);
-            mesh.ChangeMeshDataFrom(*m_final_mesh);
+            if (fullscreen) {
+                // Fullscreen/composelayers: keep the effect camera and default
+                // mesh so the final output renders as a fullscreen blit. Using
+                // the composelayer's mesh with empty camera produces wrong MVP.
+                LOG_INFO("effect final output (fullscreen blit): totalEffects=%zu blend=%d tex0=%s",
+                         m_effects.size(),
+                         static_cast<int>(m_final_blend),
+                         material.textures.empty() ? "" : material.textures.front().c_str());
+            } else {
+                last_output->sceneNode->SetCamera(std::string());
+                last_output->sceneNode->SetVirtualParent(m_worldNode ? m_worldNode->Parent() : nullptr);
+                const auto finalMeshInfo = describe_mesh(*m_final_mesh);
+                LOG_INFO("effect final output: totalEffects=%zu blend=%d hasWorldNode=%d hasParent=%d finalMeshVerts=%zu tex0=%s",
+                         m_effects.size(),
+                         static_cast<int>(m_final_blend),
+                         m_worldNode ? 1 : 0,
+                         (m_worldNode && m_worldNode->Parent()) ? 1 : 0,
+                         finalMeshInfo[2],
+                         material.textures.empty() ? "" : material.textures.front().c_str());
+                last_output->sceneNode->CopyTrans(*m_final_node);
+                mesh.ChangeMeshDataFrom(*m_final_mesh);
+            }
             if (debugLongEffectChain) {
                 const auto meshInfo = describe_mesh(mesh);
                 LOG_INFO("effect final published node: totalEffects=%zu shader=%s tex0=%s va=%zu ia=%zu verts=%zu inds=%zu",

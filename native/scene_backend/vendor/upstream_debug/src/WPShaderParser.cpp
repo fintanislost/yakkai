@@ -283,10 +283,53 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
 
     std::string src = wallpaper::WPShaderParser::PreShaderHeader(in_src, combos, type);
 
-    // workaround #require directive
+    // Resolve #require directives — WE injects these at runtime.
+    // We provide our own implementations.
     {
+        static const std::string lightingV1Impl = R"(
+// --- PerformLighting_V1: point light PBR (no shadow mapping) ---
+uniform vec3 g_LightsPosition[4];
+uniform vec4 g_LightsColorRadius[4];
+
+vec3 PerformLighting_V1(vec3 worldPos, vec3 albedo, vec3 normal,
+                        vec3 viewDir, vec3 specularTint, vec3 f0,
+                        float roughness, float metallic)
+{
+    vec3 result = vec3(0.0);
+    for (int i = 0; i < 4; ++i) {
+        vec3 L = g_LightsPosition[i].xyz - worldPos;
+        float lightRadius = g_LightsColorRadius[i].w;
+        vec3 lightColor = g_LightsColorRadius[i].rgb;
+        if (lightRadius <= 0.0 || dot(lightColor, lightColor) <= 0.0) continue;
+        result += ComputePBRLightShadow(normal, L, viewDir, albedo, lightColor,
+                                        lightRadius, 2.0, specularTint, f0,
+                                        roughness, metallic, 1.0);
+    }
+    return result;
+}
+// --- end PerformLighting_V1 ---
+)";
+
         std::regex re_require("(^|\r?\n)#require (.+)(\r?\n)");
-        src = std::regex_replace(src, re_require, "$1//#require $2$3");
+        std::smatch match;
+        std::string tmp = src;
+        std::string out;
+        while (std::regex_search(tmp, match, re_require)) {
+            out += match.prefix().str() + match[1].str();
+            std::string name = match[2].str();
+            // Trim whitespace
+            while (! name.empty() && (name.back() == ' ' || name.back() == '\r'))
+                name.pop_back();
+            if (name == "LightingV1") {
+                out += lightingV1Impl;
+            } else {
+                out += "//#require " + name;  // Comment out unknown requires
+            }
+            out += match[3].str();
+            tmp = match.suffix().str();
+        }
+        out += tmp;
+        src = out;
     }
 
     // Fix unbalanced #if/#endif — some workshop shaders have extra #endif
@@ -316,6 +359,46 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
                 }
             }
             pos = lineEnd + 1;
+        }
+    }
+
+    // Strip custom inverse() polyfills — GLSL 150+ has it built-in.
+    // WE shaders include polyfills for older GLSL that conflict with the
+    // built-in when precision qualifiers are stripped by #define highp.
+    {
+        std::string::size_type pos = 0;
+        while ((pos = src.find("inverse(mat", pos)) != std::string::npos) {
+            // Check if this is a function DEFINITION (not a call)
+            // Look backwards for a type: "mat3 inverse(mat3" or "mat4 inverse(mat4"
+            auto lineStart = src.rfind('\n', pos);
+            if (lineStart == std::string::npos) lineStart = 0; else lineStart++;
+            auto line = src.substr(lineStart, pos - lineStart);
+            // Trim whitespace
+            auto trimmed = line.find_first_not_of(" \t\r\n");
+            if (trimmed != std::string::npos) {
+                auto prefix = line.substr(trimmed);
+                if (prefix.find("mat") == 0) {
+                    // This is a function definition. Comment out until matching }
+                    int braces = 0;
+                    auto funcStart = lineStart;
+                    auto p = src.find('{', pos);
+                    if (p != std::string::npos) {
+                        braces = 1;
+                        auto bodyStart = p + 1;
+                        while (bodyStart < src.size() && braces > 0) {
+                            if (src[bodyStart] == '{') braces++;
+                            else if (src[bodyStart] == '}') braces--;
+                            bodyStart++;
+                        }
+                        // Replace the entire function with a comment
+                        std::string replacement = "// STRIPPED inverse() polyfill (GLSL 150 built-in)\n";
+                        src.replace(funcStart, bodyStart - funcStart, replacement);
+                        pos = funcStart + replacement.size();
+                        continue;
+                    }
+                }
+            }
+            pos++;
         }
     }
 
@@ -527,6 +610,49 @@ bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderU
         unit.src = Preprocessor(unit.src, unit.stage, shader_info->combos, unit.preprocess_info);
     });
 
+    // Fix varying type mismatches between vertex (out) and fragment (in).
+    // WE shaders commonly use vec4 v_TexCoord in vertex but vec2 in fragment.
+    // Promote the fragment input to match the vertex output type.
+    if (units.size() == 2) {
+        auto& vertInfo = units[0].preprocess_info;
+        auto& fragInfo = units[1].preprocess_info;
+        for (auto& [name, fragDecl] : fragInfo.input) {
+            if (vertInfo.output.count(name)) {
+                const auto& vertDecl = vertInfo.output.at(name);
+                // Extract types: match "in/out <type> <name>"
+                auto extractType = [](const std::string& decl) -> std::string {
+                    std::regex re(R"(\b(vec[234]|float|mat[234]|int)\s+\w+\s*;)");
+                    std::smatch m;
+                    if (std::regex_search(decl, m, re)) return m[1].str();
+                    return {};
+                };
+                std::string vertType = extractType(vertDecl);
+                std::string fragType = extractType(fragDecl);
+                if (! vertType.empty() && ! fragType.empty() && vertType != fragType) {
+                    LOG_INFO("fixing varying type mismatch: %s vert=%s frag=%s → demoting vert to %s",
+                             name.c_str(), vertType.c_str(), fragType.c_str(), fragType.c_str());
+                    // Demote the VERTEX output type to match the fragment input.
+                    // This avoids renaming the varying (which would break the
+                    // Finalprocessor's cross-stage matching).
+                    std::string oldVertDecl = "out " + vertType + " " + name + ";";
+                    std::string newVertDecl = "out " + fragType + " " + name + ";";
+                    auto pos = units[0].src.find(oldVertDecl);
+                    if (pos != std::string::npos) {
+                        units[0].src.replace(pos, oldVertDecl.size(), newVertDecl);
+                        // Also update vertex preprocess info
+                        vertInfo.output[name] = std::regex_replace(vertInfo.output[name],
+                            std::regex("\\b" + vertType + "\\b"), fragType);
+                        // Add a .xy/.xyz swizzle at the assignment site in the
+                        // vertex shader: "v_TexCoord = expr" → "v_TexCoord = (expr).xy"
+                        std::regex reAssign("(" + name + R"(\s*=\s*)([^;]+)(;))");
+                        units[0].src = std::regex_replace(units[0].src, reAssign,
+                            "$1" + fragType + "($2)" + "$3");
+                    }
+                }
+            }
+        }
+    }
+
     auto compile = [](std::span<WPShaderUnit> units, std::vector<ShaderCode>& codes) {
         std::vector<vulkan::ShaderCompUnit> vunits(units.size());
         for (usize i = 0; i < units.size(); i++) {
@@ -540,6 +666,7 @@ bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderU
 
             vunit.src   = unit.src;
             vunit.stage = ToGLSL(unit.stage);
+
         }
 
         vulkan::ShaderCompOpt opt;

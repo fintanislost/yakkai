@@ -2,6 +2,8 @@
 #include "Utils/Logging.h"
 #include "Fs/VFS.h"
 #include "Core/StringHelper.hpp"
+#include "WPJson.hpp"
+#include <sstream>
 
 using namespace wallpaper::wpscene;
 
@@ -242,6 +244,10 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
 	GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
 	GET_JSON_NAME_VALUE_NOWARN(json, "parent", parent);
 	GET_JSON_NAME_VALUE_NOWARN(json, "colorBlendMode", colorBlendMode);
+    // Static evaluation of simple WE script property bindings.
+    // WE scripts can set thisLayer.color/alpha from scene properties.
+    // We scan the layer's JSON for script text and resolve known patterns
+    // (e.g., "engine.userProperties.newproperty13" → the property value).
     if (RequiresUnsupportedMediaIntegrationRuntime(json, image)) {
         visible = false;
         LOG_INFO("suppressing unsupported media integration image layer: name=%s id=%d image=%s",
@@ -251,8 +257,8 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
         return true;
     }
 	if(!fullscreen) {
-		GET_JSON_NAME_VALUE(json, "origin", origin);	
-		GET_JSON_NAME_VALUE(json, "angles", angles);	
+		GET_JSON_NAME_VALUE(json, "origin", origin);
+		GET_JSON_NAME_VALUE(json, "angles", angles);
 		GET_JSON_NAME_VALUE(json, "scale", scale);	
 		GET_JSON_NAME_VALUE_NOWARN(json, "parallaxDepth", parallaxDepth);
 		if(jImage.contains("width")) {
@@ -300,6 +306,7 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
              GET_JSON_NAME_VALUE(jLayer, "blend", layer.blend);
              GET_JSON_NAME_VALUE(jLayer, "rate", layer.rate);
              GET_JSON_NAME_VALUE_NOWARN(jLayer, "visible", layer.visible);
+             GET_JSON_NAME_VALUE_NOWARN(jLayer, "additive", layer.additive);
              puppet_layers.push_back(layer);
         }
     }

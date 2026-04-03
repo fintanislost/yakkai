@@ -196,10 +196,10 @@ bool SeekNextModelSection(fs::IBinaryStream& f,
     return true;
 }
 
-bool ReadSectionAsciiString(fs::IBinaryStream& f,
-                            idx                section_end,
-                            std::string&       out,
-                            size_t             max_len = 128) {
+bool ReadSectionString(fs::IBinaryStream& f,
+                       idx                section_end,
+                       std::string&       out,
+                       size_t             max_len = 128) {
     out.clear();
     while (f.Tell() < section_end) {
         char c = '\0';
@@ -210,7 +210,9 @@ bool ReadSectionAsciiString(fs::IBinaryStream& f,
             return true;
         }
         const unsigned char uc = static_cast<unsigned char>(c);
-        if (uc < 0x20 || uc > 0x7e) {
+        // Accept printable ASCII and UTF-8 continuation/lead bytes (>= 0x80).
+        // Reject control characters (< 0x20) except within multi-byte UTF-8.
+        if (uc < 0x20) {
             return false;
         }
         out.push_back(c);
@@ -249,13 +251,13 @@ bool IsLikelyPuppetAnimationHeader(fs::IBinaryStream& f,
     }
 
     std::string name;
-    if (! ReadSectionAsciiString(f, section_end, name) || name.empty()) {
+    if (! ReadSectionString(f, section_end, name) || name.empty()) {
         restore();
         return false;
     }
 
     std::string mode;
-    if (! ReadSectionAsciiString(f, section_end, mode, 16)
+    if (! ReadSectionString(f, section_end, mode, 16)
         || (mode != "loop" && mode != "mirror" && mode != "single" && ! mode.empty())) {
         restore();
         return false;
@@ -648,6 +650,12 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
              mdl.mdla,
              mdl.puppet->bones.size(),
              mdl.puppet->anims.size());
+    for (size_t ai = 0; ai < mdl.puppet->anims.size(); ai++) {
+        auto& a = mdl.puppet->anims[ai];
+        LOG_INFO("  anim[%zu]: id=%d name='%s' fps=%.1f length=%d bframes=%zu",
+                 ai, a.id, a.name.c_str(),
+                 a.fps, a.length, a.bframes_array.size());
+    }
     return true;
 }
 

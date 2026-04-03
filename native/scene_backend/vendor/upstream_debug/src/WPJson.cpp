@@ -1,6 +1,10 @@
 #include "WPJson.hpp"
 #include <nlohmann/json.hpp>
 
+extern "C" {
+#include "quickjs.h"
+}
+
 #include "Utils/Identity.hpp"
 #include "Utils/String.h"
 
@@ -16,6 +20,9 @@
 
 namespace wallpaper
 {
+
+// Forward declaration — defined after the anonymous namespace.
+std::optional<nlohmann::json> LookupUserPropertyValue(std::string_view name);
 
 namespace
 {
@@ -72,24 +79,6 @@ bool ParseBoolString(const std::string& text, bool& value) {
         return true;
     }
     return false;
-}
-
-std::optional<nlohmann::json> LookupUserPropertyValue(std::string_view name) {
-    if (! s_activeScenePropertyState || name.empty()) {
-        return std::nullopt;
-    }
-
-    const auto& properties = s_activeScenePropertyState->properties;
-    if (! properties.is_object()) {
-        return std::nullopt;
-    }
-
-    const std::string key(name);
-    if (! properties.contains(key)) {
-        return std::nullopt;
-    }
-
-    return PropertyEntryValue(properties.at(key));
 }
 
 bool JsonMatchesCondition(const nlohmann::json& value, const nlohmann::json& condition) {
@@ -149,7 +138,8 @@ std::optional<nlohmann::json> ResolveUserWrappedValue(const nlohmann::json& json
                                                   : std::nullopt;
     const auto& user = json.at("user");
     if (user.is_string()) {
-        if (auto value = LookupUserPropertyValue(user.get_ref<const std::string&>())) {
+        const auto& userName = user.get_ref<const std::string&>();
+        if (auto value = LookupUserPropertyValue(userName)) {
             return *value;
         }
         return fallback;
@@ -365,6 +355,108 @@ std::optional<nlohmann::json> EvaluateKnownScriptValue(const nlohmann::json& jso
         }
     }
 
+    // QuickJS fallback for unrecognized scripts that reference userProperties.
+    // Evaluates the script and returns the computed value.
+    if ((script.find("engine.") != std::string::npos ||
+         script.find("scriptProperties") != std::string::npos) &&
+        script.size() > 50 && s_activeScenePropertyState) {
+        // Build a minimal JS snippet: define userProperties, run the script, capture 'value'
+        std::string js = "var engine = { userProperties: {";
+        for (const auto& [key, prop] : s_activeScenePropertyState->properties.items()) {
+            if (! prop.is_object() || ! prop.contains("value")) continue;
+            const auto& val = prop.at("value");
+            js += "'" + key + "': ";
+            if (val.is_number()) {
+                js += std::to_string(val.get<double>());
+            } else if (val.is_boolean()) {
+                js += val.get<bool>() ? "true" : "false";
+            } else if (val.is_string()) {
+                js += "'" + val.get<std::string>() + "'";
+            } else {
+                js += "null";
+            }
+            js += ", ";
+        }
+        js += "}, canvasSize: { x: 1920, y: 1080 }};\n";
+        js += "function Vec3(x,y,z) { this.x=x||0; this.y=y||0; this.z=z||0; }\n";
+        js += "function createScriptProperties() {\n"
+              "  var p={}; var b={\n"
+              "    addSlider:function(o){p[o.name]=o.value;return b;},\n"
+              "    addColor:function(o){p[o.name]=o.value;return b;},\n"
+              "    addCheckbox:function(o){p[o.name]=o.value;return b;},\n"
+              "    addCombo:function(o){p[o.name]=o.value;return b;},\n"
+              "    addText:function(o){p[o.name]=o.value;return b;},\n"
+              "    finish:function(){return p;}\n"
+              "  }; return b;\n"
+              "}\n";
+        // Strip ES module syntax so QuickJS can evaluate as a plain script
+        std::string scriptSrc(script);
+        {
+            auto rep = [](std::string& s, const std::string& f, const std::string& t) {
+                size_t p = 0;
+                while ((p = s.find(f, p)) != std::string::npos) { s.replace(p, f.size(), t); p += t.size(); }
+            };
+            rep(scriptSrc, "'use strict';", "");
+            rep(scriptSrc, "\"use strict\";", "");
+            // WE scripts use non-breaking spaces (U+00A0, UTF-8 C2 A0)
+            rep(scriptSrc, "\xc2\xa0", " "); // normalize NBSP → space
+            rep(scriptSrc, "export var ", "var ");
+            rep(scriptSrc, "export function ", "function ");
+            rep(scriptSrc, "export default ", "");
+            rep(scriptSrc, "export ", ""); // catch remaining exports
+        }
+        js += "var value = new Vec3(0, 0, 0);\n";
+        js += scriptSrc;
+        // Call update() if it exists and extract result
+        js += "\nif (typeof update === 'function') { var __r = update(value); if (__r) value = __r; }\n";
+        js += "value;\n";
+
+        JSRuntime* rt = JS_NewRuntime();
+        JSContext* ctx = JS_NewContext(rt);
+        JSValue result = JS_Eval(ctx, js.c_str(), js.size(), "<script>", JS_EVAL_TYPE_GLOBAL);
+        if (! JS_IsException(result)) {
+            // Try to extract the result
+            JSValue global = JS_GetGlobalObject(ctx);
+            JSValue jsval = JS_GetPropertyStr(ctx, global, "value");
+            if (! JS_IsNull(jsval) && ! JS_IsUndefined(jsval)) {
+                double d;
+                if (JS_ToFloat64(ctx, &d, jsval) == 0) {
+                    JS_FreeValue(ctx, jsval);
+                    JS_FreeValue(ctx, global);
+                    JS_FreeValue(ctx, result);
+                    JS_FreeContext(ctx);
+                    JS_FreeRuntime(rt);
+                    return CoerceLikeFallback(fallback, d);
+                }
+                const char* str = JS_ToCString(ctx, jsval);
+                if (str) {
+                    std::string sv(str);
+                    JS_FreeCString(ctx, str);
+                    JS_FreeValue(ctx, jsval);
+                    JS_FreeValue(ctx, global);
+                    JS_FreeValue(ctx, result);
+                    JS_FreeContext(ctx);
+                    JS_FreeRuntime(rt);
+                    LOG_INFO("QuickJS eval result: '%s'", sv.c_str());
+                    return nlohmann::json(sv);
+                }
+            }
+            JS_FreeValue(ctx, jsval);
+            JS_FreeValue(ctx, global);
+        } else {
+            JSValue exc = JS_GetException(ctx);
+            const char* msg = JS_ToCString(ctx, exc);
+            if (msg) {
+                LOG_INFO("QuickJS eval error (non-fatal): %s", msg);
+                JS_FreeCString(ctx, msg);
+            }
+            JS_FreeValue(ctx, exc);
+        }
+        JS_FreeValue(ctx, result);
+        JS_FreeContext(ctx);
+        JS_FreeRuntime(rt);
+    }
+
     return std::nullopt;
 }
 
@@ -384,6 +476,21 @@ std::optional<nlohmann::json> ResolveStructuredSceneValue(const nlohmann::json& 
     return std::nullopt;
 }
 } // namespace
+
+std::optional<nlohmann::json> LookupUserPropertyValue(std::string_view name) {
+    if (! s_activeScenePropertyState || name.empty()) {
+        return std::nullopt;
+    }
+    const auto& properties = s_activeScenePropertyState->properties;
+    if (! properties.is_object()) {
+        return std::nullopt;
+    }
+    const std::string key(name);
+    if (! properties.contains(key)) {
+        return std::nullopt;
+    }
+    return PropertyEntryValue(properties.at(key));
+}
 
 bool ParseJson(const char* file, const char* func, int line, const std::string& source,
                nlohmann::json& result) {

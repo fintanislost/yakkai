@@ -4,7 +4,12 @@
 /CMakeCache.txt
 /cmake_install.cmake
 /Makefile
-/wallpapers/io.papercompany.gradient/contents/imports/
+/wallpapers/*/contents/imports/
+__pycache__/
+*.pyc
+*.so
+wallpapers/*.mp4
+wallpapers/logs.txt
 *.user
 *.dev.md
 *.todo.md

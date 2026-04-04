@@ -108,13 +108,15 @@ Kirigami.FormLayout {
         ? "scene"
         : (wallpaperEngineWebContentMode ? "web" : "video")
     readonly property var selectedWallpaperEngineProject: {
-        const index = wallpaperEngineProjectComboBox.currentIndex
-
-        if (index < 0 || index >= currentWallpaperEngineItems.length) {
-            return null
+        const savedPath = wallpaperEngineAnySceneContentMode
+            ? root.cfg_WESceneProjectPath
+            : (wallpaperEngineWebContentMode ? root.cfg_WEWebProjectPath : root.cfg_WEVideoProjectPath)
+        if (!savedPath || savedPath.length === 0) return null
+        const items = currentWallpaperEngineItems
+        for (let i = 0; i < items.length; i++) {
+            if (items[i].projectPath === savedPath) return items[i]
         }
-
-        return currentWallpaperEngineItems[index]
+        return null
     }
 
     function applyPreset(index) {

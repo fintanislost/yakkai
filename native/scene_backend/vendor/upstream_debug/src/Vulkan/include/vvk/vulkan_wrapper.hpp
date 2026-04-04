@@ -38,7 +38,6 @@ const char* ToString(VkColorSpaceKHR color) noexcept;
         VkResult _res = (f);                                      \
         if (_res != VK_SUCCESS && _res != VK_SUBOPTIMAL_KHR) {    \
             LOG_ERROR("VkResult is \"%s\"", vvk::ToString(_res)); \
-            assert(_res == VK_SUCCESS);                           \
             { act; };                                             \
         }                                                         \
     }
@@ -84,6 +83,7 @@ struct DeviceDispatch : InstanceDispatch {
     PFN_vkAllocateDescriptorSets              vkAllocateDescriptorSets {};
     PFN_vkAllocateMemory                      vkAllocateMemory {};
     PFN_vkBeginCommandBuffer                  vkBeginCommandBuffer {};
+    PFN_vkResetCommandBuffer                  vkResetCommandBuffer {};
     PFN_vkBindBufferMemory                    vkBindBufferMemory {};
     PFN_vkBindImageMemory                     vkBindImageMemory {};
     PFN_vkCmdBeginDebugUtilsLabelEXT          vkCmdBeginDebugUtilsLabelEXT {};
@@ -537,6 +537,10 @@ class CommandBuffer : public Handle<VkCommandBuffer, NoOwnerLife, DeviceDispatch
     using Handle<VkCommandBuffer, NoOwnerLife, DeviceDispatch>::Handle;
 
 public:
+    VkResult Reset(VkCommandBufferResetFlags flags = 0) const {
+        return dld->vkResetCommandBuffer(handle, flags);
+    }
+
     VkResult Begin(const VkCommandBufferBeginInfo& begin_info) const {
         return dld->vkBeginCommandBuffer(handle, &begin_info);
     }

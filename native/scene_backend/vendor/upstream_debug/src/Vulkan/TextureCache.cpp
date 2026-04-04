@@ -38,6 +38,7 @@ VkFormat ToVkType(TextureFormat tf) {
     case TextureFormat::BC1: return VK_FORMAT_BC1_RGBA_UNORM_BLOCK;
     case TextureFormat::BC2: return VK_FORMAT_BC2_UNORM_BLOCK;
     case TextureFormat::BC3: return VK_FORMAT_BC3_UNORM_BLOCK;
+    case TextureFormat::BC7: return VK_FORMAT_BC7_UNORM_BLOCK;
     case TextureFormat::R8: return VK_FORMAT_R8_UNORM;
     case TextureFormat::RG8: return VK_FORMAT_R8G8_UNORM;
     case TextureFormat::RGB8: return VK_FORMAT_R8G8B8_UNORM;
@@ -146,6 +147,7 @@ VkResult TransImgLayout(const vvk::Queue& queue, vvk::CommandBuffer& cmd,
                         VkImageAspectFlags aspectMask = VK_IMAGE_ASPECT_COLOR_BIT) {
     VkResult result;
     do {
+        cmd.Reset();
         result = cmd.Begin(VkCommandBufferBeginInfo {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
             .pNext = nullptr,
@@ -360,6 +362,7 @@ inline VkResult CopyImageData(std::span<const BufferParameters> in_bufs,
                               vvk::CommandBuffer& cmd, const ImageParameters& image) {
     VkResult result;
     do {
+        cmd.Reset();
         result = cmd.Begin(VkCommandBufferBeginInfo {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
             .pNext = nullptr,

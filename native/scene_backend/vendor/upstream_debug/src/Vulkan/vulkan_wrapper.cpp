@@ -66,6 +66,7 @@ bool Load(VkDevice device, DeviceDispatch& dld) noexcept {
     X(vkAllocateDescriptorSets);
     X(vkAllocateMemory);
     X(vkBeginCommandBuffer);
+    X(vkResetCommandBuffer);
     X(vkBindBufferMemory);
     X(vkBindImageMemory);
     X(vkCmdBeginQuery);

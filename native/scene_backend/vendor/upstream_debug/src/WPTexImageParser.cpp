@@ -238,6 +238,7 @@ TextureFormat ToTexFormate(int type) {
     case 0: return TextureFormat::RGBA8;
     case 4: return TextureFormat::BC3;
     case 6: return TextureFormat::BC2;
+    case 5: return TextureFormat::BC7;
     case 7: return TextureFormat::BC1;
     case 8: return TextureFormat::RG8;
     case 9: return TextureFormat::R8;
@@ -470,7 +471,7 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
             // TEXB v4 flat format
             file.ReadInt32(); // unknown (0xFFFFFFFF)
             file.ReadInt32(); // unknown (0)
-            file.ReadInt32(); // v4 format ID (different numbering from TEXI; TEXI is authoritative)
+            i32 v4_format = file.ReadInt32();
             i32 v4_width  = file.ReadInt32();
             i32 v4_height = file.ReadInt32();
             LZ4_compressed    = file.ReadInt32() == 1;
@@ -484,6 +485,20 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
             img_slot.width  = v4_width;
             img_slot.height = v4_height;
             SetHeaderPow2(img.header, v4_width, v4_height);
+
+            // TEXB v4 format IDs differ from TEXI. When the data size doesn't
+            // match the TEXI format, trust the v4 format and data size.
+            // Known v4 format IDs: 1=RGBA8, 5=BC7
+            {
+                i32 dataBytes = LZ4_compressed ? decompressed_size : src_size;
+                i32 expectedRgba = v4_width * v4_height * 4;
+                if (img.header.format == TextureFormat::RGBA8 && dataBytes > 0 && dataBytes < expectedRgba) {
+                    // Data is smaller than RGBA8 — must be compressed
+                    if (v4_format == 5) {
+                        img.header.format = TextureFormat::BC7;
+                    }
+                }
+            }
 
             if (src_size <= 0 || v4_width <= 0 || v4_height <= 0)
                 return nullptr;
@@ -537,8 +552,17 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
                     return nullptr;
                 }
             }
-            // is image container (texb=3): try stbi decode, fall back to raw
-            if (img.header.extraHeader["texb"].val == 3 && img.header.type != ImageType::UNKNOWN) {
+            // Detect image containers (PNG/JPEG) by magic bytes, regardless of TEXB version.
+            // TEXB v4 with lz4=0/decomp=0 can embed PNG/JPEG directly.
+            const bool isPng = src_size >= 8 &&
+                (unsigned char)result[0] == 0x89 && result[1] == 'P' && result[2] == 'N' && result[3] == 'G';
+            const bool isJpeg = src_size >= 3 &&
+                (unsigned char)result[0] == 0xFF && (unsigned char)result[1] == 0xD8 && (unsigned char)result[2] == 0xFF;
+            const bool isImageContainer =
+                (img.header.extraHeader["texb"].val == 3 && img.header.type != ImageType::UNKNOWN) ||
+                isPng || isJpeg;
+
+            if (isImageContainer) {
                 int32_t w, h, n;
                 auto*   data =
                     stbi_load_from_memory((const unsigned char*)result, src_size, &w, &h, &n, 4);
@@ -557,7 +581,12 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
                 mipmap.data = ImageDataPtr((uint8_t*)data, [](uint8_t* data) {
                     stbi_image_free((unsigned char*)data);
                 });
-                src_size    = (data != nullptr) ? w * h * 4 : 0;
+                if (data != nullptr) {
+                    src_size = w * h * 4;
+                    img.header.format = TextureFormat::RGBA8;
+                } else {
+                    src_size = 0;
+                }
             } else {
                 // Check for video container (MP4/WebM/MKV) by magic bytes.
                 // Video textures can appear in any TEXB version, including v4.

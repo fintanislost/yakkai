@@ -559,14 +559,20 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
                 });
                 src_size    = (data != nullptr) ? w * h * 4 : 0;
             } else {
-                // texb=3 with type=UNKNOWN: could be video (MP4/WebM/MKV) or raw pixel data.
-                // Try FFmpeg for any data where stbi failed and size doesn't match raw RGBA.
+                // Check for video container (MP4/WebM/MKV) by magic bytes.
+                // Video textures can appear in any TEXB version, including v4.
                 bool videoHandled = false;
                 const i32 expectedRawSize = mipmap.width * mipmap.height * 4;
                 const bool sizeMismatch = src_size != expectedRawSize && src_size > expectedRawSize;
+                const bool isMp4Magic = src_size >= 12 &&
+                    result[4] == 'f' && result[5] == 't' && result[6] == 'y' && result[7] == 'p';
+                const bool isWebMmagic = src_size >= 4 &&
+                    (unsigned char)result[0] == 0x1A && result[1] == 0x45 &&
+                    (unsigned char)result[2] == 0xDF && (unsigned char)result[3] == 0xA3;
+                const bool hasVideoMagic = isMp4Magic || isWebMmagic;
 
 #ifdef PAPER_HAS_FFMPEG
-                if (sizeMismatch && ! img.video_decoder) {
+                if ((sizeMismatch || hasVideoMagic) && ! img.video_decoder) {
                     auto decoder = std::make_shared<VideoFrameDecoder>(
                         (const uint8_t*)result, src_size, mipmap.width, mipmap.height);
                     if (decoder->IsValid()) {
@@ -577,11 +583,13 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
                             src_size = decoder->Width() * decoder->Height() * 4;
                             mipmap.data = ImageDataPtr(new uint8_t[(usize)src_size], [](uint8_t* p) { delete[] p; });
                             std::copy(firstFrame.get(), firstFrame.get() + src_size, mipmap.data.get());
-                            img.video_decoder = decoder;
                             img.header.format = TextureFormat::RGBA8;
-                            decoder->Start();
+                            // Use first frame as static texture. Continuous video
+                            // decode (decoder->Start()) is too CPU-intensive for a
+                            // wallpaper background. Don't register the decoder for
+                            // per-frame updates.
                             videoHandled = true;
-                            LOG_INFO("video texture decoded: name=%s %dx%d", img.key.c_str(), mipmap.width, mipmap.height);
+                            LOG_INFO("video texture decoded (static first frame): name=%s %dx%d", img.key.c_str(), mipmap.width, mipmap.height);
                         } else {
                             LOG_ERROR("video texture '%s': FFmpeg opened but first frame decode failed", img.key.c_str());
                         }

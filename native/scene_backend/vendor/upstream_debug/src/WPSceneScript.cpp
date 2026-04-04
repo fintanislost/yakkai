@@ -58,14 +58,22 @@ struct SceneScriptContext::Impl {
         JS_SetPropertyStr(ctx, canvasSize, "y", JS_NewFloat64(ctx, canvasH));
         JS_SetPropertyStr(ctx, engine, "canvasSize", canvasSize);
 
+        // engine.timeOfDay — default to current time, can be overridden later
+        JS_SetPropertyStr(ctx, engine, "timeOfDay", JS_NewFloat64(ctx, 0.5));
+
         JS_SetPropertyStr(ctx, global, "engine", engine);
 
         // createScriptProperties() stub — returns a builder with .addSlider/.addColor/.finish
         const char* stubCode = R"(
+            var __scriptPropertyOverrides = __scriptPropertyOverrides || {};
             function createScriptProperties() {
                 var props = {};
                 var builder = {
-                    addSlider: function(opt) { props[opt.name] = opt.value; return builder; },
+                    addSlider: function(opt) {
+                        props[opt.name] = (opt.name in __scriptPropertyOverrides)
+                            ? __scriptPropertyOverrides[opt.name] : opt.value;
+                        return builder;
+                    },
                     addColor: function(opt) { props[opt.name] = opt.value; return builder; },
                     addCheckbox: function(opt) { props[opt.name] = opt.value; return builder; },
                     addCombo: function(opt) { props[opt.name] = opt.value; return builder; },
@@ -80,6 +88,38 @@ struct SceneScriptContext::Impl {
                 this.y = y !== undefined ? y : 0;
                 this.z = z !== undefined ? z : 0;
             }
+
+            // WEMath library stubs
+            var WEMath = {
+                smoothStep: function(edge0, edge1, x) {
+                    var t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+                    return t * t * (3 - 2 * t);
+                },
+                lerp: function(a, b, t) { return a + (b - a) * t; },
+                clamp: function(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
+            };
+
+            // engine API stubs
+            if (typeof engine !== 'undefined') {
+                engine.setTimeout = function(fn, ms) { return 0; };
+                engine.runtime = 0;
+                engine.frametime = 0.016;
+                engine.registerAnimation = function() {};
+                engine.AUDIO_RESOLUTION_16 = 16;
+                engine.AUDIO_RESOLUTION_32 = 32;
+                engine.AUDIO_RESOLUTION_64 = 64;
+                engine.registerAudioBuffers = function(resolution) {
+                    var zeros = [];
+                    for (var i = 0; i < (resolution || 16); i++) zeros.push(0);
+                    return { average: zeros, left: zeros, right: zeros };
+                };
+            }
+
+            // input stub
+            var input = {
+                cursorPosition: new Vec3(0, 0, 0),
+                cursorWorldPosition: new Vec3(0, 0, 0)
+            };
         )";
         JSValue result = JS_Eval(ctx, stubCode, strlen(stubCode), "<stubs>", JS_EVAL_TYPE_GLOBAL);
         if (JS_IsException(result)) {
@@ -100,6 +140,30 @@ SceneScriptContext::~SceneScriptContext() = default;
 
 void SceneScriptContext::setUserProperties(const nlohmann::json& properties) {
     m_impl->setupEngineObject(properties, 1920, 1080);
+}
+
+void SceneScriptContext::setTimeOfDay(double fraction) {
+    JSValue global = JS_GetGlobalObject(m_impl->ctx);
+    JSValue engine = JS_GetPropertyStr(m_impl->ctx, global, "engine");
+    if (! JS_IsUndefined(engine)) {
+        JS_SetPropertyStr(m_impl->ctx, engine, "timeOfDay", JS_NewFloat64(m_impl->ctx, fraction));
+    }
+    JS_FreeValue(m_impl->ctx, engine);
+    JS_FreeValue(m_impl->ctx, global);
+}
+
+void SceneScriptContext::setScriptProperty(const std::string& name, double value) {
+    // Store override in a global __scriptPropertyOverrides object.
+    // The createScriptProperties stub reads from this to override slider defaults.
+    JSValue global = JS_GetGlobalObject(m_impl->ctx);
+    JSValue overrides = JS_GetPropertyStr(m_impl->ctx, global, "__scriptPropertyOverrides");
+    if (JS_IsUndefined(overrides)) {
+        overrides = JS_NewObject(m_impl->ctx);
+        JS_SetPropertyStr(m_impl->ctx, global, "__scriptPropertyOverrides", JS_DupValue(m_impl->ctx, overrides));
+    }
+    JS_SetPropertyStr(m_impl->ctx, overrides, name.c_str(), JS_NewFloat64(m_impl->ctx, value));
+    JS_FreeValue(m_impl->ctx, overrides);
+    JS_FreeValue(m_impl->ctx, global);
 }
 
 void SceneScriptContext::setCanvasSize(int width, int height) {
@@ -146,33 +210,56 @@ SceneScriptResult SceneScriptContext::evaluateLayerScript(
     replaceAll(src, "export let ", "var ");
     replaceAll(src, "export default ", "");
     replaceAll(src, "export ", "");
+    // Strip import statements — we provide WEMath etc. as globals
+    {
+        size_t pos = 0;
+        while ((pos = src.find("import ", pos)) != std::string::npos) {
+            size_t end = src.find('\n', pos);
+            if (end == std::string::npos) end = src.size();
+            src.replace(pos, end - pos, "/* import stripped */");
+            pos += 20;
+        }
+    }
 
-    // Append: call update() with a value object, then store results on __result
+    // Wrap in IIFE to isolate variable declarations between scripts.
+    // Provide thisLayer/thisScene stubs that WE scripts expect.
     std::ostringstream wrapper;
-    wrapper << src << "\n";
-    wrapper << "var __thisLayer = { color: new Vec3("
+    wrapper << "(function() {\n";
+    wrapper << "var thisLayer = { color: new Vec3("
             << currentColor[0] << "," << currentColor[1] << "," << currentColor[2]
             << "), alpha: " << currentAlpha
             << ", visible: true"
             << ", origin: new Vec3("
             << currentOrigin[0] << "," << currentOrigin[1] << "," << currentOrigin[2]
-            << ") };\n";
+            << ")"
+            << ", getTextureAnimation: function() { return {"
+            << "    getFrame: function() { return 0; },"
+            << "    frameCount: 1, duration: 1, fps: 30,"
+            << "    play: function() {}, stop: function() {}, pause: function() {}"
+            << "}; }"
+            << ", getVideoTexture: function() { return { rate: 1, play: function(){}, pause: function(){} }; }"
+            << " };\n";
+    wrapper << "var thisScene = { clearColor: new Vec3(0,0,0) };\n";
+    wrapper << src << "\n";
+    wrapper << "if (typeof init === 'function') { try { init(); } catch(e) {} }\n";
     wrapper << "if (typeof update === 'function') {\n"
             << "  var __val = new Vec3(" << currentOrigin[0] << "," << currentOrigin[1] << "," << currentOrigin[2] << ");\n"
             << "  var __ret = update(__val);\n"
-            << "  if (__ret) { __thisLayer.origin = __ret; }\n"
+            << "  if (__ret) { thisLayer.origin = __ret; }\n"
             << "}\n"
             << "if (typeof scriptProperties !== 'undefined' && typeof scriptProperties === 'object') {\n"
             << "  if ('color' in scriptProperties) {\n"
             << "    var __c = scriptProperties.color;\n"
             << "    if (typeof __c === 'string') {\n"
             << "      var __parts = __c.split(' ');\n"
-            << "      if (__parts.length >= 3) __thisLayer.color = new Vec3(parseFloat(__parts[0]), parseFloat(__parts[1]), parseFloat(__parts[2]));\n"
+            << "      if (__parts.length >= 3) thisLayer.color = new Vec3(parseFloat(__parts[0]), parseFloat(__parts[1]), parseFloat(__parts[2]));\n"
             << "    }\n"
             << "  }\n"
-            << "  if ('alpha' in scriptProperties) __thisLayer.alpha = scriptProperties.alpha;\n"
-            << "  if ('visible' in scriptProperties) __thisLayer.visible = scriptProperties.visible;\n"
-            << "}\n";
+            << "  if ('alpha' in scriptProperties) thisLayer.alpha = scriptProperties.alpha;\n"
+            << "  if ('visible' in scriptProperties) thisLayer.visible = scriptProperties.visible;\n"
+            << "}\n"
+            << "globalThis.__thisLayer = thisLayer;\n"
+            << "})();\n";
 
     std::string fullSrc = wrapper.str();
 
@@ -180,7 +267,13 @@ SceneScriptResult SceneScriptContext::evaluateLayerScript(
     if (JS_IsException(val)) {
         JSValue exc = JS_GetException(ctx);
         const char* msg = JS_ToCString(ctx, exc);
-        LOG_INFO("SceneScript eval (non-fatal): %s", msg ? msg : "unknown");
+        // Get stack trace for more context
+        JSValue stack = JS_GetPropertyStr(ctx, exc, "stack");
+        const char* stackStr = JS_ToCString(ctx, stack);
+        LOG_INFO("SceneScript eval (non-fatal): %s | stack: %s",
+                 msg ? msg : "unknown", stackStr ? stackStr : "n/a");
+        if (stackStr) JS_FreeCString(ctx, stackStr);
+        JS_FreeValue(ctx, stack);
         if (msg) JS_FreeCString(ctx, msg);
         JS_FreeValue(ctx, exc);
         JS_FreeValue(ctx, val);

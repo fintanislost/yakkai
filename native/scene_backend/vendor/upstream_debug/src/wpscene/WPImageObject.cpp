@@ -233,6 +233,19 @@ bool WPImageEffect::FromFileJson(const nlohmann::json& json, fs::VFS& vfs) {
 bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
     GET_JSON_NAME_VALUE(json, "image", image);
     GET_JSON_NAME_VALUE_NOWARN(json, "visible", visible);
+    // Resolve conditional user property bindings for visible/alpha.
+    // e.g. {"user": {"condition": "2", "name": "display"}, "value": false}
+    if (json.contains("visible") && json.at("visible").is_object()) {
+        auto resolved = ResolveConditionalProperty(json.at("visible"));
+        std::string lname = json.contains("name") ? json.at("name").get<std::string>() : "?";
+        if (resolved) {
+            if (resolved->is_boolean()) {
+                visible = resolved->get<bool>();
+            } else if (resolved->is_number()) {
+                visible = resolved->get<double>() > 0.5;
+            }
+        }
+    }
     GET_JSON_NAME_VALUE_NOWARN(json, "alignment", alignment);
     nlohmann::json jImage;
     if(!PARSE_JSON(fs::GetFileContent(vfs, "/assets/" + image), jImage)) {
@@ -274,7 +287,25 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
     }
     GET_JSON_NAME_VALUE_NOWARN(jImage, "nopadding", nopadding);
     GET_JSON_NAME_VALUE_NOWARN(json, "color", color);
+    if (json.contains("color") && json.at("color").is_object()) {
+        if (auto animColor = EvaluateAnimationCurveRGB(json.at("color"), GetSceneTimeSec())) {
+            color = { (*animColor)[0], (*animColor)[1], (*animColor)[2] };
+        }
+    }
     GET_JSON_NAME_VALUE_NOWARN(json, "alpha", alpha);
+    if (json.contains("alpha") && json.at("alpha").is_object()) {
+        const auto& alphaField = json.at("alpha");
+        // Try animation curve first
+        if (auto animValue = EvaluateAnimationCurve(alphaField, GetSceneTimeSec())) {
+            alpha = static_cast<float>(*animValue);
+        }
+        // Then try conditional user property
+        else if (auto resolved = ResolveConditionalProperty(alphaField)) {
+            if (resolved->is_number()) {
+                alpha = resolved->get<float>();
+            }
+        }
+    }
     GET_JSON_NAME_VALUE_NOWARN(json, "brightness", brightness);
 
 	GET_JSON_NAME_VALUE_NOWARN(jImage, "puppet", puppet);	

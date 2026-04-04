@@ -107,6 +107,12 @@ struct ParseContext {
         bool                 has_origin { false };
     };
     std::unordered_map<int32_t, ScriptColorBinding> script_color_bindings;
+
+    // Container objects (no image/particle) whose conditional visibility is false.
+    // Child objects with a parent in this set should be hidden.
+    std::unordered_set<int32_t> hidden_containers;
+    // All container object IDs (visible or not) — used to reparent orphaned children.
+    std::unordered_set<int32_t> all_containers;
 };
 
 struct WPSolidAnchorObject {
@@ -2327,6 +2333,8 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
 void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     auto& wpimgobj = img_obj;
     if (! wpimgobj.visible) return;
+    // Hide children of invisible container objects
+    if (wpimgobj.parent > 0 && context.hidden_containers.count(wpimgobj.parent)) return;
     if (DebugSkipLayerByName(wpimgobj.name)) {
         LOG_INFO("debug skipping image layer: name=%s id=%d image=%s",
                  wpimgobj.name.c_str(),
@@ -2467,16 +2475,44 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     // visibility workaround).
     // =========================================================================
     if (context.has_puppet_objects && hasEffect) {
-        const bool isFlareOrLens =
-            wpimgobj.name.find("flare") != std::string::npos ||
-            wpimgobj.name.find("lense") != std::string::npos ||
-            wpimgobj.name.find("lens") != std::string::npos ||
-            wpimgobj.colorBlendMode != 0;
+        bool hasColorkey = false;
+        bool hasAudioEffect = false;
+        for (const auto& eff : effectObjects) {
+            if (eff.name.find("colorkey") != std::string::npos) { hasColorkey = true; }
+            if (eff.name.find("audio") != std::string::npos) { hasAudioEffect = true; }
+            for (const auto& mat : eff.materials) {
+                if (mat.shader.find("colorkey") != std::string::npos) { hasColorkey = true; }
+                if (mat.shader.find("audio") != std::string::npos) { hasAudioEffect = true; }
+            }
+        }
+        // Preserve effects for layers that need their effect chain to render:
+        // - Colorkey: chroma key removal for video overlays
+        // - Flare/lens: need additive blend from effect chain
+        // Strip heavy cosmetic effects (lightshafts, audio bars, waterwaves).
+        // Detect audio/lightshaft effects — these are heavy and non-essential
+        bool hasHeavyEffect = false;
+        for (const auto& eff : effectObjects) {
+            std::string shader;
+            if (! eff.materials.empty()) shader = eff.materials[0].shader;
+            if (eff.name.find("audio") != std::string::npos ||
+                eff.name.find("lightshaft") != std::string::npos ||
+                shader.find("audio") != std::string::npos ||
+                shader.find("Audio") != std::string::npos ||
+                shader.find("lightshaft") != std::string::npos) {
+                hasHeavyEffect = true;
+            }
+        }
+        const bool isEssentialEffect = hasColorkey ||
+            (! hasHeavyEffect && (
+                wpimgobj.name.find("flare") != std::string::npos ||
+                wpimgobj.name.find("lense") != std::string::npos ||
+                wpimgobj.name.find("lens") != std::string::npos ||
+                wpimgobj.colorBlendMode != 0));
         // The offscreen effect rendering path breaks alpha compositing,
         // causing transparent regions to become opaque (hiding layers behind).
         // Strip effects from all regular layers until the offscreen alpha path
         // is fixed. Composelayer and flare/lens layers keep their effects.
-        if (! isCompose && ! isFlareOrLens) {
+        if (! isCompose && ! isEssentialEffect) {
             LOG_INFO("stripping %d effects from layer (alpha fix): name=%s",
                      count_eff, wpimgobj.name.c_str());
             count_eff = 0;
@@ -2489,13 +2525,13 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             const bool isHashElement =
                 wpimgobj.name.size() >= 16 &&
                 wpimgobj.name.find_first_not_of("0123456789abcdef") == std::string::npos;
-            if (! isFlareOrLens && ! isHashElement && ! isCompose) {
+            if (! isEssentialEffect && ! isHashElement && ! isCompose) {
                 count_eff = 0;
                 hasEffect = false;
                 effectObjects.clear();
             }
         }
-        if (isFlareOrLens && wpimgobj.alpha == 0.0f) {
+        if (isEssentialEffect && wpimgobj.alpha == 0.0f) {
             wpimgobj.alpha = 1.0f;
         }
     }
@@ -3126,6 +3162,8 @@ struct ParticleChildPtr {
 
 void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartobj,
                       ParticleChildPtr child_ptr = {}) {
+    if (! wppartobj.visible) return;
+    if (wppartobj.parent > 0 && context.hidden_containers.count(wppartobj.parent)) return;
     struct ChildData {
         ChildData() = default;
         ChildData(const wpscene::ParticleChild& o)
@@ -3655,6 +3693,15 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
         scriptCtx.setUserProperties(sceneProperties);
         scriptCtx.setCanvasSize(sc.general.orthogonalprojection.width,
                                 sc.general.orthogonalprojection.height);
+        {
+            // Compute current time-of-day fraction (0.0 = midnight, 0.5 = noon)
+            using clock = std::chrono::system_clock;
+            auto now = clock::to_time_t(clock::now());
+            std::tm lt {};
+            localtime_r(&now, &lt);
+            double frac = (lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec) / 86400.0;
+            scriptCtx.setTimeOfDay(frac);
+        }
 
         for (const auto& obj : json.at("objects")) {
             if (! obj.contains("id")) continue;
@@ -3679,6 +3726,36 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
                         iss >> origin[0] >> origin[1] >> origin[2];
                     }
 
+                    // Resolve scriptproperties user bindings before evaluating.
+                    // Scene JSON scriptproperties can have {"user": "propName", "value": default}
+                    // entries that need to be resolved to the actual user property value.
+                    if (node.contains("scriptproperties") && node.at("scriptproperties").is_object()) {
+                        const auto& sp = node.at("scriptproperties");
+                        for (const auto& [spKey, spVal] : sp.items()) {
+                            double dval = 0;
+                            bool resolved = false;
+                            auto jsonToDouble = [](const nlohmann::json& v, double& out) -> bool {
+                                if (v.is_number()) { out = v.get<double>(); return true; }
+                                if (v.is_boolean()) { out = v.get<bool>() ? 1.0 : 0.0; return true; }
+                                if (v.is_string()) {
+                                    try { out = std::stod(v.get<std::string>()); return true; } catch (...) {}
+                                }
+                                return false;
+                            };
+                            if (spVal.is_object() && spVal.contains("user")) {
+                                std::string userPropName = spVal.at("user").get<std::string>();
+                                if (auto uval = LookupUserPropertyValue(userPropName)) {
+                                    resolved = jsonToDouble(*uval, dval);
+                                }
+                                if (! resolved && spVal.contains("value")) {
+                                    resolved = jsonToDouble(spVal.at("value"), dval);
+                                }
+                            } else {
+                                resolved = jsonToDouble(spVal, dval);
+                            }
+                            if (resolved) scriptCtx.setScriptProperty(spKey, dval);
+                        }
+                    }
                     auto result = scriptCtx.evaluateLayerScript(script, origin, color, alpha);
                     if (result.color) {
                         context.script_color_bindings[objId].color = *result.color;
@@ -3708,6 +3785,27 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
         if (! context.script_color_bindings.empty()) {
             LOG_INFO("QuickJS resolved %zu script bindings from scene JSON",
                      context.script_color_bindings.size());
+        }
+    }
+
+    // First pass: identify container objects (no image/particle/etc) whose
+    // conditional visibility resolves to false. Their children should be hidden.
+    for (const auto& obj : json.at("objects")) {
+        if (obj.contains("image") || obj.contains("particle") || obj.contains("sound") ||
+            obj.contains("light") || obj.contains("model")) continue;
+        if (! obj.contains("id")) continue;
+        int32_t objId = obj.at("id").get<int32_t>();
+        bool objVisible = true;
+        if (obj.contains("visible") && obj.at("visible").is_object()) {
+            if (auto resolved = ResolveConditionalProperty(obj.at("visible"))) {
+                if (resolved->is_boolean()) objVisible = resolved->get<bool>();
+            }
+        } else if (obj.contains("visible") && obj.at("visible").is_boolean()) {
+            objVisible = obj.at("visible").get<bool>();
+        }
+        context.all_containers.insert(objId);
+        if (! objVisible) {
+            context.hidden_containers.insert(objId);
         }
     }
 
@@ -3835,11 +3933,16 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
         context.scene_type = ParseContext::SceneType::Standard;
     }
 
+    // Attach orphaned children whose parent is a visible container-only object
+    // (known container, not hidden, no scene graph node) to the scene root.
     for (const auto& [parentId, children] : context.deferred_children) {
-        if (! children.empty() && context.object_nodes.count(parentId) == 0) {
-            LOG_INFO("dropping %zu child node(s) for missing parent id=%d",
-                     children.size(),
-                     parentId);
+        if (! children.empty() &&
+            context.object_nodes.count(parentId) == 0 &&
+            context.all_containers.count(parentId) &&
+            ! context.hidden_containers.count(parentId)) {
+            for (const auto& child : children) {
+                context.scene->sceneGraph->AppendChild(child);
+            }
         }
     }
 

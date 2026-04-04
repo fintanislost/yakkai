@@ -40,6 +40,12 @@ public:
     // Set engine.canvasSize.
     void setCanvasSize(int width, int height);
 
+    // Set engine.timeOfDay (0.0 = midnight, 0.5 = noon, 1.0 = midnight).
+    void setTimeOfDay(double fraction);
+
+    // Override a script property value (resolved from scene JSON user bindings).
+    void setScriptProperty(const std::string& name, double value);
+
     // Evaluate a SceneScript module and return any layer property modifications.
     // The script is expected to export an `update(value)` function.
     SceneScriptResult evaluateLayerScript(std::string_view script,

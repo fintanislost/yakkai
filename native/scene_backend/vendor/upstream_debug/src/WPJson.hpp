@@ -44,4 +44,17 @@ bool ParseJson(const char* file, const char* func, int line, const std::string& 
 void SetActiveScenePropertyState(const nlohmann::json& properties);
 void ClearActiveScenePropertyState();
 std::optional<nlohmann::json> LookupUserPropertyValue(std::string_view name);
+
+// Resolve a JSON field that may be a conditional user property binding.
+std::optional<nlohmann::json> ResolveConditionalProperty(const nlohmann::json& field);
+
+// Evaluate a WE animation curve at the given scene time (seconds).
+// Returns the interpolated value, or std::nullopt if the field has no animation.
+// Handles {"animation": {"c0": [{frame, value, ...}], "options": {fps, length, mode}}}.
+std::optional<double> EvaluateAnimationCurve(const nlohmann::json& field, double sceneTimeSec);
+// Evaluate a multi-channel animation (c0, c1, c2) → RGB color.
+std::optional<std::array<float, 3>> EvaluateAnimationCurveRGB(const nlohmann::json& field, double sceneTimeSec);
+
+// Get current scene time in seconds (monotonic, starts at 0).
+double GetSceneTimeSec();
 } // namespace wallpaper

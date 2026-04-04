@@ -54,6 +54,13 @@ nlohmann::json PropertyEntryValue(const nlohmann::json& property) {
     if (property.is_object() && property.contains("value")) {
         return property.at("value");
     }
+    // Combo properties may have no "value" — default to first option's value
+    if (property.is_object() && property.contains("options")) {
+        const auto& opts = property.at("options");
+        if (opts.is_array() && ! opts.empty() && opts[0].contains("value")) {
+            return opts[0].at("value");
+        }
+    }
     return property;
 }
 
@@ -377,7 +384,8 @@ std::optional<nlohmann::json> EvaluateKnownScriptValue(const nlohmann::json& jso
             }
             js += ", ";
         }
-        js += "}, canvasSize: { x: 1920, y: 1080 }};\n";
+        js += "}, canvasSize: { x: 1920, y: 1080 }, timeOfDay: " +
+              std::to_string(s_activeScenePropertyState->timeOfDay) + " };\n";
         js += "function Vec3(x,y,z) { this.x=x||0; this.y=y||0; this.z=z||0; }\n";
         js += "function createScriptProperties() {\n"
               "  var p={}; var b={\n"
@@ -405,11 +413,13 @@ std::optional<nlohmann::json> EvaluateKnownScriptValue(const nlohmann::json& jso
             rep(scriptSrc, "export default ", "");
             rep(scriptSrc, "export ", ""); // catch remaining exports
         }
+        js += "var thisLayer = { color: new Vec3(0,0,0), alpha: 1, visible: true, origin: new Vec3(0,0,0) };\n";
+        js += "var thisScene = { clearColor: new Vec3(0,0,0) };\n";
         js += "var value = new Vec3(0, 0, 0);\n";
+        js += "(function() {\n";
         js += scriptSrc;
-        // Call update() if it exists and extract result
         js += "\nif (typeof update === 'function') { var __r = update(value); if (__r) value = __r; }\n";
-        js += "value;\n";
+        js += "})();\n";
 
         JSRuntime* rt = JS_NewRuntime();
         JSContext* ctx = JS_NewContext(rt);
@@ -476,6 +486,89 @@ std::optional<nlohmann::json> ResolveStructuredSceneValue(const nlohmann::json& 
     return std::nullopt;
 }
 } // namespace
+
+std::optional<nlohmann::json> ResolveConditionalProperty(const nlohmann::json& field) {
+    return ResolveStructuredSceneValue(field);
+}
+
+static std::chrono::steady_clock::time_point s_sceneStartTime = std::chrono::steady_clock::now();
+
+double GetSceneTimeSec() {
+    auto now = std::chrono::steady_clock::now();
+    return std::chrono::duration<double>(now - s_sceneStartTime).count();
+}
+
+std::optional<double> EvaluateAnimationCurve(const nlohmann::json& field, double sceneTimeSec) {
+    if (! field.is_object() || ! field.contains("animation")) return std::nullopt;
+    const auto& anim = field.at("animation");
+    if (! anim.contains("c0") || ! anim.at("c0").is_array()) return std::nullopt;
+    const auto& keyframes = anim.at("c0");
+    if (keyframes.empty()) return std::nullopt;
+
+    // Parse animation options
+    double fps = 30.0;
+    int length = 2700;
+    bool loop = true;
+    if (anim.contains("options")) {
+        const auto& opts = anim.at("options");
+        if (opts.contains("fps")) fps = opts.at("fps").get<double>();
+        if (opts.contains("length")) length = opts.at("length").get<int>();
+        if (opts.contains("mode") && opts.at("mode").get<std::string>() != "loop") loop = false;
+    }
+
+    // For looping day-night animations (long loops at 30fps), map time-of-day
+    // to the frame range rather than using elapsed scene time.
+    double totalFrames = static_cast<double>(length);
+    double frame;
+    if (loop && totalFrames >= 2400) {
+        // Long loops represent a 24-hour cycle — use current time-of-day
+        double dayFrac = CurrentTimeOfDayFraction();
+        frame = dayFrac * totalFrames;
+    } else {
+        frame = sceneTimeSec * fps;
+        if (loop && totalFrames > 0) {
+            frame = std::fmod(frame, totalFrames);
+            if (frame < 0) frame += totalFrames;
+        } else {
+            frame = std::clamp(frame, 0.0, totalFrames);
+        }
+    }
+
+    // Find surrounding keyframes and interpolate linearly
+    double prevFrame = 0, prevValue = keyframes[0].at("value").get<double>();
+    for (size_t i = 0; i < keyframes.size(); i++) {
+        double kfFrame = keyframes[i].at("frame").get<double>();
+        double kfValue = keyframes[i].at("value").get<double>();
+        if (frame <= kfFrame) {
+            if (i == 0) return kfValue;
+            double t = (kfFrame > prevFrame) ? (frame - prevFrame) / (kfFrame - prevFrame) : 0.0;
+            return prevValue + t * (kfValue - prevValue);
+        }
+        prevFrame = kfFrame;
+        prevValue = kfValue;
+    }
+    return prevValue; // past last keyframe
+}
+
+std::optional<std::array<float, 3>> EvaluateAnimationCurveRGB(const nlohmann::json& field, double sceneTimeSec) {
+    if (! field.is_object() || ! field.contains("animation")) return std::nullopt;
+    const auto& anim = field.at("animation");
+    if (! anim.contains("c0")) return std::nullopt;
+
+    // Build a synthetic single-channel field for each component
+    std::array<float, 3> result { 1.0f, 1.0f, 1.0f };
+    const char* channels[] = { "c0", "c1", "c2" };
+    for (int ch = 0; ch < 3; ch++) {
+        if (! anim.contains(channels[ch])) continue;
+        nlohmann::json singleChannel;
+        singleChannel["animation"]["c0"] = anim.at(channels[ch]);
+        if (anim.contains("options")) singleChannel["animation"]["options"] = anim.at("options");
+        if (auto val = EvaluateAnimationCurve(singleChannel, sceneTimeSec)) {
+            result[ch] = static_cast<float>(*val);
+        }
+    }
+    return result;
+}
 
 std::optional<nlohmann::json> LookupUserPropertyValue(std::string_view name) {
     if (! s_activeScenePropertyState || name.empty()) {

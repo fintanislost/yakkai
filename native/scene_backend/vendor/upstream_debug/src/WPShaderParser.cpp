@@ -117,7 +117,16 @@ inline void ParseWPShader(const std::string& src, WPShaderInfo* pWPShaderInfo,
         */
         if (line.find("// [COMBO]") != std::string::npos) {
             nlohmann::json combo_json;
-            if (PARSE_JSON(line.substr(line.find_first_of('{')), combo_json)) {
+            std::string comboStr = line.substr(line.find_first_of('{'));
+            // Fix malformed JSON: unquoted keys in "options" like {Color":0}  → {"Color":0}
+            for (size_t p = 0; p < comboStr.size(); p++) {
+                if (comboStr[p] == '{' && p + 1 < comboStr.size() &&
+                    comboStr[p + 1] != '"' && comboStr[p + 1] != '}' &&
+                    std::isalpha((unsigned char)comboStr[p + 1])) {
+                    comboStr.insert(p + 1, "\"");
+                }
+            }
+            if (PARSE_JSON(comboStr, combo_json)) {
                 if (combo_json.contains("combo")) {
                     std::string name;
                     int32_t     value = 0;

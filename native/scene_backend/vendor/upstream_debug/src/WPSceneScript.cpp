@@ -120,6 +120,9 @@ struct SceneScriptContext::Impl {
                 cursorPosition: new Vec3(0, 0, 0),
                 cursorWorldPosition: new Vec3(0, 0, 0)
             };
+
+            // shared object stub — inter-layer communication
+            var shared = {};
         )";
         JSValue result = JS_Eval(ctx, stubCode, strlen(stubCode), "<stubs>", JS_EVAL_TYPE_GLOBAL);
         if (JS_IsException(result)) {

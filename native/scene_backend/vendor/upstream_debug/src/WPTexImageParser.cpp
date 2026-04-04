@@ -584,12 +584,19 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
                             mipmap.data = ImageDataPtr(new uint8_t[(usize)src_size], [](uint8_t* p) { delete[] p; });
                             std::copy(firstFrame.get(), firstFrame.get() + src_size, mipmap.data.get());
                             img.header.format = TextureFormat::RGBA8;
-                            // Use first frame as static texture. Continuous video
-                            // decode (decoder->Start()) is too CPU-intensive for a
-                            // wallpaper background. Don't register the decoder for
-                            // per-frame updates.
+                            // Large videos (>= 1920 wide) are likely the main
+                            // wallpaper content — enable continuous playback.
+                            // Small videos are overlays — use static first frame
+                            // to avoid CPU overhead.
+                            const bool isMainVideo = decoder->Width() >= 1920;
+                            if (isMainVideo) {
+                                img.video_decoder = decoder;
+                                decoder->Start();
+                                LOG_INFO("video texture decoded (playback): name=%s %dx%d", img.key.c_str(), mipmap.width, mipmap.height);
+                            } else {
+                                LOG_INFO("video texture decoded (static first frame): name=%s %dx%d", img.key.c_str(), mipmap.width, mipmap.height);
+                            }
                             videoHandled = true;
-                            LOG_INFO("video texture decoded (static first frame): name=%s %dx%d", img.key.c_str(), mipmap.width, mipmap.height);
                         } else {
                             LOG_ERROR("video texture '%s': FFmpeg opened but first frame decode failed", img.key.c_str());
                         }

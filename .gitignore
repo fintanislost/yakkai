@@ -14,3 +14,4 @@ wallpapers/logs.txt
 *.dev.md
 *.todo.md
 /smoke-tests/*.png
+/references/

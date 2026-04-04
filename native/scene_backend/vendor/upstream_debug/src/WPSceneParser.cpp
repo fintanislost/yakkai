@@ -295,7 +295,7 @@ bool IsUnsupportedWorkshopBokehParticle(std::string_view particlePath) {
 }
 
 bool DebugSkipLayerByName(std::string_view name) {
-    const char* raw = std::getenv("PAPER_SCENE_DEBUG_SKIP_LAYERS");
+    const char* raw = std::getenv("YAKKAI_SCENE_DEBUG_SKIP_LAYERS");
     if (raw == nullptr || *raw == '\0' || name.empty()) {
         return false;
     }
@@ -411,10 +411,10 @@ std::string InjectGenericImage4ChannelMapAlphaMask(std::string src) {
         return src;
     }
 
-    constexpr std::string_view declBlock = "#if PAPER_CHANNELMAP_ALPHA_MASK || PAPER_CHANNELMAP_BASE_EXCLUDE || PAPER_BASE_ALPHA_MASK\n"
+    constexpr std::string_view declBlock = "#if YAKKAI_CHANNELMAP_ALPHA_MASK || YAKKAI_CHANNELMAP_BASE_EXCLUDE || YAKKAI_BASE_ALPHA_MASK\n"
                                            "uniform sampler2D g_Texture1;\n"
                                            "#endif\n"
-                                            "#if PAPER_CHANNELMAP_ALPHA_MASK\n"
+                                            "#if YAKKAI_CHANNELMAP_ALPHA_MASK\n"
                                             "uniform sampler2D g_Texture2;\n"
                                             "#endif\n";
 
@@ -433,21 +433,21 @@ std::string InjectGenericImage4ChannelMapAlphaMask(std::string src) {
         src = std::regex_replace(
             src,
             colorWriteLine,
-            "$1#if PAPER_CHANNELMAP_ALPHA_MASK || PAPER_CHANNELMAP_BASE_EXCLUDE || PAPER_BASE_ALPHA_MASK\n"
+            "$1#if YAKKAI_CHANNELMAP_ALPHA_MASK || YAKKAI_CHANNELMAP_BASE_EXCLUDE || YAKKAI_BASE_ALPHA_MASK\n"
             "$1float paperChannelMapMaskAlpha = texSample2D(g_Texture1, v_TexCoord.xy).a;\n"
             "$1#endif\n"
-            "$1#if PAPER_CHANNELMAP_ALPHA_MASK\n"
+            "$1#if YAKKAI_CHANNELMAP_ALPHA_MASK\n"
             "$1float paperBaseMaskAlpha = texSample2D(g_Texture2, v_TexCoord.xy).a;\n"
             "$1float paperOverlayMaskAlpha = paperChannelMapMaskAlpha * paperBaseMaskAlpha;\n"
             "$1color.rgb *= paperOverlayMaskAlpha;\n"
             "$1color.a *= paperOverlayMaskAlpha;\n"
             "$1#endif\n"
-            "$1#if PAPER_BASE_ALPHA_MASK\n"
+            "$1#if YAKKAI_BASE_ALPHA_MASK\n"
             "$1float paperStandaloneBaseAlpha = paperChannelMapMaskAlpha;\n"
             "$1color.rgb *= paperStandaloneBaseAlpha;\n"
             "$1color.a *= paperStandaloneBaseAlpha;\n"
             "$1#endif\n"
-            "$1#if PAPER_CHANNELMAP_BASE_EXCLUDE\n"
+            "$1#if YAKKAI_CHANNELMAP_BASE_EXCLUDE\n"
             "$1float paperBaseVisibleAlpha = 1.0 - paperChannelMapMaskAlpha;\n"
             "$1color.rgb *= paperBaseVisibleAlpha;\n"
             "$1color.a *= paperBaseVisibleAlpha;\n"
@@ -1981,13 +1981,13 @@ bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene,
 
     const bool shaderUsesSkinning =
         exists(pWPShaderInfo->combos, "SKINNING") && pWPShaderInfo->combos.at("SKINNING") != "0";
-    const bool shaderUsesChannelMapAlphaMask = exists(pWPShaderInfo->combos, "PAPER_CHANNELMAP_ALPHA_MASK") &&
-                                               pWPShaderInfo->combos.at("PAPER_CHANNELMAP_ALPHA_MASK") != "0";
+    const bool shaderUsesChannelMapAlphaMask = exists(pWPShaderInfo->combos, "YAKKAI_CHANNELMAP_ALPHA_MASK") &&
+                                               pWPShaderInfo->combos.at("YAKKAI_CHANNELMAP_ALPHA_MASK") != "0";
     const bool shaderUsesChannelMapBaseExclude =
-        exists(pWPShaderInfo->combos, "PAPER_CHANNELMAP_BASE_EXCLUDE") &&
-        pWPShaderInfo->combos.at("PAPER_CHANNELMAP_BASE_EXCLUDE") != "0";
-    const bool shaderUsesBaseAlphaMask = exists(pWPShaderInfo->combos, "PAPER_BASE_ALPHA_MASK") &&
-                                         pWPShaderInfo->combos.at("PAPER_BASE_ALPHA_MASK") != "0";
+        exists(pWPShaderInfo->combos, "YAKKAI_CHANNELMAP_BASE_EXCLUDE") &&
+        pWPShaderInfo->combos.at("YAKKAI_CHANNELMAP_BASE_EXCLUDE") != "0";
+    const bool shaderUsesBaseAlphaMask = exists(pWPShaderInfo->combos, "YAKKAI_BASE_ALPHA_MASK") &&
+                                         pWPShaderInfo->combos.at("YAKKAI_BASE_ALPHA_MASK") != "0";
     if (wpmat.shader == "puppettexturechannels" && shaderUsesSkinning) {
         sd_units[0].src = InjectPuppetChannelMapSkinning(std::move(sd_units[0].src));
         LOG_INFO("injecting native skinning path into puppettexturechannels vertex shader");
@@ -2411,8 +2411,8 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     if (! hasEffect && wpimgobj.fullscreen) return;
     if (! hasEffect && isCompose) return;
 
-    // Debug: PAPER_NO_EFFECTS=1 strips all effects for color debugging
-    if (std::getenv("PAPER_NO_EFFECTS")) {
+    // Debug: YAKKAI_NO_EFFECTS=1 strips all effects for color debugging
+    if (std::getenv("YAKKAI_NO_EFFECTS")) {
         count_eff = 0;
         hasEffect = false;
         effectObjects.clear();
@@ -2790,17 +2790,17 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 scene.debugRenderDumps.push_back({
                     .label        = "arona-source-puppet",
                     .renderTarget = aronaDebugSourceTarget,
-                    .path         = "/tmp/papercompany-debug/arona-source-puppet.tga",
+                    .path         = "/tmp/yakkai-debug/arona-source-puppet.tga",
                 });
                 scene.debugRenderDumps.push_back({
                     .label        = "arona-last-effect",
                     .renderTarget = aronaDebugLastEffectTarget,
-                    .path         = "/tmp/papercompany-debug/arona-last-effect.tga",
+                    .path         = "/tmp/yakkai-debug/arona-last-effect.tga",
                 });
                 scene.debugRenderDumps.push_back({
                     .label        = "arona-final-default",
                     .renderTarget = SpecTex_Default.data(),
-                    .path         = "/tmp/papercompany-debug/arona-final-default.tga",
+                    .path         = "/tmp/yakkai-debug/arona-final-default.tga",
                 });
                 LOG_INFO("registered arona debug render dumps: source=%s last=%s final=%s",
                          aronaDebugSourceTarget.c_str(),
@@ -2983,7 +2983,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     ! sourceMaterial.textures[0].empty()) {
                     baseSourceMaterial.textures.resize(std::max<usize>(baseSourceMaterial.textures.size(), 2));
                     baseSourceMaterial.textures[1] = sourceMaterial.textures[0];
-                    baseSourceMaterial.combos["PAPER_CHANNELMAP_BASE_EXCLUDE"] = 1;
+                    baseSourceMaterial.combos["YAKKAI_CHANNELMAP_BASE_EXCLUDE"] = 1;
                     LOG_INFO("native puppet base display applying inverse channelmap alpha mask: image=%s channelMask=%s",
                              wpimgobj.name.c_str(),
                              baseSourceMaterial.textures[1].c_str());
@@ -3058,7 +3058,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     } else if (! wpimgobj.material.textures.empty()) {
                         finalSourceMaterial.textures[2] = wpimgobj.material.textures[0];
                     }
-                    finalSourceMaterial.combos["PAPER_CHANNELMAP_ALPHA_MASK"] = 1;
+                    finalSourceMaterial.combos["YAKKAI_CHANNELMAP_ALPHA_MASK"] = 1;
                     LOG_INFO("native puppet final display applying channelmap/base alpha masks: image=%s channelMask=%s baseMask=%s",
                              wpimgobj.name.c_str(),
                              finalSourceMaterial.textures[1].c_str(),

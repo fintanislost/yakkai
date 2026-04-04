@@ -30,13 +30,13 @@ Captured from the scene harness at known-good master state for regression compar
 
 ```bash
 # Arona
-build/native/scene_harness/paper_scene_harness --backend paper \
+build/native/scene_harness/yakkai_scene_harness --backend paper \
   --source ~/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/workshop/content/431960/3228578419/scene.pkg \
   --assets ~/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/wallpaper_engine/assets \
   --fill crop --capture smoke-tests/3228578419-sleeping-arona.png --capture-delay-ms 8000
 
 # Shiroko
-build/native/scene_harness/paper_scene_harness --backend paper \
+build/native/scene_harness/yakkai_scene_harness --backend paper \
   --source ~/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/workshop/content/431960/3327063360/scene.pkg \
   --assets ~/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/wallpaper_engine/assets \
   --fill crop --capture smoke-tests/3327063360-shiroko-video.png --capture-delay-ms 20000

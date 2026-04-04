@@ -7,7 +7,7 @@
 
 set -e
 
-HARNESS="build/native/scene_harness/paper_scene_harness"
+HARNESS="build/native/scene_harness/yakkai_scene_harness"
 ASSETS="$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/wallpaper_engine/assets"
 WORKSHOP="$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/workshop/content/431960"
 SMOKE_DIR="smoke-tests"
@@ -18,8 +18,8 @@ if [ ! -f "$HARNESS" ]; then
 fi
 
 # Ensure QML module is staged
-cp build/native/scene_backend/libpapercompany_scene_backend.so \
-   build/qml/io/papercompany/scene/libpapercompany_scene_backend.so 2>/dev/null || true
+cp build/native/scene_backend/libyakkai_scene_backend.so \
+   build/qml/io/team7/scene/libyakkai_scene_backend.so 2>/dev/null || true
 
 # Clear shader cache so smoke tests verify the actual pipeline, not stale SPIR-V.
 # Cached shaders have masked regressions before (invisible flares, wrong colors).
@@ -35,7 +35,7 @@ UPDATE="${1:-}"
 
 run_test() {
     local id="$1" name="$2" delay="$3" ref="$SMOKE_DIR/$4"
-    local capture="/tmp/papercompany-smoke-$id.png"
+    local capture="/tmp/yakkai-smoke-$id.png"
     local scene="$WORKSHOP/$id/scene.pkg"
 
     if [ ! -f "$scene" ]; then

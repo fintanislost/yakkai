@@ -89,7 +89,7 @@ Scans `project.json` for colour/opacity property pairs and blends them into the 
 - `tools/color-lab/` — Interactive HTML color debugging tool with texture viewer, g_Color4 sliders, blend mode simulation
 - `tools/color-lab/export_textures.py` — Extract WE .tex files to PNG via LZ4 + DDS + ImageMagick
 - `tools/validate-scene.sh` — Automated render validator with structural + pixel analysis
-- `PAPER_NO_EFFECTS` env var — strips all effects for color debugging
+- `YAKKAI_NO_EFFECTS` env var — strips all effects for color debugging
 
 ## Tested Scenes
 

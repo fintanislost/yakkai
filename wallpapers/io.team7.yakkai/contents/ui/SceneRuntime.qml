@@ -6,12 +6,12 @@
 
 import QtQuick
 import QtQuick.Window
-import "../imports/io/papercompany/scene" as PaperSceneModule
+import "../imports/io/team7/scene" as YakkaiSceneModule
 
 Item {
     id: root
 
-    property string logPrefix: "[Paper Gradient]"
+    property string logPrefix: "[Yakkai]"
     property url sceneSource: ""
     property string assetsPath: ""
     property string scenePropertiesJson: "{}"
@@ -81,12 +81,12 @@ Item {
     function sceneFillModeEnum() {
         switch (fillModeValue) {
         case 1:
-            return PaperSceneModule.PaperSceneViewer.AspectFit
+            return YakkaiSceneModule.YakkaiSceneViewer.AspectFit
         case 2:
-            return PaperSceneModule.PaperSceneViewer.Stretch
+            return YakkaiSceneModule.YakkaiSceneViewer.Stretch
         case 0:
         default:
-            return PaperSceneModule.PaperSceneViewer.AspectCrop
+            return YakkaiSceneModule.YakkaiSceneViewer.AspectCrop
         }
     }
 
@@ -151,13 +151,13 @@ Item {
         }
     }
 
-    PaperSceneModule.PaperSceneViewer {
+    YakkaiSceneModule.YakkaiSceneViewer {
         id: player
         anchors.fill: parent
         source: root.sceneSource
         assets: root.assetsUrl(root.assetsPath)
         scenePropertiesJson: root.scenePropertiesJson
-        fillMode: PaperSceneModule.PaperSceneViewer.AspectCrop
+        fillMode: YakkaiSceneModule.YakkaiSceneViewer.AspectCrop
         fps: 30
         speed: 1.0
         muted: root.muted

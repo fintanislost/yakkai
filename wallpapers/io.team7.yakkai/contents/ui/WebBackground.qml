@@ -18,7 +18,7 @@ Item {
     property bool pageLoaded: false
     property bool propertiesSent: false
     property string loadErrorText: ""
-    readonly property string logPrefix: "[Paper Gradient]"
+    readonly property string logPrefix: "[Yakkai]"
     readonly property var generalProperties: ({ fps: 24 })
     readonly property var parsedUserProperties: parseUserProperties(userPropertiesJson)
     readonly property string statusText: {
@@ -166,7 +166,7 @@ Item {
                                             try {
                                                 listener(payload);
                                             } catch (error) {
-                                                console.error("[Paper Gradient] WE web listener failed", error);
+                                                console.error("[Yakkai] WE web listener failed", error);
                                             }
                                         });
                                     }

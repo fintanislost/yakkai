@@ -16,10 +16,10 @@
 
 set -uo pipefail
 
-HARNESS="build/native/scene_harness/paper_scene_harness"
+HARNESS="build/native/scene_harness/yakkai_scene_harness"
 ASSETS="$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/wallpaper_engine/assets"
 WORKSHOP="$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/workshop/content/431960"
-OUTDIR="/tmp/papercompany-debug"
+OUTDIR="/tmp/yakkai-debug"
 
 SCENE_ID="${1:?Usage: $0 <scene_id>}"
 CAPTURE_DELAY="${2:-10000}"
@@ -41,8 +41,8 @@ if [ ! -f "$SCENE_PKG" ]; then
 fi
 
 # Ensure QML module is staged
-cp build/native/scene_backend/libpapercompany_scene_backend.so \
-   build/qml/io/papercompany/scene/libpapercompany_scene_backend.so 2>/dev/null || true
+cp build/native/scene_backend/libyakkai_scene_backend.so \
+   build/qml/io/team7/scene/libyakkai_scene_backend.so 2>/dev/null || true
 
 echo "=== Scene Render Validator: $SCENE_ID ==="
 echo "Capture delay: ${CAPTURE_DELAY}ms"

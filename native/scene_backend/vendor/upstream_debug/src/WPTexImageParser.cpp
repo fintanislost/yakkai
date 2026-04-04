@@ -571,7 +571,7 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
                     (unsigned char)result[2] == 0xDF && (unsigned char)result[3] == 0xA3;
                 const bool hasVideoMagic = isMp4Magic || isWebMmagic;
 
-#ifdef PAPER_HAS_FFMPEG
+#ifdef YAKKAI_HAS_FFMPEG
                 if ((sizeMismatch || hasVideoMagic) && ! img.video_decoder) {
                     auto decoder = std::make_shared<VideoFrameDecoder>(
                         (const uint8_t*)result, src_size, mipmap.width, mipmap.height);

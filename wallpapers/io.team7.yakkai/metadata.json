@@ -12,9 +12,9 @@
         ],
         "Description": "A configurable gradient, local video, and Wallpaper Engine media wallpaper for KDE Plasma 6",
         "Icon": "preferences-desktop-wallpaper",
-        "Id": "io.papercompany.gradient",
+        "Id": "io.team7.yakkai",
         "License": "MIT",
-        "Name": "Paper Gradient",
+        "Name": "Yakkai",
         "Version": "0.9.0"
     },
     "X-KDE-ParentApp": "org.kde.plasmashell",

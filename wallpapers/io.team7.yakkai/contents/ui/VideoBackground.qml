@@ -17,7 +17,7 @@ Item {
     property int stalledTicks: 0
     property int previousPosition: -1
     property int receivedFrameCount: 0
-    readonly property string logPrefix: "[Paper Gradient]"
+    readonly property string logPrefix: "[Yakkai]"
 
     readonly property bool hasRenderedFrame: receivedFrameCount > 0
     readonly property string mediaStatusLabel: {

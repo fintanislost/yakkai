@@ -1,6 +1,6 @@
 # Wallpaper Engine KDE Reference
 
-This directory contains a curated local copy of the installed `Wallpaper Engine for Kde` plugin files that are relevant to Paper Gradient's video-wallpaper research.
+This directory contains a curated local copy of the installed `Wallpaper Engine for Kde` plugin files that are relevant to Yakkai's video-wallpaper research.
 
 Origin on this machine:
 
@@ -26,13 +26,13 @@ Key findings:
 - The full plugin is not QML-only. It imports a compiled module, `com.github.catsout.wallpaperEngineKde`, whose installed `qmldir` exposes `PluginInfo`, `MouseGrabber`, `SceneViewer`, and `Mpv`.
 - Additional runtime behavior such as TTY switching, mouse forwarding, scene playback, and mpv playback depends on compiled code.
 
-What is likely reusable for Paper Gradient:
+What is likely reusable for Yakkai:
 
 - The idea of a small backend loader that swaps between content modes.
 - A minimal `QtMultimedia` video backend for local file playback.
 - Later, optional pause policies based on focused/maximized/fullscreen windows and battery state.
 
-What is probably out of scope for a first Paper Gradient video milestone:
+What is probably out of scope for a first Yakkai video milestone:
 
 - Wallpaper Engine scene playback
 - Workshop integration

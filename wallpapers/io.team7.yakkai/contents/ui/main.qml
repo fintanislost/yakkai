@@ -10,7 +10,7 @@ import org.kde.plasma.plasmoid
 WallpaperItem {
     id: root
 
-    readonly property string logPrefix: "[Paper Gradient]"
+    readonly property string logPrefix: "[Yakkai]"
 
     function resolvedVideoSource(value) {
         const asText = String(value ?? "")
@@ -135,7 +135,7 @@ WallpaperItem {
                         ? qsTr("Wallpaper Engine Web mode could not be initialized in this Plasma session. Check QtWebEngine availability in the VM.")
                         : ((root.sceneMode || root.sceneNativeMode)
                             ? qsTr("Wallpaper Engine Scene mode could not be initialized in this Plasma session.")
-                            : qsTr("The selected Paper Gradient content mode could not be initialized.")))
+                            : qsTr("The selected Yakkai content mode could not be initialized.")))
             } else if (status === Loader.Loading) {
                 root.contentLoadFailed = false
                 root.contentLoadErrorText = ""

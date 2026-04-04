@@ -1,4 +1,4 @@
-#include "PaperSceneViewer.hpp"
+#include "YakkaiSceneViewer.hpp"
 
 #include <QtGui/QtEvents>
 #include <QtCore/QDebug>
@@ -8,14 +8,14 @@
 #include <QtCore/QJsonObject>
 #include <QtCore/QJsonValue>
 
-#if PAPER_SCENE_USE_VENDORED_BACKEND
+#if YAKKAI_SCENE_USE_VENDORED_BACKEND
 
-PaperSceneViewer::PaperSceneViewer(QQuickItem* parent)
+YakkaiSceneViewer::YakkaiSceneViewer(QQuickItem* parent)
     : scenebackend::SceneObject(parent)
 {
     qInfo().noquote()
-        << "[Paper Gradient] scene viewer build=2026-03-18 experimental-model-fallback";
-    setBackendStatus(QStringLiteral("Vendored Paper Company scene backend initialized."));
+        << "[Yakkai] scene viewer build=2026-03-18 experimental-model-fallback";
+    setBackendStatus(QStringLiteral("Vendored Yakkai scene backend initialized."));
     connect(this,
             &scenebackend::SceneObject::sourceChanged,
             this,
@@ -29,21 +29,21 @@ PaperSceneViewer::PaperSceneViewer(QQuickItem* parent)
                 refreshSceneSupportStatus();
                 if (m_unsupportedModelObjectCount > 0) {
                     setBackendStatus(
-                        QStringLiteral("Vendored Paper Company scene backend rendered a first frame while using the experimental model fallback for %1 model object(s). Output may still be incomplete.")
+                        QStringLiteral("Vendored Yakkai scene backend rendered a first frame while using the experimental model fallback for %1 model object(s). Output may still be incomplete.")
                             .arg(m_unsupportedModelObjectCount));
                 } else {
-                    setBackendStatus(QStringLiteral("Vendored Paper Company scene backend rendered a first frame."));
+                    setBackendStatus(QStringLiteral("Vendored Yakkai scene backend rendered a first frame."));
                 }
             });
     applyMouseInput();
 }
 
-bool PaperSceneViewer::mouseInputEnabled() const
+bool YakkaiSceneViewer::mouseInputEnabled() const
 {
     return m_mouseInputEnabled;
 }
 
-void PaperSceneViewer::setMouseInputEnabled(bool value)
+void YakkaiSceneViewer::setMouseInputEnabled(bool value)
 {
     if (m_mouseInputEnabled == value) {
         return;
@@ -54,12 +54,12 @@ void PaperSceneViewer::setMouseInputEnabled(bool value)
     emit mouseInputEnabledChanged();
 }
 
-bool PaperSceneViewer::validationLayersEnabled() const
+bool YakkaiSceneViewer::validationLayersEnabled() const
 {
     return m_validationLayersEnabled;
 }
 
-void PaperSceneViewer::setValidationLayersEnabled(bool value)
+void YakkaiSceneViewer::setValidationLayersEnabled(bool value)
 {
     if (m_validationLayersEnabled == value) {
         return;
@@ -68,31 +68,31 @@ void PaperSceneViewer::setValidationLayersEnabled(bool value)
     m_validationLayersEnabled = value;
     if (value) {
         enableVulkanValid();
-        setBackendStatus(QStringLiteral("Vendored Paper Company scene backend will request Vulkan validation layers on the next renderer initialization."));
+        setBackendStatus(QStringLiteral("Vendored Yakkai scene backend will request Vulkan validation layers on the next renderer initialization."));
     } else {
-        setBackendStatus(QStringLiteral("Vendored Paper Company scene backend validation layers are disabled."));
+        setBackendStatus(QStringLiteral("Vendored Yakkai scene backend validation layers are disabled."));
     }
     emit validationLayersEnabledChanged();
 }
 
-QString PaperSceneViewer::backendStatus() const
+QString YakkaiSceneViewer::backendStatus() const
 {
     return m_backendStatus;
 }
 
-void PaperSceneViewer::requestGraphvizDump()
+void YakkaiSceneViewer::requestGraphvizDump()
 {
     enableGenGraphviz();
-    setBackendStatus(QStringLiteral("Vendored Paper Company scene backend will request a Graphviz dump on the next renderer compilation."));
+    setBackendStatus(QStringLiteral("Vendored Yakkai scene backend will request a Graphviz dump on the next renderer compilation."));
 }
 
-void PaperSceneViewer::applyMouseInput()
+void YakkaiSceneViewer::applyMouseInput()
 {
     setAcceptMouse(m_mouseInputEnabled);
     setAcceptHover(m_mouseInputEnabled);
 }
 
-void PaperSceneViewer::refreshSceneSupportStatus()
+void YakkaiSceneViewer::refreshSceneSupportStatus()
 {
     m_unsupportedModelObjectCount = 0;
 
@@ -148,17 +148,17 @@ void PaperSceneViewer::refreshSceneSupportStatus()
     if (unsupportedModelObjectCount > 0) {
         if (supportedDrawableObjectCount > 0) {
             setBackendStatus(
-                QStringLiteral("Vendored Paper Company scene backend detected %1 model object(s) and will use an experimental static fallback for them. Output may be incomplete.")
+                QStringLiteral("Vendored Yakkai scene backend detected %1 model object(s) and will use an experimental static fallback for them. Output may be incomplete.")
                     .arg(unsupportedModelObjectCount));
         } else {
             setBackendStatus(
-                QStringLiteral("Vendored Paper Company scene backend is using an experimental static fallback for %1 model object(s). Output may still be blank or incomplete.")
+                QStringLiteral("Vendored Yakkai scene backend is using an experimental static fallback for %1 model object(s). Output may still be blank or incomplete.")
                     .arg(unsupportedModelObjectCount));
         }
     }
 }
 
-void PaperSceneViewer::setBackendStatus(const QString& value)
+void YakkaiSceneViewer::setBackendStatus(const QString& value)
 {
     if (m_backendStatus == value) {
         return;
@@ -170,19 +170,19 @@ void PaperSceneViewer::setBackendStatus(const QString& value)
 
 #else
 
-PaperSceneViewer::PaperSceneViewer(QQuickItem* parent)
+YakkaiSceneViewer::YakkaiSceneViewer(QQuickItem* parent)
     : QQuickItem(parent)
 {
     setBackendStatus(QStringLiteral("Scene backend scaffold only. No native renderer is wired yet."));
     updateMouseAcceptance();
 }
 
-QUrl PaperSceneViewer::source() const
+QUrl YakkaiSceneViewer::source() const
 {
     return m_source;
 }
 
-void PaperSceneViewer::setSource(const QUrl& value)
+void YakkaiSceneViewer::setSource(const QUrl& value)
 {
     if (m_source == value) {
         return;
@@ -192,12 +192,12 @@ void PaperSceneViewer::setSource(const QUrl& value)
     emit sourceChanged();
 }
 
-QUrl PaperSceneViewer::assets() const
+QUrl YakkaiSceneViewer::assets() const
 {
     return m_assets;
 }
 
-void PaperSceneViewer::setAssets(const QUrl& value)
+void YakkaiSceneViewer::setAssets(const QUrl& value)
 {
     if (m_assets == value) {
         return;
@@ -207,12 +207,12 @@ void PaperSceneViewer::setAssets(const QUrl& value)
     emit assetsChanged();
 }
 
-int PaperSceneViewer::fps() const
+int YakkaiSceneViewer::fps() const
 {
     return m_fps;
 }
 
-void PaperSceneViewer::setFps(int value)
+void YakkaiSceneViewer::setFps(int value)
 {
     if (m_fps == value) {
         return;
@@ -222,12 +222,12 @@ void PaperSceneViewer::setFps(int value)
     emit fpsChanged();
 }
 
-PaperSceneViewer::FillMode PaperSceneViewer::fillMode() const
+YakkaiSceneViewer::FillMode YakkaiSceneViewer::fillMode() const
 {
     return m_fillMode;
 }
 
-void PaperSceneViewer::setFillMode(FillMode value)
+void YakkaiSceneViewer::setFillMode(FillMode value)
 {
     if (m_fillMode == value) {
         return;
@@ -237,12 +237,12 @@ void PaperSceneViewer::setFillMode(FillMode value)
     emit fillModeChanged();
 }
 
-float PaperSceneViewer::speed() const
+float YakkaiSceneViewer::speed() const
 {
     return m_speed;
 }
 
-void PaperSceneViewer::setSpeed(float value)
+void YakkaiSceneViewer::setSpeed(float value)
 {
     if (qFuzzyCompare(m_speed, value)) {
         return;
@@ -252,12 +252,12 @@ void PaperSceneViewer::setSpeed(float value)
     emit speedChanged();
 }
 
-float PaperSceneViewer::volume() const
+float YakkaiSceneViewer::volume() const
 {
     return m_volume;
 }
 
-void PaperSceneViewer::setVolume(float value)
+void YakkaiSceneViewer::setVolume(float value)
 {
     if (qFuzzyCompare(m_volume, value)) {
         return;
@@ -267,12 +267,12 @@ void PaperSceneViewer::setVolume(float value)
     emit volumeChanged();
 }
 
-bool PaperSceneViewer::muted() const
+bool YakkaiSceneViewer::muted() const
 {
     return m_muted;
 }
 
-void PaperSceneViewer::setMuted(bool value)
+void YakkaiSceneViewer::setMuted(bool value)
 {
     if (m_muted == value) {
         return;
@@ -282,12 +282,12 @@ void PaperSceneViewer::setMuted(bool value)
     emit mutedChanged();
 }
 
-bool PaperSceneViewer::mouseInputEnabled() const
+bool YakkaiSceneViewer::mouseInputEnabled() const
 {
     return m_mouseInputEnabled;
 }
 
-void PaperSceneViewer::setMouseInputEnabled(bool value)
+void YakkaiSceneViewer::setMouseInputEnabled(bool value)
 {
     if (m_mouseInputEnabled == value) {
         return;
@@ -298,12 +298,12 @@ void PaperSceneViewer::setMouseInputEnabled(bool value)
     emit mouseInputEnabledChanged();
 }
 
-bool PaperSceneViewer::validationLayersEnabled() const
+bool YakkaiSceneViewer::validationLayersEnabled() const
 {
     return m_validationLayersEnabled;
 }
 
-void PaperSceneViewer::setValidationLayersEnabled(bool value)
+void YakkaiSceneViewer::setValidationLayersEnabled(bool value)
 {
     if (m_validationLayersEnabled == value) {
         return;
@@ -318,23 +318,23 @@ void PaperSceneViewer::setValidationLayersEnabled(bool value)
     emit validationLayersEnabledChanged();
 }
 
-QString PaperSceneViewer::backendStatus() const
+QString YakkaiSceneViewer::backendStatus() const
 {
     return m_backendStatus;
 }
 
-void PaperSceneViewer::requestGraphvizDump()
+void YakkaiSceneViewer::requestGraphvizDump()
 {
     setBackendStatus(QStringLiteral("Scene backend scaffold only. Graphviz dump requested but no native renderer is wired yet."));
 }
 
-void PaperSceneViewer::updateMouseAcceptance()
+void YakkaiSceneViewer::updateMouseAcceptance()
 {
     setAcceptedMouseButtons(m_mouseInputEnabled ? Qt::LeftButton : Qt::NoButton);
     setAcceptHoverEvents(m_mouseInputEnabled);
 }
 
-void PaperSceneViewer::setBackendStatus(const QString& value)
+void YakkaiSceneViewer::setBackendStatus(const QString& value)
 {
     if (m_backendStatus == value) {
         return;

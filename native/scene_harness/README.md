@@ -9,12 +9,12 @@ Why it exists:
 
 Current backends:
 - `system`: uses the currently installed `com.github.catsout.wallpaperEngineKde` `SceneViewer`
-- `paper`: uses the repo-owned `io.papercompany.scene` native backend module
+- `paper`: uses the repo-owned `io.team7.scene` native backend module
 
 Example usage after building:
 
 ```bash
-./paper_scene_harness \
+./yakkai_scene_harness \
   --backend system \
   --source /path/to/scene.json \
   --assets /path/to/wallpaper_engine/assets \

@@ -23,8 +23,8 @@ Why this copy exists:
   - official single-header `nlohmann/json` replacements
 
 Current policy:
-- this vendored tree is now compiled by [native/scene_backend/CMakeLists.txt](/home/peter/repos/papercompany/native/scene_backend/CMakeLists.txt) when `PAPER_ENABLE_VENDORED_SCENE_BACKEND=ON`
-- the repo-owned `PaperSceneViewer` wrapper is the QML-facing module built on top of it
+- this vendored tree is now compiled by [native/scene_backend/CMakeLists.txt](/home/peter/repos/yakkai/native/scene_backend/CMakeLists.txt) when `YAKKAI_ENABLE_VENDORED_SCENE_BACKEND=ON`
+- the repo-owned `YakkaiSceneViewer` wrapper is the QML-facing module built on top of it
 - the vendored `glslang` subtree is now built as a coherent local compiler dependency instead of mixing with the system `libglslang.so`
 - the current failure point is back in external-texture import, not in shader compilation or Plasma integration
 

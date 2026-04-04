@@ -4,10 +4,10 @@
 #include <QtCore/QString>
 #include <QtQml/qqmlregistration.h>
 
-#if PAPER_SCENE_USE_VENDORED_BACKEND
+#if YAKKAI_SCENE_USE_VENDORED_BACKEND
 #include "SceneBackend.hpp"
 
-class PaperSceneViewer : public scenebackend::SceneObject
+class YakkaiSceneViewer : public scenebackend::SceneObject
 {
     Q_OBJECT
     QML_ELEMENT
@@ -25,7 +25,7 @@ public:
     };
     Q_ENUM(FillMode)
 
-    explicit PaperSceneViewer(QQuickItem* parent = nullptr);
+    explicit YakkaiSceneViewer(QQuickItem* parent = nullptr);
 
     bool mouseInputEnabled() const;
     void setMouseInputEnabled(bool value);
@@ -57,7 +57,7 @@ private:
 
 #include <QtQuick/QQuickItem>
 
-class PaperSceneViewer : public QQuickItem
+class YakkaiSceneViewer : public QQuickItem
 {
     Q_OBJECT
     QML_ELEMENT
@@ -82,7 +82,7 @@ public:
     };
     Q_ENUM(FillMode)
 
-    explicit PaperSceneViewer(QQuickItem* parent = nullptr);
+    explicit YakkaiSceneViewer(QQuickItem* parent = nullptr);
 
     QUrl source() const;
     void setSource(const QUrl& value);

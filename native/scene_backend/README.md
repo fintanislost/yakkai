@@ -1,10 +1,10 @@
 # Scene Backend
 
-This directory contains the repo-owned native Wallpaper Engine scene backend for Paper Company.
+This directory contains the repo-owned native Wallpaper Engine scene backend for Yakkai.
 
 Current state:
-- `io.papercompany.scene` builds a repo-owned `PaperSceneViewer` QML type backed by vendored native scene sources when `PAPER_ENABLE_VENDORED_SCENE_BACKEND=ON`.
-- The build now stages that QML module into `wallpapers/io.papercompany.gradient/contents/imports/io/papercompany/scene/` so `Wallpaper Engine Scene Native` can load it without depending on a system-installed scene plugin.
+- `io.team7.scene` builds a repo-owned `YakkaiSceneViewer` QML type backed by vendored native scene sources when `YAKKAI_ENABLE_VENDORED_SCENE_BACKEND=ON`.
+- The build now stages that QML module into `wallpapers/io.team7.yakkai/contents/imports/io/team7/scene/` so `Wallpaper Engine Scene Native` can load it without depending on a system-installed scene plugin.
 - The built module now reaches native renderer initialization in the standalone harness, including:
   - Vulkan/GL setup
   - scene parsing

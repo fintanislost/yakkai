@@ -30,7 +30,7 @@ int fillModeFromString(const QString& fillMode)
 QString backendQmlFile(const QString& qmlDir, const QString& backend)
 {
     if (backend == QStringLiteral("paper")) {
-        return QDir(qmlDir).filePath(QStringLiteral("PaperSceneViewerHarness.qml"));
+        return QDir(qmlDir).filePath(QStringLiteral("YakkaiSceneViewerHarness.qml"));
     }
 
     return QDir(qmlDir).filePath(QStringLiteral("SystemSceneViewerHarness.qml"));
@@ -40,11 +40,11 @@ QString backendQmlFile(const QString& qmlDir, const QString& backend)
 int main(int argc, char* argv[])
 {
     QGuiApplication app(argc, argv);
-    QCoreApplication::setApplicationName(QStringLiteral("paper_scene_harness"));
+    QCoreApplication::setApplicationName(QStringLiteral("yakkai_scene_harness"));
     QCoreApplication::setOrganizationName(QStringLiteral("Papercompany"));
 
     QCommandLineParser parser;
-    parser.setApplicationDescription(QStringLiteral("Standalone Paper Company scene harness"));
+    parser.setApplicationDescription(QStringLiteral("Standalone Yakkai scene harness"));
     parser.addHelpOption();
 
     QCommandLineOption backendOption(
@@ -99,8 +99,8 @@ int main(int argc, char* argv[])
     parser.addOption(captureDelayOption);
     parser.process(app);
 
-    const QString qmlDir = QStringLiteral(PAPER_SCENE_HARNESS_QML_DIR);
-    const QString buildQmlImportDir = QStringLiteral(PAPER_SCENE_HARNESS_BUILD_QML_IMPORT_DIR);
+    const QString qmlDir = QStringLiteral(YAKKAI_SCENE_HARNESS_QML_DIR);
+    const QString buildQmlImportDir = QStringLiteral(YAKKAI_SCENE_HARNESS_BUILD_QML_IMPORT_DIR);
     const QString backend = parser.value(backendOption).trimmed().toLower();
     const QString rawSourcePath = parser.value(sourceOption).trimmed();
     const QString rawAssetsPath = parser.value(assetsOption).trimmed();
@@ -116,14 +116,14 @@ int main(int argc, char* argv[])
 
     QQmlApplicationEngine engine;
     QObject::connect(&app, &QGuiApplication::aboutToQuit, []() {
-        qInfo() << "paper_scene_harness: aboutToQuit";
+        qInfo() << "yakkai_scene_harness: aboutToQuit";
     });
     QObject::connect(&app, &QGuiApplication::lastWindowClosed, []() {
-        qInfo() << "paper_scene_harness: lastWindowClosed";
+        qInfo() << "yakkai_scene_harness: lastWindowClosed";
     });
     QObject::connect(&engine, &QQmlApplicationEngine::warnings, [](const QList<QQmlError>& warnings) {
         for (const QQmlError& warning : warnings) {
-            qWarning().noquote() << "paper_scene_harness: qml warning:" << warning.toString();
+            qWarning().noquote() << "yakkai_scene_harness: qml warning:" << warning.toString();
         }
     });
     engine.addImportPath(buildQmlImportDir);
@@ -142,29 +142,29 @@ int main(int argc, char* argv[])
         &QQmlApplicationEngine::objectCreationFailed,
         &app,
         []() {
-            qWarning() << "paper_scene_harness: objectCreationFailed";
+            qWarning() << "yakkai_scene_harness: objectCreationFailed";
             QCoreApplication::exit(1);
         },
         Qt::QueuedConnection
     );
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreated, &app, [](QObject* object, const QUrl& url) {
-        qInfo() << "paper_scene_harness: objectCreated" << url << (object ? "ok" : "null");
+        qInfo() << "yakkai_scene_harness: objectCreated" << url << (object ? "ok" : "null");
 
         auto* window = qobject_cast<QWindow*>(object);
         if (!window) {
             return;
         }
 
-        qInfo() << "paper_scene_harness: rootWindow initial visible=" << window->isVisible()
+        qInfo() << "yakkai_scene_harness: rootWindow initial visible=" << window->isVisible()
                 << "size=" << window->size();
         QObject::connect(window, &QWindow::visibleChanged, window, [window](bool visible) {
-            qInfo() << "paper_scene_harness: rootWindow visibleChanged" << visible;
+            qInfo() << "yakkai_scene_harness: rootWindow visibleChanged" << visible;
         });
         QObject::connect(window, &QWindow::widthChanged, window, [window]() {
-            qInfo() << "paper_scene_harness: rootWindow widthChanged" << window->width();
+            qInfo() << "yakkai_scene_harness: rootWindow widthChanged" << window->width();
         });
         QObject::connect(window, &QWindow::heightChanged, window, [window]() {
-            qInfo() << "paper_scene_harness: rootWindow heightChanged" << window->height();
+            qInfo() << "yakkai_scene_harness: rootWindow heightChanged" << window->height();
         });
     });
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreated, &app, [&app, capturePath, captureDelayMs](QObject* object, const QUrl&) {
@@ -174,7 +174,7 @@ int main(int argc, char* argv[])
 
         auto* quickWindow = qobject_cast<QQuickWindow*>(object);
         if (!quickWindow) {
-            qWarning() << "paper_scene_harness: capture requested but root object is not a QQuickWindow";
+            qWarning() << "yakkai_scene_harness: capture requested but root object is not a QQuickWindow";
             QCoreApplication::exit(2);
             return;
         }
@@ -183,22 +183,22 @@ int main(int argc, char* argv[])
         QPointer<QQuickWindow> guardedWindow(quickWindow);
         QTimer::singleShot(std::max(captureDelayMs, 0), &app, [guardedWindow, absoluteCapturePath]() {
             if (!guardedWindow) {
-                qWarning() << "paper_scene_harness: capture window was destroyed before capture";
+                qWarning() << "yakkai_scene_harness: capture window was destroyed before capture";
                 QCoreApplication::exit(3);
                 return;
             }
 
             const QImage image = guardedWindow->grabWindow();
-            qInfo() << "paper_scene_harness: capture size=" << image.size()
+            qInfo() << "yakkai_scene_harness: capture size=" << image.size()
                     << "path=" << absoluteCapturePath;
             if (image.isNull()) {
-                qWarning() << "paper_scene_harness: capture image is null";
+                qWarning() << "yakkai_scene_harness: capture image is null";
                 QCoreApplication::exit(4);
                 return;
             }
 
             if (!image.save(absoluteCapturePath)) {
-                qWarning() << "paper_scene_harness: failed to save capture to" << absoluteCapturePath;
+                qWarning() << "yakkai_scene_harness: failed to save capture to" << absoluteCapturePath;
                 QCoreApplication::exit(5);
                 return;
             }
@@ -209,7 +209,7 @@ int main(int argc, char* argv[])
     engine.load(mainQml);
 
     QTimer::singleShot(0, &app, [&engine]() {
-        qInfo() << "paper_scene_harness: rootObjects after load" << engine.rootObjects().size();
+        qInfo() << "yakkai_scene_harness: rootObjects after load" << engine.rootObjects().size();
     });
 
     return app.exec();

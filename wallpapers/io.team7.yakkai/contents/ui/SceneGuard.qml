@@ -9,7 +9,7 @@ import QtQuick
 Item {
     id: root
 
-    property string logPrefix: "[Paper Gradient]"
+    property string logPrefix: "[Yakkai]"
     property url sceneSource: ""
     property string sceneSourceKind: ""
     property string scenePropertiesJson: "{}"
@@ -32,7 +32,7 @@ Item {
         && String(sceneSource).length > 0
         && String(assetsPath).length > 0
     readonly property string runtimeErrorText: runtimeLoader.status === Loader.Error
-        ? qsTr("The experimental scene renderer failed to load. Paper Gradient stayed on the safe placeholder instead of invoking the renderer.")
+        ? qsTr("The experimental scene renderer failed to load. Yakkai stayed on the safe placeholder instead of invoking the renderer.")
         : ""
 
     function log(message) {

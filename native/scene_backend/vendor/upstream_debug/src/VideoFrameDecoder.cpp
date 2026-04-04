@@ -1,7 +1,7 @@
 #include "VideoFrameDecoder.hpp"
 #include "Utils/Logging.h"
 
-#ifdef PAPER_HAS_FFMPEG
+#ifdef YAKKAI_HAS_FFMPEG
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -280,7 +280,7 @@ void VideoFrameDecoder::DecodeLoop() {
 
 } // namespace wallpaper
 
-#else // !PAPER_HAS_FFMPEG
+#else // !YAKKAI_HAS_FFMPEG
 
 namespace wallpaper {
 
@@ -306,4 +306,4 @@ void VideoFrameDecoder::DecodeLoop() {}
 
 } // namespace wallpaper
 
-#endif // PAPER_HAS_FFMPEG
+#endif // YAKKAI_HAS_FFMPEG

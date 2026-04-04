@@ -1,6 +1,6 @@
 # Fixes
 
-This document tracks the practical fixes and debugging outcomes that got `Paper Gradient` to a working state for local video, Wallpaper Engine video, and first-pass Wallpaper Engine web testing.
+This document tracks the practical fixes and debugging outcomes that got `Yakkai` to a working state for local video, Wallpaper Engine video, and first-pass Wallpaper Engine web testing.
 
 ## Wallpaper Engine Scene backend limit
 
@@ -113,7 +113,7 @@ Diagnosis:
 - The latest Sleeping Arona correction narrows that companion `*_channelmap.json` path back to an explicit-material check. The native backend no longer promotes a sibling sidecar just because a matching filename exists next to a `genericimage4` puppet asset; the special `puppettexturechannels` route is now reserved for source materials that explicitly request it.
 - The ordinary Sleeping Arona `genericimage4 + effects` path is now pinned back to the upstream renderer model instead of the custom standalone-display experiment. The source card stays flat, a synthetic puppet `genericimage4` node is appended as the last authored effect stage, and the effect resolver publishes that last node back with the puppet mesh just like upstream `wallpaper-engine-kde-plugin`.
 - That upstream-compatible baseline still leaves Sleeping Arona visibly broken in native Plasma runs, so the current practical fallback now disables the local `ARONA_CROP_SHEET` card-effect chain entirely and renders that layer as a plain puppet image instead of continuing to route it through the authored flat-card effect publish path. This is intentionally scene-specific and prioritized as a display-quality fallback rather than a renderer-accuracy claim.
-- To stop guessing at that path from screenshots alone, the native renderer can now dump three targeted `ARONA_CROP_SHEET` render targets into `/tmp/papercompany-debug/`: the copied source puppet RT before effects, the last effect ping-pong RT, and the final `_rt_default` scene RT after the frame completes.
+- To stop guessing at that path from screenshots alone, the native renderer can now dump three targeted `ARONA_CROP_SHEET` render targets into `/tmp/yakkai-debug/`: the copied source puppet RT before effects, the last effect ping-pong RT, and the final `_rt_default` scene RT after the frame completes.
 - That new prepass also exposed a renderer safety bug: uniform uploads were writing the full authored payload even when the reflected block member was smaller, which could overrun UBO storage for authored array values like `g_BlendMap`. The Vulkan custom-shader pass now clamps those uploads to the reflected member size and logs the mismatch instead of blindly overwriting adjacent uniform data.
 - The same crop-sheet work also exposed a shader-compiler stage bug in the vendored Vulkan backend: GLSL fragment sources were still being registered as vertex-stage inputs during `glslang` parse, so authored fragment-only operations like `discard` or `gl_FragColor` could fail in otherwise valid scene materials. The compiler now forwards the real unit stage into `setEnvInput(...)`, which lets `puppettexturechannels` and similar fragment shaders compile under their correct stage.
 
@@ -129,19 +129,19 @@ Result:
 ## Repo-owned native scene backend status
 
 Problem:
-- The repo-owned `io.papercompany.scene` backend now builds and loads in the standalone harness, but it does not yet reach the same external-texture import phase as the installed system backend.
+- The repo-owned `io.team7.scene` backend now builds and loads in the standalone harness, but it does not yet reach the same external-texture import phase as the installed system backend.
 
 What was fixed:
-- Vendored the missing native scene backend sources under [native/scene_backend/vendor/upstream_debug](/home/peter/repos/papercompany/native/scene_backend/vendor/upstream_debug).
-- Replaced the original `PaperSceneViewer` stub with a repo-owned wrapper around the vendored `SceneObject`.
-- Added the missing local `glslang` translation units needed to eliminate unresolved symbols from [libpapercompany_scene_backend.so](/tmp/papercompany-cmake-check/native/scene_backend/libpapercompany_scene_backend.so).
-- Replaced the mixed vendored-source/system-library `glslang` path with a fully vendored `glslang` subproject build in [native/scene_backend/CMakeLists.txt](/home/peter/repos/papercompany/native/scene_backend/CMakeLists.txt).
-- Added standalone harness diagnostics in [main.cpp](/home/peter/repos/papercompany/native/scene_harness/src/main.cpp) and [Main.qml](/home/peter/repos/papercompany/native/scene_harness/qml/Main.qml).
+- Vendored the missing native scene backend sources under [native/scene_backend/vendor/upstream_debug](/home/peter/repos/yakkai/native/scene_backend/vendor/upstream_debug).
+- Replaced the original `YakkaiSceneViewer` stub with a repo-owned wrapper around the vendored `SceneObject`.
+- Added the missing local `glslang` translation units needed to eliminate unresolved symbols from [libyakkai_scene_backend.so](/tmp/yakkai-cmake-check/native/scene_backend/libyakkai_scene_backend.so).
+- Replaced the mixed vendored-source/system-library `glslang` path with a fully vendored `glslang` subproject build in [native/scene_backend/CMakeLists.txt](/home/peter/repos/yakkai/native/scene_backend/CMakeLists.txt).
+- Added standalone harness diagnostics in [main.cpp](/home/peter/repos/yakkai/native/scene_harness/src/main.cpp) and [Main.qml](/home/peter/repos/yakkai/native/scene_harness/qml/Main.qml).
 - Added native renderer logging through:
-  - [SceneWallpaper.cpp](/home/peter/repos/papercompany/native/scene_backend/vendor/upstream_debug/src/SceneWallpaper.cpp)
-  - [VulkanRender.cpp](/home/peter/repos/papercompany/native/scene_backend/vendor/upstream_debug/src/VulkanRender/VulkanRender.cpp)
-  - [FinPass.cpp](/home/peter/repos/papercompany/native/scene_backend/vendor/upstream_debug/src/VulkanRender/FinPass.cpp)
-  - [Shader.cpp](/home/peter/repos/papercompany/native/scene_backend/vendor/upstream_debug/src/Vulkan/Shader.cpp)
+  - [SceneWallpaper.cpp](/home/peter/repos/yakkai/native/scene_backend/vendor/upstream_debug/src/SceneWallpaper.cpp)
+  - [VulkanRender.cpp](/home/peter/repos/yakkai/native/scene_backend/vendor/upstream_debug/src/VulkanRender/VulkanRender.cpp)
+  - [FinPass.cpp](/home/peter/repos/yakkai/native/scene_backend/vendor/upstream_debug/src/VulkanRender/FinPass.cpp)
+  - [Shader.cpp](/home/peter/repos/yakkai/native/scene_backend/vendor/upstream_debug/src/Vulkan/Shader.cpp)
 
 Current evidence:
 - `ldd -r` is now clean for the repo-owned scene backend shared library.
@@ -174,9 +174,9 @@ Inference:
 
 Result:
 - The repo-owned backend is now beyond the scaffold stage and reaches first frame, successful external-texture import, and active per-image external semaphore handoff in the standalone harness.
-- The native backend now stages its `io.papercompany.scene` QML module into `wallpapers/io.papercompany.gradient/contents/imports/io/papercompany/scene/` during the CMake build.
+- The native backend now stages its `io.team7.scene` QML module into `wallpapers/io.team7.yakkai/contents/imports/io/team7/scene/` during the CMake build.
 - `Wallpaper Engine Scene Native` now loads that staged repo-owned module through a local QML import instead of depending on the system `SceneViewer` install.
-- The scene guard now tears down and recreates the experimental runtime when the selected scene source or assets root changes, which avoids hot-swapping a live `PaperSceneViewer` instance across different scenes.
+- The scene guard now tears down and recreates the experimental runtime when the selected scene source or assets root changes, which avoids hot-swapping a live `YakkaiSceneViewer` instance across different scenes.
 - The repeated `waiting on external ready semaphore` / `submitted external image` / `queued external release` pattern is the expected steady-state render loop for an animated scene, not by itself an infinite recursion bug.
 - Those high-frequency native scene logs are now rate-limited so live Plasma runs stay readable while keeping the synchronization path visible.
 - Hard `assert(...)` paths in the vendored MDL/puppet parser are being converted to logged validation failures so malformed scene content can fail soft instead of crashing `plasmashell`.
@@ -190,7 +190,7 @@ Problem:
 - Wallpaper Engine web pages were loading, but their property bridge was unreliable or missing.
 
 Fix:
-- Reworked [WebBackground.qml](/home/peter/repos/papercompany/wallpapers/io.papercompany.gradient/contents/ui/WebBackground.qml) to use a direct JavaScript compatibility shim instead of a live `QWebChannel` dependency.
+- Reworked [WebBackground.qml](/home/peter/repos/yakkai/wallpapers/io.team7.yakkai/contents/ui/WebBackground.qml) to use a direct JavaScript compatibility shim instead of a live `QWebChannel` dependency.
 - The shim now creates and maintains:
   - `window.wpeQml`
   - `window.wallpaperRegisterAudioListener(...)`
@@ -204,7 +204,7 @@ Result:
 ## Stale Plasma QML cache
 
 Problem:
-- Even after updating the package, `plasmashell` kept logging strings that no longer existed in the installed [WebBackground.qml](/home/peter/.local/share/plasma/wallpapers/io.papercompany.gradient/contents/ui/WebBackground.qml).
+- Even after updating the package, `plasmashell` kept logging strings that no longer existed in the installed [WebBackground.qml](/home/peter/.local/share/plasma/wallpapers/io.team7.yakkai/contents/ui/WebBackground.qml).
 - That showed Plasma was still running an older in-memory or cached QML instance.
 
 Fix:
@@ -258,18 +258,18 @@ Why:
 Update the wallpaper package during development:
 
 ```bash
-kpackagetool6 -t Plasma/Wallpaper -u /home/peter/repos/papercompany/wallpapers/io.papercompany.gradient
+kpackagetool6 -t Plasma/Wallpaper -u /home/peter/repos/yakkai/wallpapers/io.team7.yakkai
 ```
 
 Watch runtime logs:
 
 ```bash
-journalctl --user -f | grep "Paper Gradient"
+journalctl --user -f | grep "Yakkai"
 ```
 
 Do a temporary package-structure smoke test:
 
 ```bash
 tmp_root="$(mktemp -d)"
-kpackagetool6 -t Plasma/Wallpaper -i "/home/peter/repos/papercompany/wallpapers/io.papercompany.gradient" -p "$tmp_root"
+kpackagetool6 -t Plasma/Wallpaper -i "/home/peter/repos/yakkai/wallpapers/io.team7.yakkai" -p "$tmp_root"
 ```

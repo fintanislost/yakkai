@@ -38,13 +38,13 @@ Item {
             ? runtimeErrorText
             : (experimentalEnabled
                 ? (backendModuleStatus === qsTr("Checking…")
-                    ? qsTr("Wallpaper Engine Scene Native is checking whether the repo-owned Paper Company scene module is staged into this wallpaper package.")
+                    ? qsTr("Wallpaper Engine Scene Native is checking whether the repo-owned Yakkai scene module is staged into this wallpaper package.")
                     : (backendModuleStaged
-                    ? qsTr("Wallpaper Engine Scene Native is in guarded experimental mode. If the repo-owned native renderer does not come up cleanly, Paper Gradient falls back to this safe placeholder instead of continuing the attempt.")
-                    : qsTr("Wallpaper Engine Scene Native needs the repo-owned Paper Company scene module to be staged into this wallpaper package before the guarded native renderer can start. Build the native workspace, then update the wallpaper package again.")))
+                    ? qsTr("Wallpaper Engine Scene Native is in guarded experimental mode. If the repo-owned native renderer does not come up cleanly, Yakkai falls back to this safe placeholder instead of continuing the attempt.")
+                    : qsTr("Wallpaper Engine Scene Native needs the repo-owned Yakkai scene module to be staged into this wallpaper package before the guarded native renderer can start. Build the native workspace, then update the wallpaper package again.")))
                 : qsTr("Wallpaper Engine Scene is currently a research-only mode. Scene projects can be scanned and selected safely, but rendering is intentionally disabled to avoid destabilizing Plasma.")))
         : emptyMessage
-    readonly property string nativeModuleDirPath: localPath(Qt.resolvedUrl("../imports/io/papercompany/scene"))
+    readonly property string nativeModuleDirPath: localPath(Qt.resolvedUrl("../imports/io/team7/scene"))
 
     function localPath(value) {
         const asText = String(value ?? "")
@@ -87,8 +87,8 @@ Item {
         queueDiagnostic(
             "backend",
             "if test -f " + shellQuote(nativeModuleDirPath + "/qmldir")
-                + " && test -f " + shellQuote(nativeModuleDirPath + "/libpapercompany_scene_backendplugin.so")
-                + " && test -f " + shellQuote(nativeModuleDirPath + "/libpapercompany_scene_backend.so")
+                + " && test -f " + shellQuote(nativeModuleDirPath + "/libyakkai_scene_backendplugin.so")
+                + " && test -f " + shellQuote(nativeModuleDirPath + "/libyakkai_scene_backend.so")
                 + "; then printf yes; else printf no; fi"
         )
     }
@@ -157,7 +157,7 @@ Item {
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
             color: "#dde6ef"
-            text: qsTr("Scene source exists: %1\nWallpaper Engine assets directory exists: %2\nPaper Company native scene module staged: %3")
+            text: qsTr("Scene source exists: %1\nWallpaper Engine assets directory exists: %2\nYakkai native scene module staged: %3")
                 .arg(sourceExistsStatus)
                 .arg(assetsExistsStatus)
                 .arg(backendModuleStatus)

@@ -1,0 +1,26 @@
+dwight@wallpaper:~$ plasmashell --replace &
+[1] 4700
+dwight@wallpaper:~$ libEGL warning: egl: failed to create dri2 screen
+libEGL warning: egl: failed to create dri2 screen
+kf.package: Could not find required file "mainscript" for package "/usr/share/plasma/plasmoids/org.kde.plasma.icontasks/" should be QList("ui/main.qml")
+qml: [Paper Gradient] contentMode=3 videoMode=false webMode=true
+qml: [Paper Gradient] wallpaperEngineVideoSource=file:///mnt/steam/steamapps/workshop/content/431960/3390843420/yuuka_pajama.mp4
+qml: [Paper Gradient] wallpaperEngineWebSource=file:///mnt/steam/steamapps/workshop/content/431960/3650880224/index.html
+qml: [Paper Gradient] videoMuted=true
+qml: [Paper Gradient] WE web component completed webgl=true canvas2d=true
+qml: [Paper Gradient] loader status=1 source=WebBackground.qml
+qml: [Paper Gradient] binding web content source=file:///mnt/steam/steamapps/workshop/content/431960/3650880224/index.html muted=true title=Blue Archive | Kei
+qml: [Paper Gradient] webSource=file:///mnt/steam/steamapps/workshop/content/431960/3650880224/index.html
+qml: [Paper Gradient] wallpaper loaded contentMode=3 resolvedMediaSource=file:///mnt/steam/steamapps/workshop/content/431960/3650880224/index.html
+libEGL warning: egl: failed to create dri2 screen
+libEGL warning: egl: failed to create dri2 screen
+libva error: /usr/lib/x86_64-linux-gnu/dri/virtio_gpu_drv_video.so init failed
+qml: [Paper Gradient] WE web loading started url=file:///mnt/steam/steamapps/workshop/content/431960/3650880224/index.html
+[4700:4748:0316/080908.473138:ERROR:context_group.cc(143)] ContextResult::kFatalFailure: WebGL1 blocklisted
+[4700:4748:0316/080908.473797:ERROR:context_group.cc(143)] ContextResult::kFatalFailure: WebGL1 blocklisted
+org.kde.plasma.kicker: Entry is not valid "org.kde.kontact.desktop" 0x5ff1d2216b50
+org.kde.plasma.kicker: Entry is not valid "org.kde.kontact.desktop" 0x5ff1d2216b50
+
+
+
+

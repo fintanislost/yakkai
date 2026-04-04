@@ -1,5 +1,5 @@
 import QtQuick
-import io.papercompany.scene 1.0
+import io.team7.scene 1.0
 
 Item {
     id: root
@@ -31,12 +31,12 @@ Item {
     function sceneFillMode() {
         switch (fillModeValue) {
         case 1:
-            return PaperSceneViewer.AspectFit
+            return YakkaiSceneViewer.AspectFit
         case 2:
-            return PaperSceneViewer.Stretch
+            return YakkaiSceneViewer.Stretch
         case 0:
         default:
-            return PaperSceneViewer.AspectCrop
+            return YakkaiSceneViewer.AspectCrop
         }
     }
 
@@ -45,7 +45,7 @@ Item {
         color: "#11161d"
     }
 
-    PaperSceneViewer {
+    YakkaiSceneViewer {
         id: viewer
         anchors.fill: parent
         source: root.sceneSource

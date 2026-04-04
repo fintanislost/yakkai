@@ -16,6 +16,7 @@ import org.kde.plasma.plasma5support as Plasma5Support
 Kirigami.FormLayout {
     id: root
     twinFormLayouts: parentLayout
+    wideMode: false
 
     property alias formLayout: root
 
@@ -62,6 +63,8 @@ Kirigami.FormLayout {
     property string cfg_WEScenePropertiesJson
     property bool cfg_WESceneExperimentalEnabled
     property bool cfg_WESceneMouseInput
+
+    property var scenePropertyModel: []
 
     property var wallpaperEngineVideoItems: []
     property var wallpaperEngineWebItems: []
@@ -181,6 +184,77 @@ Kirigami.FormLayout {
         }
 
         return item.title
+    }
+
+    function buildScenePropertyModel() {
+        if (!root.cfg_WEScenePropertiesJson || root.cfg_WEScenePropertiesJson.length === 0) {
+            root.scenePropertyModel = []
+            return
+        }
+        try {
+            const props = JSON.parse(root.cfg_WEScenePropertiesJson)
+            const model = []
+            const keys = Object.keys(props).sort((a, b) => {
+                const oa = props[a].order ?? props[a].index ?? 0
+                const ob = props[b].order ?? props[b].index ?? 0
+                return oa - ob
+            })
+            for (const key of keys) {
+                const p = props[key]
+                if (!p || typeof p !== "object") continue
+                const ptype = p.type ?? ""
+                // Skip non-interactive properties (text labels, dividers)
+                if (ptype === "text" || ptype === "textinput" || ptype === "") continue
+                const label = (p.text ?? key)
+                    .replace(/<[^>]*>/g, "")  // strip HTML tags
+                    .replace(/&nbsp;?/gi, " ")
+                    .replace(/&amp;?/gi, "&")
+                    .replace(/🔘/g, "")
+                    .replace(/\s+/g, " ")
+                    .trim()
+                    .substring(0, 50)
+                if (label.length === 0) continue
+                const entry = { key: key, label: label, type: ptype, value: p.value }
+                if (ptype === "bool") {
+                    entry.value = !!p.value
+                } else if (ptype === "slider") {
+                    entry.min = p.min ?? 0
+                    entry.max = p.max ?? 100
+                    entry.step = p.step ?? 1
+                    entry.value = p.value ?? 0
+                } else if (ptype === "combo" && p.options) {
+                    entry.options = p.options
+                    entry.value = p.value ?? (p.options[0]?.value ?? "")
+                } else if (ptype === "color") {
+                    entry.value = p.value ?? "#ffffff"
+                } else {
+                    continue
+                }
+                model.push(entry)
+            }
+            root.scenePropertyModel = model
+        } catch (e) {
+            root.scenePropertyModel = []
+        }
+    }
+
+    function updateSceneProperty(key, value) {
+        try {
+            const props = JSON.parse(root.cfg_WEScenePropertiesJson || "{}")
+            if (props[key]) {
+                props[key].value = value
+            }
+            root.cfg_WEScenePropertiesJson = JSON.stringify(props)
+            // Update the model entry in place
+            const newModel = root.scenePropertyModel.slice()
+            for (let i = 0; i < newModel.length; i++) {
+                if (newModel[i].key === key) {
+                    newModel[i] = Object.assign({}, newModel[i], { value: value })
+                    break
+                }
+            }
+            root.scenePropertyModel = newModel
+        } catch (e) {}
     }
 
     function clearWallpaperEngineSelection(projectType) {
@@ -375,9 +449,14 @@ Kirigami.FormLayout {
         }
     }
 
+    onCfg_WEScenePropertiesJsonChanged: {
+        if (startupComplete) buildScenePropertyModel()
+    }
+
     Component.onCompleted: {
         migrateLegacySceneMode()
         startupComplete = true
+        buildScenePropertyModel()
 
         if (root.cfg_WEVideoLibraryPath.length > 0 && wallpaperEngineContentMode) {
             startWallpaperEngineScan()
@@ -390,30 +469,14 @@ Kirigami.FormLayout {
         model: [
             qsTr("Gradient"),
             qsTr("Video"),
-            qsTr("Wallpaper Engine Video"),
-            qsTr("Wallpaper Engine Web"),
-            qsTr("Wallpaper Engine Scene"),
-            qsTr("Wallpaper Engine Scene Native")
+            qsTr("WE Video"),
+            qsTr("WE Web"),
+            qsTr("WE Scene (diagnostics)"),
+            qsTr("WE Scene (native)")
         ]
         currentIndex: root.cfg_ContentMode
 
         onActivated: root.cfg_ContentMode = currentIndex
-    }
-
-    QQC2.Label {
-        text: root.gradientContentMode
-            ? qsTr("Gradient mode renders the current Paper Gradient background, with optional manual or time-of-day palettes.")
-            : (root.localVideoContentMode
-                ? qsTr("Video mode plays a local video file through QtMultimedia. Actual playback depends on the codecs installed in the current Plasma system or VM.")
-                : (root.wallpaperEngineVideoContentMode
-                    ? qsTr("Wallpaper Engine Video mode scans a Steam library for Wallpaper Engine video projects and reuses the Paper Gradient video backend for playback.")
-                    : (root.wallpaperEngineWebContentMode
-                        ? qsTr("Wallpaper Engine Web mode scans a Steam library for Wallpaper Engine web projects and loads their local HTML entrypoints through QtWebEngine.")
-                        : (root.wallpaperEngineSceneContentMode
-                            ? qsTr("Wallpaper Engine Scene mode scans and stores scene selections safely, then stays on the diagnostics placeholder.")
-                            : qsTr("Wallpaper Engine Scene Native mode reuses the same scene scan and selection flow, then routes into the guarded repo-owned native scene renderer staged into the wallpaper package.")))))
-        wrapMode: Text.WordWrap
-        Layout.fillWidth: true
     }
 
     QQC2.ComboBox {
@@ -543,6 +606,27 @@ Kirigami.FormLayout {
         visible: root.gradientContentMode && !root.manualMode
     }
 
+    Rectangle {
+        Kirigami.FormData.label: qsTr("Preview:")
+        visible: root.gradientContentMode
+        Layout.fillWidth: true
+        height: 80
+        radius: 4
+        border.color: Kirigami.Theme.disabledTextColor
+        border.width: 1
+        gradient: Gradient {
+            orientation: Gradient.Horizontal
+            GradientStop {
+                position: 0.0
+                color: root.manualMode ? root.cfg_StartColor : root.cfg_DayStartColor
+            }
+            GradientStop {
+                position: 1.0
+                color: root.manualMode ? root.cfg_EndColor : root.cfg_DayEndColor
+            }
+        }
+    }
+
     QQC2.CheckBox {
         id: animateCheckBox
         Kirigami.FormData.label: qsTr("Animation:")
@@ -597,6 +681,7 @@ Kirigami.FormLayout {
     ColumnLayout {
         Kirigami.FormData.label: qsTr("Source:")
         Layout.fillWidth: true
+        Layout.maximumWidth: 460
         visible: root.localVideoContentMode
 
         RowLayout {
@@ -626,13 +711,14 @@ Kirigami.FormLayout {
     ColumnLayout {
         Kirigami.FormData.label: qsTr("Library:")
         Layout.fillWidth: true
+        Layout.maximumWidth: 460
         visible: root.wallpaperEngineContentMode
 
         RowLayout {
             Layout.fillWidth: true
 
             QQC2.Button {
-                text: root.cfg_WEVideoLibraryPath.length > 0 ? qsTr("Change Steam library…") : qsTr("Select Steam library…")
+                text: root.cfg_WEVideoLibraryPath.length > 0 ? qsTr("Change…") : qsTr("Select Steam library…")
                 Layout.fillWidth: true
                 enabled: !root.wallpaperEngineScanRunning
                 onClicked: steamLibraryDialog.open()
@@ -683,39 +769,141 @@ Kirigami.FormLayout {
         }
     }
 
-    QQC2.ComboBox {
-        id: wallpaperEngineProjectComboBox
+    ColumnLayout {
         Kirigami.FormData.label: qsTr("Wallpaper:")
-        model: root.currentWallpaperEngineItems.map(function(item) {
-            return root.wallpaperEngineItemLabel(item)
-        })
-        enabled: root.currentWallpaperEngineItems.length > 0 && !root.wallpaperEngineScanRunning
-        visible: root.wallpaperEngineContentMode
-
-        onActivated: root.applyWallpaperEngineSelection(currentIndex)
-    }
-
-    QQC2.Label {
-        text: root.selectedWallpaperEngineProject
-            ? (root.wallpaperEngineAnySceneContentMode
-                ? qsTr("Project: %1\nScene source: %2\nSource kind: %3")
-                    .arg(root.selectedWallpaperEngineProject.projectPath)
-                    .arg(root.selectedWallpaperEngineProject.sourcePath)
-                    .arg(root.selectedWallpaperEngineProject.sourceKind ?? qsTr("Unknown"))
-                : (root.wallpaperEngineWebContentMode
-                ? qsTr("Project: %1\nEntry: %2").arg(root.selectedWallpaperEngineProject.projectPath).arg(root.selectedWallpaperEngineProject.sourcePath)
-                : qsTr("Project: %1\nMedia: %2").arg(root.selectedWallpaperEngineProject.projectPath).arg(root.selectedWallpaperEngineProject.sourcePath)))
-            : (root.wallpaperEngineSceneContentMode
-                ? qsTr("Select a Steam library, refresh the scan, and choose one of the discovered Wallpaper Engine scene projects. This mode stays on the safe diagnostics placeholder.")
-                : (root.wallpaperEngineSceneNativeContentMode
-                    ? qsTr("Select a Steam library, refresh the scan, and choose one of the discovered Wallpaper Engine scene projects. This mode launches the guarded repo-owned native renderer after the staged scene module has been built.")
-                : (root.wallpaperEngineWebContentMode
-                ? qsTr("Select a Steam library, refresh the scan, and choose one of the discovered Wallpaper Engine web projects.")
-                : qsTr("Select a Steam library, refresh the scan, and choose one of the discovered Wallpaper Engine video projects."))))
-        wrapMode: Text.WrapAnywhere
         Layout.fillWidth: true
+        Layout.maximumWidth: 460
         visible: root.wallpaperEngineContentMode
-        opacity: root.selectedWallpaperEngineProject ? 1 : 0.7
+        spacing: Kirigami.Units.smallSpacing
+
+        QQC2.TextField {
+            id: wallpaperSearchField
+            Layout.fillWidth: true
+            placeholderText: qsTr("Search wallpapers…")
+            visible: root.currentWallpaperEngineItems.length > 6
+        }
+
+        GridView {
+            id: wallpaperGrid
+            Layout.fillWidth: true
+            Layout.preferredHeight: Math.min(cellHeight * Math.ceil(count / columns), 320)
+            Layout.maximumHeight: 320
+            clip: true
+
+            readonly property int columns: Math.max(1, Math.floor(width / 140))
+            cellWidth: width / columns
+            cellHeight: 110
+
+            model: {
+                const items = root.currentWallpaperEngineItems
+                const query = wallpaperSearchField.text.toLowerCase()
+                if (query.length === 0) return items
+                return items.filter(item => (item.title || "").toLowerCase().includes(query))
+            }
+
+            delegate: Item {
+                width: wallpaperGrid.cellWidth
+                height: wallpaperGrid.cellHeight
+                required property var modelData
+                required property int index
+
+                Rectangle {
+                    anchors.fill: parent
+                    anchors.margins: 3
+                    radius: 4
+                    color: {
+                        const sel = root.selectedWallpaperEngineProject
+                        const isSel = sel && sel.projectPath === modelData.projectPath
+                        return isSel ? Kirigami.Theme.highlightColor : (hoverArea.containsMouse ? Kirigami.Theme.hoverColor : "transparent")
+                    }
+                    border.color: {
+                        const sel = root.selectedWallpaperEngineProject
+                        const isSel = sel && sel.projectPath === modelData.projectPath
+                        return isSel ? Kirigami.Theme.highlightColor : Kirigami.Theme.disabledTextColor
+                    }
+                    border.width: 1
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 2
+                        spacing: 1
+
+                        Image {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            source: modelData.previewPath ? ("file://" + modelData.previewPath) : ""
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                            visible: modelData.previewPath && modelData.previewPath.length > 0
+
+                            Rectangle {
+                                anchors.fill: parent
+                                color: "transparent"
+                                visible: parent.status === Image.Error || !parent.visible
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            color: Kirigami.Theme.backgroundColor
+                            visible: !modelData.previewPath || modelData.previewPath.length === 0
+
+                            QQC2.Label {
+                                anchors.centerIn: parent
+                                text: "?"
+                                opacity: 0.3
+                            }
+                        }
+
+                        QQC2.Label {
+                            Layout.fillWidth: true
+                            text: modelData.title || ""
+                            elide: Text.ElideRight
+                            horizontalAlignment: Text.AlignHCenter
+                            font.pointSize: Kirigami.Theme.smallFont.pointSize
+                        }
+                        QQC2.Label {
+                            Layout.fillWidth: true
+                            text: modelData.workshopId || ""
+                            elide: Text.ElideRight
+                            horizontalAlignment: Text.AlignHCenter
+                            font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            opacity: 0.5
+                            visible: (modelData.workshopId || "").length > 0
+                        }
+                    }
+
+                    MouseArea {
+                        id: hoverArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: {
+                            // Find the original index in the unfiltered list
+                            const items = root.currentWallpaperEngineItems
+                            for (let i = 0; i < items.length; i++) {
+                                if (items[i].projectPath === modelData.projectPath) {
+                                    root.applyWallpaperEngineSelection(i)
+                                    break
+                                }
+                            }
+                        }
+                    }
+
+                    QQC2.ToolTip.visible: hoverArea.containsMouse
+                    QQC2.ToolTip.text: modelData.title || ""
+                    QQC2.ToolTip.delay: 500
+                }
+            }
+        }
+
+        QQC2.Label {
+            text: root.currentWallpaperEngineItems.length === 0
+                ? qsTr("Select a Steam library, scan, and choose a wallpaper.")
+                : qsTr("%1 wallpapers found").arg(root.currentWallpaperEngineItems.length)
+            opacity: 0.7
+            visible: wallpaperGrid.count === 0 || root.currentWallpaperEngineItems.length > 0
+        }
     }
 
     QQC2.ComboBox {
@@ -750,22 +938,84 @@ Kirigami.FormLayout {
         onToggled: root.cfg_VideoMuted = checked
     }
 
+    // Scene property editor — shows user-configurable properties from the WE scene
+    Kirigami.Separator {
+        visible: root.wallpaperEngineSceneNativeContentMode && scenePropertyRepeater.count > 0
+    }
+
     QQC2.Label {
-        text: root.gradientContentMode
-            ? (root.manualMode
-                ? qsTr("Manual mode uses the two colors above for the full day.")
-                : qsTr("Time-of-day mode blends from the night palette into the day palette at the configured hours using your VM or system local time."))
-            : (root.localVideoContentMode
-                ? qsTr("Start with local MP4 or WebM files. If a video fails to play in the VM, the issue is likely the guest multimedia codec stack rather than the wallpaper package itself.")
-                : (root.wallpaperEngineVideoContentMode
-                    ? qsTr("Wallpaper Engine Video mode currently supports only Wallpaper Engine projects whose project.json type is video. It uses a small Python helper in the settings page to scan the Steam library and resolve the actual media file.")
-                    : (root.wallpaperEngineWebContentMode
-                        ? qsTr("Wallpaper Engine Web mode currently supports only Wallpaper Engine projects whose project.json type is web. It loads the local HTML entrypoint and injects a compatibility shim for Wallpaper Engine page APIs.")
-                        : (root.wallpaperEngineSceneNativeContentMode
-                            ? qsTr("Wallpaper Engine Scene Native mode is the backend workbench. It launches the guarded repo-owned native scene renderer from the staged wallpaper imports, restarts that renderer on sizing and mouse-input changes, and logs scene guard/runtime state so native launch failures are easier to isolate.")
-                            : qsTr("Wallpaper Engine Scene mode is the stable selection and diagnostics path. It resolves real scene sources such as scene.pkg, shows diagnostics, and keeps rendering disabled so Plasma stays stable while native backend work continues.")))))
+        Kirigami.FormData.label: qsTr("Scene properties:")
+        text: qsTr("Adjust settings exposed by the wallpaper author.")
         wrapMode: Text.WordWrap
         Layout.fillWidth: true
+        visible: root.wallpaperEngineSceneNativeContentMode && scenePropertyRepeater.count > 0
+    }
+
+    Repeater {
+        id: scenePropertyRepeater
+        model: root.scenePropertyModel
+        delegate: ColumnLayout {
+            Layout.fillWidth: true
+            Layout.maximumWidth: 460
+            required property var modelData
+            visible: root.wallpaperEngineSceneNativeContentMode
+            spacing: 2
+
+            QQC2.Label {
+                text: modelData.label
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+                opacity: 0.8
+                font.pointSize: Kirigami.Theme.smallFont.pointSize
+            }
+
+            QQC2.CheckBox {
+                visible: modelData.type === "bool"
+                text: modelData.value ? qsTr("On") : qsTr("Off")
+                checked: modelData.type === "bool" ? !!modelData.value : false
+                onToggled: root.updateSceneProperty(modelData.key, checked)
+            }
+
+            RowLayout {
+                visible: modelData.type === "slider"
+                Layout.fillWidth: true
+                spacing: Kirigami.Units.smallSpacing
+                QQC2.Slider {
+                    from: modelData.min ?? 0
+                    to: modelData.max ?? 1
+                    stepSize: modelData.step ?? 0.01
+                    value: modelData.type === "slider" ? (modelData.value ?? 0) : 0
+                    Layout.fillWidth: true
+                    Layout.maximumWidth: 250
+                    onMoved: root.updateSceneProperty(modelData.key, value)
+                }
+                QQC2.Label {
+                    text: modelData.type === "slider" ? Number(modelData.value ?? 0).toFixed(2) : ""
+                    Layout.minimumWidth: 44
+                }
+            }
+
+            QQC2.ComboBox {
+                visible: modelData.type === "combo"
+                Layout.fillWidth: true
+                Layout.maximumWidth: 300
+                model: (modelData.options ?? []).map(o => o.label)
+                currentIndex: {
+                    if (modelData.type !== "combo") return 0
+                    const val = String(modelData.value)
+                    const opts = modelData.options ?? []
+                    for (let i = 0; i < opts.length; i++) {
+                        if (String(opts[i].value) === val) return i
+                    }
+                    return 0
+                }
+                onActivated: {
+                    const opts = modelData.options ?? []
+                    if (currentIndex >= 0 && currentIndex < opts.length)
+                        root.updateSceneProperty(modelData.key, opts[currentIndex].value)
+                }
+            }
+        }
     }
 
     FileDialog {

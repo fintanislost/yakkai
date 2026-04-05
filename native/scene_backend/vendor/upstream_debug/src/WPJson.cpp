@@ -513,7 +513,7 @@ std::optional<double> EvaluateAnimationCurve(const nlohmann::json& field, double
         const auto& opts = anim.at("options");
         if (opts.contains("fps")) fps = opts.at("fps").get<double>();
         if (opts.contains("length")) length = opts.at("length").get<int>();
-        if (opts.contains("mode") && opts.at("mode").get<std::string>() != "loop") loop = false;
+        if (opts.contains("mode") && opts.at("mode").is_string() && opts.at("mode").get<std::string>() != "loop") loop = false;
     }
 
     // For looping day-night animations (long loops at 30fps), map time-of-day
@@ -623,9 +623,12 @@ inline bool _GetJsonValue(const nlohmann::json&                  json,
     if (njson.is_number()) {
         value = { njson.get<Tv>() };
         return true;
+    } else if (njson.is_string()) {
+        std::string strvalue = njson.get<std::string>();
+        return utils::StrToArray::Convert(strvalue, value);
     } else {
-        std::string strvalue;
-        strvalue = njson.get<std::string>();
+        // Not a number or string — try dump() as fallback
+        std::string strvalue = njson.dump();
         return utils::StrToArray::Convert(strvalue, value);
     }
 }

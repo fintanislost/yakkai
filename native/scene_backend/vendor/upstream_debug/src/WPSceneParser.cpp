@@ -3750,7 +3750,7 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
                                 }
                                 return false;
                             };
-                            if (spVal.is_object() && spVal.contains("user")) {
+                            if (spVal.is_object() && spVal.contains("user") && spVal.at("user").is_string()) {
                                 std::string userPropName = spVal.at("user").get<std::string>();
                                 if (auto uval = LookupUserPropertyValue(userPropName)) {
                                     resolved = jsonToDouble(*uval, dval);

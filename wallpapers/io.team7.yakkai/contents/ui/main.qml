@@ -279,7 +279,7 @@ WallpaperItem {
             return
         }
 
-        if (root.videoMode) {
+        if (root.videoMode || (root.contentMode === 7 && root.umbrellaResolvedType === "video")) {
             root.log("binding video content source=" + String(root.activeVideoSource)
                 + " fill=" + root.videoFillMode
                 + " muted=" + root.videoMuted)
@@ -298,7 +298,7 @@ WallpaperItem {
             return
         }
 
-        if (root.webMode) {
+        if (root.webMode || (root.contentMode === 7 && root.umbrellaResolvedType === "web")) {
             root.log("binding web content source=" + String(root.activeWebSource)
                 + " muted=" + root.videoMuted
                 + " title=" + root.wallpaperEngineWebProjectTitle)
@@ -320,7 +320,7 @@ WallpaperItem {
             return
         }
 
-        if (root.sceneMode || root.sceneNativeMode) {
+        if (root.sceneMode || root.sceneNativeMode || root.contentMode === 7) {
             root.log("binding scene content source=" + String(root.activeSceneSource)
                 + " title=" + root.wallpaperEngineSceneProjectTitle)
             contentLoader.item.sceneSource = Qt.binding(function() {

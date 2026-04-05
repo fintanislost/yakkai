@@ -234,8 +234,9 @@ Kirigami.FormLayout {
     readonly property var selectedWallpaperEngineProject: {
         let savedPath = ""
         if (umbrellaContentMode) {
-            // Check all types to find the active selection
-            savedPath = root.cfg_WESceneProjectPath || root.cfg_WEVideoProjectPath || root.cfg_WEWebProjectPath
+            const utype = root.cfg_UmbrellaSelectedType || "scene"
+            savedPath = utype === "video" ? root.cfg_WEVideoProjectPath
+                : (utype === "web" ? root.cfg_WEWebProjectPath : root.cfg_WESceneProjectPath)
         } else {
             savedPath = wallpaperEngineAnySceneContentMode
                 ? root.cfg_WESceneProjectPath

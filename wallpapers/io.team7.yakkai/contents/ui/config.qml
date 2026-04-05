@@ -228,9 +228,15 @@ Kirigami.FormLayout {
         ? "scene"
         : (wallpaperEngineWebContentMode ? "web" : "video")
     readonly property var selectedWallpaperEngineProject: {
-        const savedPath = wallpaperEngineAnySceneContentMode
-            ? root.cfg_WESceneProjectPath
-            : (wallpaperEngineWebContentMode ? root.cfg_WEWebProjectPath : root.cfg_WEVideoProjectPath)
+        let savedPath = ""
+        if (umbrellaContentMode) {
+            // Check all types to find the active selection
+            savedPath = root.cfg_WESceneProjectPath || root.cfg_WEVideoProjectPath || root.cfg_WEWebProjectPath
+        } else {
+            savedPath = wallpaperEngineAnySceneContentMode
+                ? root.cfg_WESceneProjectPath
+                : (wallpaperEngineWebContentMode ? root.cfg_WEWebProjectPath : root.cfg_WEVideoProjectPath)
+        }
         if (!savedPath || savedPath.length === 0) return null
         const items = currentWallpaperEngineItems
         for (let i = 0; i < items.length; i++) {

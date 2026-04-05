@@ -920,11 +920,23 @@ Kirigami.FormLayout {
                     anchors.margins: 3
                     radius: 4
                     color: {
+                        if (root.playlistContentMode) {
+                            // In playlist mode, highlight items already in the playlist
+                            const items = root.activePlaylist ? (root.activePlaylist.items || []) : []
+                            const inPlaylist = items.some(it => it.sceneProjectPath === modelData.projectPath)
+                            return inPlaylist ? Qt.rgba(Kirigami.Theme.highlightColor.r, Kirigami.Theme.highlightColor.g, Kirigami.Theme.highlightColor.b, 0.3)
+                                : (hoverArea.containsMouse ? Kirigami.Theme.hoverColor : "transparent")
+                        }
                         const sel = root.selectedWallpaperEngineProject
                         const isSel = sel && sel.projectPath === modelData.projectPath
                         return isSel ? Kirigami.Theme.highlightColor : (hoverArea.containsMouse ? Kirigami.Theme.hoverColor : "transparent")
                     }
                     border.color: {
+                        if (root.playlistContentMode) {
+                            const items = root.activePlaylist ? (root.activePlaylist.items || []) : []
+                            const inPlaylist = items.some(it => it.sceneProjectPath === modelData.projectPath)
+                            return inPlaylist ? Kirigami.Theme.highlightColor : Kirigami.Theme.disabledTextColor
+                        }
                         const sel = root.selectedWallpaperEngineProject
                         const isSel = sel && sel.projectPath === modelData.projectPath
                         return isSel ? Kirigami.Theme.highlightColor : Kirigami.Theme.disabledTextColor

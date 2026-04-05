@@ -186,8 +186,9 @@ Kirigami.FormLayout {
     readonly property bool wallpaperEngineWebContentMode: cfg_ContentMode === 3
     readonly property bool wallpaperEngineSceneContentMode: cfg_ContentMode === 4
     readonly property bool wallpaperEngineSceneNativeContentMode: cfg_ContentMode === 5
+    readonly property bool umbrellaContentMode: cfg_ContentMode === 7
     readonly property bool wallpaperEngineAnySceneContentMode: wallpaperEngineSceneContentMode || wallpaperEngineSceneNativeContentMode || playlistContentMode
-    readonly property bool wallpaperEngineContentMode: wallpaperEngineVideoContentMode || wallpaperEngineWebContentMode || wallpaperEngineAnySceneContentMode || playlistContentMode
+    readonly property bool wallpaperEngineContentMode: wallpaperEngineVideoContentMode || wallpaperEngineWebContentMode || wallpaperEngineAnySceneContentMode || playlistContentMode || umbrellaContentMode
     readonly property bool playbackVideoContentMode: localVideoContentMode || wallpaperEngineVideoContentMode
     readonly property bool scenePlaybackContentMode: wallpaperEngineSceneNativeContentMode
     readonly property bool mediaSizingContentMode: playbackVideoContentMode || scenePlaybackContentMode
@@ -206,9 +207,23 @@ Kirigami.FormLayout {
         const homes = StandardPaths.standardLocations(StandardPaths.HomeLocation)
         return homes.length > 0 ? homes[0] : "/"
     }
-    readonly property var currentWallpaperEngineItems: wallpaperEngineAnySceneContentMode
-        ? wallpaperEngineSceneItems
-        : (wallpaperEngineWebContentMode ? wallpaperEngineWebItems : wallpaperEngineVideoItems)
+    readonly property var currentWallpaperEngineItems: {
+        if (umbrellaContentMode) {
+            // Combine all types, tagging each with its source type
+            const tagged = []
+            for (const item of wallpaperEngineSceneItems)
+                tagged.push(Object.assign({}, item, { weType: "scene" }))
+            for (const item of wallpaperEngineVideoItems)
+                tagged.push(Object.assign({}, item, { weType: "video" }))
+            for (const item of wallpaperEngineWebItems)
+                tagged.push(Object.assign({}, item, { weType: "web" }))
+            tagged.sort((a, b) => (a.title || "").localeCompare(b.title || ""))
+            return tagged
+        }
+        return wallpaperEngineAnySceneContentMode
+            ? wallpaperEngineSceneItems
+            : (wallpaperEngineWebContentMode ? wallpaperEngineWebItems : wallpaperEngineVideoItems)
+    }
     readonly property string currentWallpaperEngineType: wallpaperEngineAnySceneContentMode
         ? "scene"
         : (wallpaperEngineWebContentMode ? "web" : "video")
@@ -385,6 +400,9 @@ Kirigami.FormLayout {
         wallpaperEngineProjectComboBox.currentIndex = -1
     }
 
+    // Tracks the type of the currently selected umbrella item for backend routing
+    property string umbrellaSelectedType: ""
+
     function applyWallpaperEngineSelection(index) {
         const item = currentWallpaperEngineItems[index]
 
@@ -392,7 +410,14 @@ Kirigami.FormLayout {
             return
         }
 
-        if (currentWallpaperEngineType === "web") {
+        // In umbrella mode, use the item's tagged type
+        const itemType = item.weType || currentWallpaperEngineType
+
+        if (umbrellaContentMode) {
+            root.umbrellaSelectedType = itemType
+        }
+
+        if (itemType === "web") {
             root.cfg_WEWebProjectPath = item.projectPath
             root.cfg_WEWebProjectTitle = item.title
             root.cfg_WEWebSource = item.sourcePath
@@ -400,7 +425,7 @@ Kirigami.FormLayout {
             return
         }
 
-        if (currentWallpaperEngineType === "scene") {
+        if (itemType === "scene") {
             root.cfg_WESceneProjectPath = item.projectPath
             root.cfg_WESceneProjectTitle = item.title
             root.cfg_WESceneSource = item.sourcePath
@@ -456,14 +481,24 @@ Kirigami.FormLayout {
         return localPath(Qt.resolvedUrl("../tools/we_video_scan.py"))
     }
 
+    property var umbrellaScanQueue: []
+
     function startWallpaperEngineScan() {
         const libraryPath = localPath(root.cfg_WEVideoLibraryPath)
-        const projectType = currentWallpaperEngineType
 
         if (libraryPath.length === 0 || wallpaperEngineScanRunning) {
             return
         }
 
+        if (umbrellaContentMode) {
+            // Scan all types sequentially
+            umbrellaScanQueue = ["scene", "video", "web"]
+            wallpaperEngineScanStatus = qsTr("Scanning Steam library for all wallpaper types…")
+            startNextUmbrellaScan()
+            return
+        }
+
+        const projectType = currentWallpaperEngineType
         wallpaperEngineScanRunning = true
         wallpaperEngineScanType = projectType
         wallpaperEngineScanError = ""
@@ -479,6 +514,30 @@ Kirigami.FormLayout {
             + shellQuote(libraryPath)
             + " "
             + shellQuote(projectType)
+
+        wallpaperEngineScanner.exec(command)
+    }
+
+    function startNextUmbrellaScan() {
+        if (umbrellaScanQueue.length === 0) {
+            wallpaperEngineScanRunning = false
+            wallpaperEngineScanStatus = qsTr("Found %1 scene, %2 video, %3 web wallpapers")
+                .arg(wallpaperEngineSceneItems.length)
+                .arg(wallpaperEngineVideoItems.length)
+                .arg(wallpaperEngineWebItems.length)
+            return
+        }
+        const nextType = umbrellaScanQueue.shift()
+        wallpaperEngineScanRunning = true
+        wallpaperEngineScanType = nextType
+        wallpaperEngineScanError = ""
+
+        const command = "python3 "
+            + shellQuote(wallpaperEngineScannerPath())
+            + " "
+            + shellQuote(localPath(root.cfg_WEVideoLibraryPath))
+            + " "
+            + shellQuote(nextType)
 
         wallpaperEngineScanner.exec(command)
     }
@@ -527,14 +586,14 @@ Kirigami.FormLayout {
                 ? qsTr("Found %1 Wallpaper Engine scene wallpapers.").arg(itemCount)
                 : qsTr("Found %1 Wallpaper Engine video wallpapers.").arg(itemCount))
 
-        if (itemCount > 0) {
+        // Continue umbrella scan queue if more types to scan
+        if (umbrellaScanQueue.length > 0) {
+            startNextUmbrellaScan()
+            return
+        }
+
+        if (itemCount > 0 && !umbrellaContentMode) {
             syncWallpaperEngineSelection(wallpaperEngineScanType)
-        } else if ((
-            wallpaperEngineScanType === "web"
-                ? root.cfg_WEWebProjectPath.length
-                : (wallpaperEngineScanType === "scene" ? root.cfg_WESceneProjectPath.length : root.cfg_WEVideoProjectPath.length)
-        ) === 0) {
-            wallpaperEngineProjectComboBox.currentIndex = -1
         }
     }
 
@@ -580,7 +639,8 @@ Kirigami.FormLayout {
             qsTr("WE Web"),
             qsTr("WE Scene (diagnostics)"),
             qsTr("WE Scene (native)"),
-            qsTr("Playlist")
+            qsTr("Playlist"),
+            qsTr("All Wallpapers")
         ]
         currentIndex: root.cfg_ContentMode
 
@@ -985,12 +1045,18 @@ Kirigami.FormLayout {
                         }
                         QQC2.Label {
                             Layout.fillWidth: true
-                            text: modelData.workshopId || ""
+                            text: {
+                                const wid = modelData.workshopId || ""
+                                const wtype = modelData.weType || ""
+                                if (wtype && root.umbrellaContentMode)
+                                    return wid ? (wid + " · " + wtype) : wtype
+                                return wid
+                            }
                             elide: Text.ElideRight
                             horizontalAlignment: Text.AlignHCenter
                             font.pointSize: Kirigami.Theme.smallFont.pointSize
                             opacity: 0.5
-                            visible: (modelData.workshopId || "").length > 0
+                            visible: text.length > 0
                         }
                     }
 

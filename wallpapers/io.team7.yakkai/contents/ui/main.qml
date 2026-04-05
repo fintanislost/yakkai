@@ -197,16 +197,25 @@ WallpaperItem {
     property bool videoMuted: configuration.VideoMuted ?? true
 
     readonly property bool localVideoMode: contentMode === 1
-    readonly property bool wallpaperEngineVideoMode: contentMode === 2
-    readonly property bool wallpaperEngineWebMode: contentMode === 3
+    readonly property bool wallpaperEngineVideoMode: contentMode === 2 || (contentMode === 7 && umbrellaResolvedType === "video")
+    readonly property bool wallpaperEngineWebMode: contentMode === 3 || (contentMode === 7 && umbrellaResolvedType === "web")
     readonly property bool legacySceneNativeMode: contentMode === 4 && wallpaperEngineSceneExperimentalEnabled
     readonly property bool wallpaperEngineSceneMode: contentMode === 4 && !legacySceneNativeMode
-    readonly property bool wallpaperEngineSceneNativeMode: contentMode === 5 || legacySceneNativeMode || contentMode === 6
+    readonly property bool wallpaperEngineSceneNativeMode: contentMode === 5 || legacySceneNativeMode || contentMode === 6 || (contentMode === 7 && umbrellaResolvedType === "scene")
     readonly property bool playlistMode_: contentMode === 6
     readonly property bool videoMode: localVideoMode || wallpaperEngineVideoMode
     readonly property bool webMode: wallpaperEngineWebMode
     readonly property bool sceneMode: wallpaperEngineSceneMode
     readonly property bool sceneNativeMode: wallpaperEngineSceneNativeMode
+
+    // Umbrella mode: detect which backend to use based on what's configured
+    readonly property string umbrellaResolvedType: {
+        if (contentMode !== 7) return ""
+        if (wallpaperEngineSceneSource.toString().length > 0) return "scene"
+        if (wallpaperEngineWebSource.toString().length > 0) return "web"
+        if (wallpaperEngineVideoSource.toString().length > 0) return "video"
+        return "scene" // default
+    }
     readonly property url activeVideoSource: wallpaperEngineVideoMode ? wallpaperEngineVideoSource : videoSource
     readonly property url activeWebSource: wallpaperEngineWebSource
     readonly property url activeSceneSource: wallpaperEngineSceneSource

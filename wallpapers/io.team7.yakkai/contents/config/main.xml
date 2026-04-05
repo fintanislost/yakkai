@@ -150,5 +150,9 @@
       <label>Index of the currently active playlist</label>
       <default>-1</default>
     </entry>
+    <entry name="UmbrellaSelectedType" type="String">
+      <label>Selected wallpaper type in All Wallpapers mode (scene/video/web)</label>
+      <default>scene</default>
+    </entry>
   </group>
 </kcfg>

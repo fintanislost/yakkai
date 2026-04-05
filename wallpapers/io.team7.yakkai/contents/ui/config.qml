@@ -400,8 +400,7 @@ Kirigami.FormLayout {
         wallpaperEngineProjectComboBox.currentIndex = -1
     }
 
-    // Tracks the type of the currently selected umbrella item for backend routing
-    property string umbrellaSelectedType: ""
+    property string cfg_UmbrellaSelectedType
 
     function applyWallpaperEngineSelection(index) {
         const item = currentWallpaperEngineItems[index]
@@ -414,7 +413,7 @@ Kirigami.FormLayout {
         const itemType = item.weType || currentWallpaperEngineType
 
         if (umbrellaContentMode) {
-            root.umbrellaSelectedType = itemType
+            root.cfg_UmbrellaSelectedType = itemType
             // Clear other type sources so the runtime routes correctly
             if (itemType !== "scene") {
                 root.cfg_WESceneSource = ""

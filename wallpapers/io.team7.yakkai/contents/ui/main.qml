@@ -208,14 +208,8 @@ WallpaperItem {
     readonly property bool sceneMode: wallpaperEngineSceneMode
     readonly property bool sceneNativeMode: wallpaperEngineSceneNativeMode
 
-    // Umbrella mode: detect which backend to use based on what's configured
-    readonly property string umbrellaResolvedType: {
-        if (contentMode !== 7) return ""
-        if (wallpaperEngineSceneSource.toString().length > 0) return "scene"
-        if (wallpaperEngineWebSource.toString().length > 0) return "web"
-        if (wallpaperEngineVideoSource.toString().length > 0) return "video"
-        return "scene" // default
-    }
+    // Umbrella mode: persisted type selection from config
+    readonly property string umbrellaResolvedType: contentMode === 7 ? (configuration.UmbrellaSelectedType || "scene") : ""
     readonly property url activeVideoSource: wallpaperEngineVideoMode ? wallpaperEngineVideoSource : videoSource
     readonly property url activeWebSource: wallpaperEngineWebSource
     readonly property url activeSceneSource: wallpaperEngineSceneSource

@@ -114,10 +114,8 @@ WallpaperItem {
                 if (mins > bestMins) { bestMins = mins; bestIdx = i }
             }
         }
-        if (bestIdx !== playlistCurrentIndex) {
-            playlistCurrentIndex = bestIdx
-            playlistApplyItem(items[bestIdx])
-        }
+        playlistCurrentIndex = bestIdx
+        playlistApplyItem(items[bestIdx])
     }
 
     Timer {

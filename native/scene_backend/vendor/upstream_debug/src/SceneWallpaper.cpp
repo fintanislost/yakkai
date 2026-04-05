@@ -524,7 +524,22 @@ void MainHandler::loadScene() {
         }
         m_scene_parser.SetScenePropertiesJson(
             ResolveScenePropertiesJson(m_scene_properties_json, pkgDir));
-        scene = m_scene_parser.Parse(scene_id, scene_src, vfs, *m_sound_manager);
+        try {
+            scene = m_scene_parser.Parse(scene_id, scene_src, vfs, *m_sound_manager);
+        } catch (const nlohmann::json::exception& e) {
+            LOG_ERROR("scene parse failed (JSON): %s", e.what());
+            return;
+        } catch (const std::exception& e) {
+            LOG_ERROR("scene parse failed: %s", e.what());
+            return;
+        } catch (...) {
+            LOG_ERROR("scene parse failed: unknown exception");
+            return;
+        }
+        if (!scene) {
+            LOG_ERROR("scene parse returned null for %s", scene_id.c_str());
+            return;
+        }
         LOG_INFO("main loadScene: parse finished for %s", scene_id.c_str());
         scene->vfs.swap(pVfs);
     }

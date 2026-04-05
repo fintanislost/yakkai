@@ -424,19 +424,6 @@ Kirigami.FormLayout {
 
         if (umbrellaContentMode) {
             root.cfg_UmbrellaSelectedType = itemType
-            // Clear other type sources so the runtime routes correctly
-            if (itemType !== "scene") {
-                root.cfg_WESceneSource = ""
-                root.cfg_WESceneProjectPath = ""
-            }
-            if (itemType !== "video") {
-                root.cfg_WEVideoSource = ""
-                root.cfg_WEVideoProjectPath = ""
-            }
-            if (itemType !== "web") {
-                root.cfg_WEWebSource = ""
-                root.cfg_WEWebProjectPath = ""
-            }
         }
 
         if (itemType === "web") {

@@ -17,18 +17,8 @@ QtObject {
     property string videoSource: ""
     property string webSource: ""
 
-    // Resolved backend type based on selected type + source availability
-    readonly property string resolvedType: {
-        // Trust the selected type if its source is set
-        if (selectedType === "video" && videoSource.length > 0) return "video"
-        if (selectedType === "web" && webSource.length > 0) return "web"
-        if (selectedType === "scene" && sceneSource.length > 0) return "scene"
-        // Fallback: detect from whichever source is available
-        if (sceneSource.length > 0) return "scene"
-        if (webSource.length > 0) return "web"
-        if (videoSource.length > 0) return "video"
-        return selectedType || "scene"
-    }
+    // Resolved backend type — trust the persisted selection directly
+    readonly property string resolvedType: selectedType || "scene"
 
     readonly property bool isScene: resolvedType === "scene"
     readonly property bool isVideo: resolvedType === "video"

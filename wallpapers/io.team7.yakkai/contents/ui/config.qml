@@ -189,6 +189,8 @@ Kirigami.FormLayout {
     readonly property bool umbrellaContentMode: cfg_ContentMode === 7
     readonly property bool wallpaperEngineAnySceneContentMode: wallpaperEngineSceneContentMode || wallpaperEngineSceneNativeContentMode || playlistContentMode
     readonly property bool wallpaperEngineContentMode: wallpaperEngineVideoContentMode || wallpaperEngineWebContentMode || wallpaperEngineAnySceneContentMode || playlistContentMode || umbrellaContentMode
+    // Umbrella needs its own scanner type — not always "scene"
+    readonly property string umbrellaCurrentType: cfg_UmbrellaSelectedType || "scene"
     readonly property bool playbackVideoContentMode: localVideoContentMode || wallpaperEngineVideoContentMode
     readonly property bool scenePlaybackContentMode: wallpaperEngineSceneNativeContentMode
     readonly property bool mediaSizingContentMode: playbackVideoContentMode || scenePlaybackContentMode
@@ -224,9 +226,11 @@ Kirigami.FormLayout {
             ? wallpaperEngineSceneItems
             : (wallpaperEngineWebContentMode ? wallpaperEngineWebItems : wallpaperEngineVideoItems)
     }
-    readonly property string currentWallpaperEngineType: wallpaperEngineAnySceneContentMode
-        ? "scene"
-        : (wallpaperEngineWebContentMode ? "web" : "video")
+    readonly property string currentWallpaperEngineType: umbrellaContentMode
+        ? "scene"  // umbrella scans all types via umbrellaScanQueue, this is just the initial type
+        : (wallpaperEngineAnySceneContentMode
+            ? "scene"
+            : (wallpaperEngineWebContentMode ? "web" : "video"))
     readonly property var selectedWallpaperEngineProject: {
         let savedPath = ""
         if (umbrellaContentMode) {
@@ -628,7 +632,7 @@ Kirigami.FormLayout {
                 && !wallpaperEngineScanRunning) {
             if (currentWallpaperEngineItems.length === 0) {
                 startWallpaperEngineScan()
-            } else {
+            } else if (!umbrellaContentMode) {
                 syncWallpaperEngineSelection(currentWallpaperEngineType)
             }
         }

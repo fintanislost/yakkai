@@ -45,78 +45,95 @@ WallpaperItem {
         return base + child
     }
 
-    // Playlist state
-    property bool playlistEnabled: configuration.PlaylistEnabled ?? false
-    property string playlistItemsJson: configuration.PlaylistItemsJson ?? ""
-    property int playlistMode: configuration.PlaylistMode ?? 0
-    property int playlistInterval: configuration.PlaylistInterval ?? 30
-    property int playlistDayItemIndex: configuration.PlaylistDayItemIndex ?? 0
-    property int playlistNightItemIndex: configuration.PlaylistNightItemIndex ?? 0
-    property var playlistItems: {
-        if (!playlistItemsJson || playlistItemsJson.length === 0) return []
-        try { return JSON.parse(playlistItemsJson) } catch(e) { return [] }
+    // Playlist runtime
+    property string playlistsJson: configuration.PlaylistsJson ?? ""
+    property int activePlaylistIndex: configuration.ActivePlaylistIndex ?? -1
+    property var playlistData: {
+        if (!playlistsJson || playlistsJson.length === 0) return { playlists: [] }
+        try { return JSON.parse(playlistsJson) } catch(e) { return { playlists: [] } }
     }
+    property var activePlaylist: {
+        const idx = activePlaylistIndex
+        const pls = playlistData.playlists || []
+        return (idx >= 0 && idx < pls.length) ? pls[idx] : null
+    }
+    property bool playlistActive: contentMode === 6 && activePlaylist !== null && (activePlaylist.items || []).length > 0
     property int playlistCurrentIndex: 0
 
+    function playlistApplyItem(item) {
+        if (!item) return
+        log("playlist switch: " + (item.title || "untitled"))
+        if (item.sceneSource) {
+            configuration.WESceneSource = item.sceneSource
+            configuration.WESceneProjectPath = item.sceneProjectPath || ""
+            configuration.WESceneProjectTitle = item.sceneProjectTitle || ""
+            configuration.WESceneSourceKind = item.sceneSourceKind || ""
+            configuration.WEScenePropertiesJson = item.scenePropertiesJson || ""
+            configuration.WESceneExperimentalEnabled = true
+        }
+    }
+
     function playlistAdvance() {
-        if (playlistItems.length === 0) return
-        if (playlistMode === 1) {
-            // Random
-            let next = Math.floor(Math.random() * playlistItems.length)
-            if (playlistItems.length > 1) {
-                while (next === playlistCurrentIndex) next = Math.floor(Math.random() * playlistItems.length)
-            }
+        const items = activePlaylist ? (activePlaylist.items || []) : []
+        if (items.length < 2) return
+        const mode = activePlaylist.mode || 0
+        if (mode === 1) {
+            let next = Math.floor(Math.random() * items.length)
+            while (next === playlistCurrentIndex && items.length > 1)
+                next = Math.floor(Math.random() * items.length)
             playlistCurrentIndex = next
         } else {
-            // Sequential
-            playlistCurrentIndex = (playlistCurrentIndex + 1) % playlistItems.length
+            playlistCurrentIndex = (playlistCurrentIndex + 1) % items.length
         }
-        playlistApplyCurrent()
+        playlistApplyItem(items[playlistCurrentIndex])
     }
 
-    function playlistApplyTimeOfDay() {
-        if (playlistItems.length === 0) return
-        const hour = new Date().getHours()
-        const dayStart = root.dayStartHour
-        const nightStart = root.nightStartHour
-        const isDay = (dayStart < nightStart) ? (hour >= dayStart && hour < nightStart) : (hour >= dayStart || hour < nightStart)
-        const idx = isDay ? root.playlistDayItemIndex : root.playlistNightItemIndex
-        if (idx >= 0 && idx < playlistItems.length && idx !== playlistCurrentIndex) {
-            playlistCurrentIndex = idx
-            playlistApplyCurrent()
+    function playlistCheckSchedule() {
+        const items = activePlaylist ? (activePlaylist.items || []) : []
+        if (items.length === 0) return
+        const now = new Date()
+        const nowMins = now.getHours() * 60 + now.getMinutes()
+        // Find the item whose schedule time is closest before now
+        let bestIdx = 0
+        let bestMins = -1
+        for (let i = 0; i < items.length; i++) {
+            const t = items[i].scheduleTime || "00:00"
+            const parts = t.split(":")
+            const mins = parseInt(parts[0] || "0") * 60 + parseInt(parts[1] || "0")
+            if (mins <= nowMins && mins > bestMins) {
+                bestMins = mins
+                bestIdx = i
+            }
         }
-    }
-
-    function playlistApplyCurrent() {
-        if (playlistCurrentIndex < 0 || playlistCurrentIndex >= playlistItems.length) return
-        const item = playlistItems[playlistCurrentIndex]
-        log("playlist switch to [" + playlistCurrentIndex + "]: " + (item.title || "untitled"))
-
-        // Apply the playlist item's wallpaper config
-        if (item.contentMode !== undefined) configuration.ContentMode = item.contentMode
-        if (item.sceneSource) configuration.WESceneSource = item.sceneSource
-        if (item.sceneProjectPath) configuration.WESceneProjectPath = item.sceneProjectPath
-        if (item.sceneProjectTitle) configuration.WESceneProjectTitle = item.sceneProjectTitle
-        if (item.sceneSourceKind) configuration.WESceneSourceKind = item.sceneSourceKind
-        if (item.scenePropertiesJson !== undefined) configuration.WEScenePropertiesJson = item.scenePropertiesJson
-        if (item.videoSource) configuration.WEVideoSource = item.videoSource
-        if (item.webSource) configuration.WEWebSource = item.webSource
+        // Handle wrap-around: if no item is before now, use the last scheduled one
+        if (bestMins < 0) {
+            for (let i = 0; i < items.length; i++) {
+                const t = items[i].scheduleTime || "00:00"
+                const parts = t.split(":")
+                const mins = parseInt(parts[0] || "0") * 60 + parseInt(parts[1] || "0")
+                if (mins > bestMins) { bestMins = mins; bestIdx = i }
+            }
+        }
+        if (bestIdx !== playlistCurrentIndex) {
+            playlistCurrentIndex = bestIdx
+            playlistApplyItem(items[bestIdx])
+        }
     }
 
     Timer {
-        id: playlistTimer
-        interval: root.playlistInterval * 60 * 1000
+        id: playlistCycleTimer
+        interval: (root.activePlaylist ? (root.activePlaylist.interval || 30) : 30) * 60 * 1000
         repeat: true
-        running: root.playlistEnabled && root.playlistItems.length > 1 && root.playlistMode !== 2
+        running: root.playlistActive && (root.activePlaylist.mode || 0) !== 2
         onTriggered: root.playlistAdvance()
     }
 
     Timer {
-        id: playlistTimeOfDayTimer
-        interval: 60000 // check every minute
+        id: playlistScheduleTimer
+        interval: 60000
         repeat: true
-        running: root.playlistEnabled && root.playlistItems.length > 1 && root.playlistMode === 2
-        onTriggered: root.playlistApplyTimeOfDay()
+        running: root.playlistActive && (root.activePlaylist.mode || 0) === 2
+        onTriggered: root.playlistCheckSchedule()
     }
 
 
@@ -158,7 +175,8 @@ WallpaperItem {
     readonly property bool wallpaperEngineWebMode: contentMode === 3
     readonly property bool legacySceneNativeMode: contentMode === 4 && wallpaperEngineSceneExperimentalEnabled
     readonly property bool wallpaperEngineSceneMode: contentMode === 4 && !legacySceneNativeMode
-    readonly property bool wallpaperEngineSceneNativeMode: contentMode === 5 || legacySceneNativeMode
+    readonly property bool wallpaperEngineSceneNativeMode: contentMode === 5 || legacySceneNativeMode || contentMode === 6
+    readonly property bool playlistMode_: contentMode === 6
     readonly property bool videoMode: localVideoMode || wallpaperEngineVideoMode
     readonly property bool webMode: wallpaperEngineWebMode
     readonly property bool sceneMode: wallpaperEngineSceneMode
@@ -355,8 +373,14 @@ WallpaperItem {
                     ? activeVideoSource
                     : (webMode ? activeWebSource : ((sceneMode || sceneNativeMode) ? activeSceneSource : ""))
             ))
-        if (playlistEnabled && playlistItems.length > 0 && playlistMode === 2) {
-            playlistApplyTimeOfDay()
+        if (playlistActive) {
+            const mode = activePlaylist.mode || 0
+            if (mode === 2) {
+                playlistCheckSchedule()
+            } else {
+                const items = activePlaylist.items || []
+                if (items.length > 0) playlistApplyItem(items[0])
+            }
         }
     }
 

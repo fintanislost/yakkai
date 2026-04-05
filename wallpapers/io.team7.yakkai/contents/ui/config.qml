@@ -63,51 +63,110 @@ Kirigami.FormLayout {
     property string cfg_WEScenePropertiesJson
     property bool cfg_WESceneExperimentalEnabled
     property bool cfg_WESceneMouseInput
-    property bool cfg_PlaylistEnabled
-    property string cfg_PlaylistItemsJson
-    property int cfg_PlaylistMode
-    property int cfg_PlaylistInterval
-    property int cfg_PlaylistDayItemIndex
-    property int cfg_PlaylistNightItemIndex
+    property string cfg_PlaylistsJson
+    property int cfg_ActivePlaylistIndex
 
-    property var playlistItems: {
-        if (!cfg_PlaylistItemsJson || cfg_PlaylistItemsJson.length === 0) return []
-        try { return JSON.parse(cfg_PlaylistItemsJson) } catch(e) { return [] }
+    property var playlistData: {
+        if (!cfg_PlaylistsJson || cfg_PlaylistsJson.length === 0) return { playlists: [] }
+        try { return JSON.parse(cfg_PlaylistsJson) } catch(e) { return { playlists: [] } }
+    }
+    property var activePlaylist: {
+        const idx = cfg_ActivePlaylistIndex
+        const pls = playlistData.playlists || []
+        return (idx >= 0 && idx < pls.length) ? pls[idx] : null
+    }
+    readonly property bool playlistContentMode: cfg_ContentMode === 6
+
+    function savePlaylistData() {
+        cfg_PlaylistsJson = JSON.stringify(playlistData)
     }
 
-    function playlistAddCurrent() {
-        const items = playlistItems.slice()
-        const item = {
-            title: root.wallpaperEngineAnySceneContentMode
-                ? root.cfg_WESceneProjectTitle
-                : (root.wallpaperEngineWebContentMode ? root.cfg_WEWebProjectTitle : root.cfg_WEVideoProjectTitle),
-            contentMode: root.cfg_ContentMode,
-            sceneSource: root.cfg_WESceneSource,
-            sceneProjectPath: root.cfg_WESceneProjectPath,
-            sceneProjectTitle: root.cfg_WESceneProjectTitle,
-            sceneSourceKind: root.cfg_WESceneSourceKind,
-            scenePropertiesJson: root.cfg_WEScenePropertiesJson,
-            videoSource: root.cfg_WEVideoSource,
-            webSource: root.cfg_WEWebSource,
-            previewPath: root.selectedWallpaperEngineProject ? root.selectedWallpaperEngineProject.previewPath || "" : ""
+    function playlistCreate(name) {
+        const data = JSON.parse(JSON.stringify(playlistData))
+        data.playlists.push({ name: name, mode: 0, interval: 30, items: [] })
+        cfg_PlaylistsJson = JSON.stringify(data)
+        cfg_ActivePlaylistIndex = data.playlists.length - 1
+    }
+
+    function playlistDelete(index) {
+        const data = JSON.parse(JSON.stringify(playlistData))
+        data.playlists.splice(index, 1)
+        cfg_PlaylistsJson = JSON.stringify(data)
+        if (cfg_ActivePlaylistIndex >= data.playlists.length)
+            cfg_ActivePlaylistIndex = data.playlists.length - 1
+    }
+
+    function playlistRename(index, newName) {
+        const data = JSON.parse(JSON.stringify(playlistData))
+        if (index >= 0 && index < data.playlists.length) {
+            data.playlists[index].name = newName
+            cfg_PlaylistsJson = JSON.stringify(data)
         }
-        items.push(item)
-        root.cfg_PlaylistItemsJson = JSON.stringify(items)
     }
 
-    function playlistRemove(index) {
-        const items = playlistItems.slice()
-        items.splice(index, 1)
-        root.cfg_PlaylistItemsJson = JSON.stringify(items)
+    function playlistSetMode(mode) {
+        const data = JSON.parse(JSON.stringify(playlistData))
+        const idx = cfg_ActivePlaylistIndex
+        if (idx >= 0 && idx < data.playlists.length) {
+            data.playlists[idx].mode = mode
+            cfg_PlaylistsJson = JSON.stringify(data)
+        }
     }
 
-    function playlistMoveUp(index) {
-        if (index <= 0) return
-        const items = playlistItems.slice()
-        const tmp = items[index - 1]
-        items[index - 1] = items[index]
-        items[index] = tmp
-        root.cfg_PlaylistItemsJson = JSON.stringify(items)
+    function playlistSetInterval(mins) {
+        const data = JSON.parse(JSON.stringify(playlistData))
+        const idx = cfg_ActivePlaylistIndex
+        if (idx >= 0 && idx < data.playlists.length) {
+            data.playlists[idx].interval = mins
+            cfg_PlaylistsJson = JSON.stringify(data)
+        }
+    }
+
+    function playlistAddFromPicker(pickerItem) {
+        if (!pickerItem) return
+        const data = JSON.parse(JSON.stringify(playlistData))
+        const idx = cfg_ActivePlaylistIndex
+        if (idx < 0 || idx >= data.playlists.length) return
+        data.playlists[idx].items.push({
+            title: pickerItem.title || "",
+            sceneSource: pickerItem.sourcePath || "",
+            sceneProjectPath: pickerItem.projectPath || "",
+            sceneProjectTitle: pickerItem.title || "",
+            sceneSourceKind: pickerItem.sourceKind || "",
+            scenePropertiesJson: "",
+            previewPath: pickerItem.previewPath || "",
+            workshopId: pickerItem.workshopId || "",
+            scheduleTime: "00:00"
+        })
+        cfg_PlaylistsJson = JSON.stringify(data)
+    }
+
+    function playlistRemoveItem(itemIndex) {
+        const data = JSON.parse(JSON.stringify(playlistData))
+        const idx = cfg_ActivePlaylistIndex
+        if (idx < 0 || idx >= data.playlists.length) return
+        data.playlists[idx].items.splice(itemIndex, 1)
+        cfg_PlaylistsJson = JSON.stringify(data)
+    }
+
+    function playlistMoveItemUp(itemIndex) {
+        if (itemIndex <= 0) return
+        const data = JSON.parse(JSON.stringify(playlistData))
+        const idx = cfg_ActivePlaylistIndex
+        if (idx < 0 || idx >= data.playlists.length) return
+        const items = data.playlists[idx].items
+        const tmp = items[itemIndex - 1]
+        items[itemIndex - 1] = items[itemIndex]
+        items[itemIndex] = tmp
+        cfg_PlaylistsJson = JSON.stringify(data)
+    }
+
+    function playlistSetItemTime(itemIndex, time) {
+        const data = JSON.parse(JSON.stringify(playlistData))
+        const idx = cfg_ActivePlaylistIndex
+        if (idx < 0 || idx >= data.playlists.length) return
+        data.playlists[idx].items[itemIndex].scheduleTime = time
+        cfg_PlaylistsJson = JSON.stringify(data)
     }
 
     property var scenePropertyModel: []
@@ -127,8 +186,8 @@ Kirigami.FormLayout {
     readonly property bool wallpaperEngineWebContentMode: cfg_ContentMode === 3
     readonly property bool wallpaperEngineSceneContentMode: cfg_ContentMode === 4
     readonly property bool wallpaperEngineSceneNativeContentMode: cfg_ContentMode === 5
-    readonly property bool wallpaperEngineAnySceneContentMode: wallpaperEngineSceneContentMode || wallpaperEngineSceneNativeContentMode
-    readonly property bool wallpaperEngineContentMode: wallpaperEngineVideoContentMode || wallpaperEngineWebContentMode || wallpaperEngineAnySceneContentMode
+    readonly property bool wallpaperEngineAnySceneContentMode: wallpaperEngineSceneContentMode || wallpaperEngineSceneNativeContentMode || playlistContentMode
+    readonly property bool wallpaperEngineContentMode: wallpaperEngineVideoContentMode || wallpaperEngineWebContentMode || wallpaperEngineAnySceneContentMode || playlistContentMode
     readonly property bool playbackVideoContentMode: localVideoContentMode || wallpaperEngineVideoContentMode
     readonly property bool scenePlaybackContentMode: wallpaperEngineSceneNativeContentMode
     readonly property bool mediaSizingContentMode: playbackVideoContentMode || scenePlaybackContentMode
@@ -520,7 +579,8 @@ Kirigami.FormLayout {
             qsTr("WE Video"),
             qsTr("WE Web"),
             qsTr("WE Scene (diagnostics)"),
-            qsTr("WE Scene (native)")
+            qsTr("WE Scene (native)"),
+            qsTr("Playlist")
         ]
         currentIndex: root.cfg_ContentMode
 
@@ -927,12 +987,17 @@ Kirigami.FormLayout {
                         anchors.fill: parent
                         hoverEnabled: true
                         onClicked: {
-                            // Find the original index in the unfiltered list
-                            const items = root.currentWallpaperEngineItems
-                            for (let i = 0; i < items.length; i++) {
-                                if (items[i].projectPath === modelData.projectPath) {
-                                    root.applyWallpaperEngineSelection(i)
-                                    break
+                            if (root.playlistContentMode && root.activePlaylist) {
+                                // In playlist mode, add to playlist
+                                root.playlistAddFromPicker(modelData)
+                            } else {
+                                // Normal mode, select wallpaper
+                                const items = root.currentWallpaperEngineItems
+                                for (let i = 0; i < items.length; i++) {
+                                    if (items[i].projectPath === modelData.projectPath) {
+                                        root.applyWallpaperEngineSelection(i)
+                                        break
+                                    }
                                 }
                             }
                         }
@@ -1066,72 +1131,87 @@ Kirigami.FormLayout {
         }
     }
 
-    // ---- Playlist section ----
-    Kirigami.Separator {}
+    // ---- Playlist section (visible when content mode is Playlist) ----
+    Kirigami.Separator {
+        visible: root.playlistContentMode
+    }
 
-    QQC2.CheckBox {
+    RowLayout {
         Kirigami.FormData.label: qsTr("Playlist:")
-        text: qsTr("Enable playlist cycling")
-        checked: root.cfg_PlaylistEnabled
-        onToggled: root.cfg_PlaylistEnabled = checked
+        visible: root.playlistContentMode
+        Layout.fillWidth: true
+        Layout.maximumWidth: 460
+
+        QQC2.ComboBox {
+            id: playlistSelector
+            Layout.fillWidth: true
+            model: (root.playlistData.playlists || []).map(p => p.name)
+            currentIndex: root.cfg_ActivePlaylistIndex
+            onActivated: root.cfg_ActivePlaylistIndex = currentIndex
+        }
+
+        QQC2.Button {
+            text: qsTr("New")
+            onClicked: {
+                playlistNameInput.text = qsTr("Playlist %1").arg((root.playlistData.playlists || []).length + 1)
+                playlistNameDialog.mode = "create"
+                playlistNameDialog.open()
+            }
+        }
+
+        QQC2.Button {
+            text: qsTr("Rename")
+            enabled: root.activePlaylist !== null
+            onClicked: {
+                playlistNameInput.text = root.activePlaylist.name
+                playlistNameDialog.mode = "rename"
+                playlistNameDialog.open()
+            }
+        }
+
+        QQC2.Button {
+            text: qsTr("Delete")
+            enabled: root.activePlaylist !== null
+            onClicked: playlistDeleteDialog.open()
+        }
     }
 
     QQC2.ComboBox {
-        Kirigami.FormData.label: qsTr("Cycle mode:")
-        visible: root.cfg_PlaylistEnabled
-        model: [qsTr("Sequential"), qsTr("Random"), qsTr("Time of day")]
-        currentIndex: root.cfg_PlaylistMode
-        onActivated: root.cfg_PlaylistMode = currentIndex
+        Kirigami.FormData.label: qsTr("Cycle:")
+        visible: root.playlistContentMode && root.activePlaylist
+        model: [qsTr("Sequential"), qsTr("Random"), qsTr("Scheduled")]
+        currentIndex: root.activePlaylist ? (root.activePlaylist.mode || 0) : 0
+        onActivated: root.playlistSetMode(currentIndex)
     }
 
     QQC2.SpinBox {
-        Kirigami.FormData.label: qsTr("Interval (minutes):")
-        visible: root.cfg_PlaylistEnabled && root.cfg_PlaylistMode !== 2
+        Kirigami.FormData.label: qsTr("Interval (min):")
+        visible: root.playlistContentMode && root.activePlaylist && (root.activePlaylist.mode || 0) !== 2
         from: 1
         to: 1440
         stepSize: 5
         editable: true
-        value: root.cfg_PlaylistInterval
-        onValueModified: root.cfg_PlaylistInterval = value
+        value: root.activePlaylist ? (root.activePlaylist.interval || 30) : 30
+        onValueModified: root.playlistSetInterval(value)
     }
 
-    QQC2.SpinBox {
-        Kirigami.FormData.label: qsTr("Day wallpaper:")
-        visible: root.cfg_PlaylistEnabled && root.cfg_PlaylistMode === 2
-        from: 0
-        to: Math.max(0, root.playlistItems.length - 1)
-        value: root.cfg_PlaylistDayItemIndex
-        onValueModified: root.cfg_PlaylistDayItemIndex = value
+    QQC2.Label {
+        text: qsTr("Add wallpapers from the picker below, then set a time for each.")
+        visible: root.playlistContentMode && root.activePlaylist && (root.activePlaylist.mode || 0) === 2
+        wrapMode: Text.WordWrap
+        Layout.fillWidth: true
+        opacity: 0.7
     }
 
-    QQC2.SpinBox {
-        Kirigami.FormData.label: qsTr("Night wallpaper:")
-        visible: root.cfg_PlaylistEnabled && root.cfg_PlaylistMode === 2
-        from: 0
-        to: Math.max(0, root.playlistItems.length - 1)
-        value: root.cfg_PlaylistNightItemIndex
-        onValueModified: root.cfg_PlaylistNightItemIndex = value
-    }
-
-    QQC2.Button {
-        text: qsTr("Add current wallpaper to playlist")
-        visible: root.cfg_PlaylistEnabled && root.wallpaperEngineContentMode && root.selectedWallpaperEngineProject
-        onClicked: root.playlistAddCurrent()
-    }
-
+    // Playlist items list
     ColumnLayout {
         Layout.fillWidth: true
         Layout.maximumWidth: 460
-        visible: root.cfg_PlaylistEnabled && root.playlistItems.length > 0
-        spacing: 2
-
-        QQC2.Label {
-            text: qsTr("Playlist (%1 items):").arg(root.playlistItems.length)
-            font.bold: true
-        }
+        visible: root.playlistContentMode && root.activePlaylist && (root.activePlaylist.items || []).length > 0
+        spacing: 4
 
         Repeater {
-            model: root.playlistItems
+            model: root.activePlaylist ? (root.activePlaylist.items || []) : []
             delegate: RowLayout {
                 Layout.fillWidth: true
                 required property var modelData
@@ -1139,7 +1219,7 @@ Kirigami.FormLayout {
                 spacing: Kirigami.Units.smallSpacing
 
                 Image {
-                    source: modelData.previewPath ? ("file://" + modelData.previewPath) : ""
+                    source: (modelData.previewPath || "").length > 0 ? ("file://" + modelData.previewPath) : ""
                     Layout.preferredWidth: 48
                     Layout.preferredHeight: 32
                     fillMode: Image.PreserveAspectCrop
@@ -1147,25 +1227,86 @@ Kirigami.FormLayout {
                     visible: (modelData.previewPath || "").length > 0
                 }
 
-                QQC2.Label {
-                    text: (index + 1) + ". " + (modelData.title || qsTr("Untitled"))
+                ColumnLayout {
                     Layout.fillWidth: true
-                    elide: Text.ElideRight
+                    spacing: 0
+                    QQC2.Label {
+                        text: (index + 1) + ". " + (modelData.title || qsTr("Untitled"))
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+                    QQC2.Label {
+                        text: modelData.workshopId || ""
+                        font.pointSize: Kirigami.Theme.smallFont.pointSize
+                        opacity: 0.5
+                        visible: (modelData.workshopId || "").length > 0
+                    }
+                }
+
+                QQC2.TextField {
+                    visible: root.activePlaylist && (root.activePlaylist.mode || 0) === 2
+                    Layout.preferredWidth: 60
+                    text: modelData.scheduleTime || "00:00"
+                    placeholderText: "HH:MM"
+                    onEditingFinished: root.playlistSetItemTime(index, text)
                 }
 
                 QQC2.ToolButton {
                     icon.name: "go-up"
                     enabled: index > 0
-                    onClicked: root.playlistMoveUp(index)
-                    visible: root.cfg_PlaylistMode === 0
+                    onClicked: root.playlistMoveItemUp(index)
                 }
 
                 QQC2.ToolButton {
                     icon.name: "edit-delete"
-                    onClicked: root.playlistRemove(index)
+                    onClicked: root.playlistRemoveItem(index)
                 }
             }
         }
+    }
+
+    QQC2.Label {
+        text: root.activePlaylist
+            ? qsTr("Select wallpapers below to add to \"%1\":").arg(root.activePlaylist.name)
+            : qsTr("Create a playlist first, then add wallpapers to it.")
+        visible: root.playlistContentMode
+        wrapMode: Text.WordWrap
+        Layout.fillWidth: true
+        opacity: 0.7
+    }
+
+    // Playlist name dialog
+    QQC2.Dialog {
+        id: playlistNameDialog
+        property string mode: "create"
+        title: mode === "create" ? qsTr("New playlist") : qsTr("Rename playlist")
+        standardButtons: QQC2.Dialog.Ok | QQC2.Dialog.Cancel
+        modal: true
+        anchors.centerIn: parent
+        contentItem: QQC2.TextField {
+            id: playlistNameInput
+            placeholderText: qsTr("Playlist name")
+        }
+        onAccepted: {
+            if (mode === "create") root.playlistCreate(playlistNameInput.text)
+            else root.playlistRename(root.cfg_ActivePlaylistIndex, playlistNameInput.text)
+        }
+    }
+
+    // Playlist delete confirmation
+    QQC2.Dialog {
+        id: playlistDeleteDialog
+        title: qsTr("Delete playlist")
+        standardButtons: QQC2.Dialog.Yes | QQC2.Dialog.No
+        modal: true
+        anchors.centerIn: parent
+        contentItem: QQC2.Label {
+            text: root.activePlaylist
+                ? qsTr("Are you sure you want to delete \"%1\"? This cannot be undone.").arg(root.activePlaylist.name)
+                : ""
+            wrapMode: Text.WordWrap
+        }
+        onAccepted: root.playlistDelete(root.cfg_ActivePlaylistIndex)
     }
 
     FileDialog {

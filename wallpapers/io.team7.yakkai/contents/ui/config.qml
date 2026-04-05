@@ -979,7 +979,12 @@ Kirigami.FormLayout {
                 const items = root.currentWallpaperEngineItems
                 const query = wallpaperSearchField.text.toLowerCase()
                 if (query.length === 0) return items
-                return items.filter(item => (item.title || "").toLowerCase().includes(query))
+                return items.filter(item => {
+                    const title = (item.title || "").toLowerCase()
+                    const wid = (item.workshopId || "").toLowerCase()
+                    const wtype = (item.weType || "").toLowerCase()
+                    return title.includes(query) || wid.includes(query) || wtype.includes(query)
+                })
             }
 
             delegate: Item {

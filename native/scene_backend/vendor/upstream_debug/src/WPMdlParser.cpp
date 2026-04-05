@@ -330,7 +330,15 @@ bool SeekNextPuppetAnimationHeader(fs::IBinaryStream& f,
         return false;
     }
 
-    for (idx pos = start; pos < section_end; ++pos) {
+    // Scan for next animation header. Use a quick pre-filter: the first int32
+    // (anim_id) must be a small positive number, which rules out most positions.
+    const idx max_scan = section_end;
+    for (idx pos = start; pos < max_scan; ++pos) {
+        // Quick reject: read the candidate anim_id without full validation
+        if (pos + 4 > section_end) break;
+        f.SeekSet(pos);
+        int32_t candidate_id = f.ReadInt32();
+        if (candidate_id <= 0 || candidate_id > 100000) continue;
         if (! IsLikelyPuppetAnimationHeader(f, pos, section_end, bone_count)) {
             continue;
         }
@@ -376,8 +384,13 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
     // located after the herald value, and we'll need to account for other differences later on.
     if(curr == 0){
         alt_mdl_format = true;
+        int scan_limit = 0;
         while (curr != alt_format_vertex_size_herald_value){
             curr = f.ReadUint32();
+            if (++scan_limit > 10000 || f.Tell() >= f.Size()) {
+                LOG_ERROR("mdl alt format herald not found after %d reads: %s", scan_limit, str_path.data());
+                return false;
+            }
         }
         curr = f.ReadUint32();
     }
@@ -603,7 +616,10 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
             LOG_INFO("mdl MDLA: version=%d end_size=%u section_end=%td anim_num=%u pos=%td",
                      mdl.mdla, end_size, mdla_section_end, anim_num, f.Tell());
             anims.resize(anim_num);
-            for (auto& anim : anims) {
+            for (size_t anim_idx = 0; anim_idx < anims.size(); anim_idx++) {
+                auto& anim = anims[anim_idx];
+                LOG_INFO("mdl seeking anim header [%zu/%zu] from pos=%td section_end=%td",
+                         anim_idx, anims.size(), f.Tell(), mdla_section_end);
                 if (! SeekNextPuppetAnimationHeader(f, f.Tell(), mdla_section_end, bones_num)) {
                     LOG_ERROR("failed to locate puppet animation header starting from %td (section_end=%td bones=%u)",
                               f.Tell(), mdla_section_end, bones_num);
@@ -622,12 +638,16 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
                 f.ReadInt32();
 
                 uint32_t b_num = f.ReadUint32();
+                if (b_num > 1000) {
+                    LOG_ERROR("unreasonable bone count %u in animation %d, aborting MDL parse", b_num, anim.id);
+                    return false;
+                }
                 anim.bframes_array.resize(b_num);
                 for (auto& bframes : anim.bframes_array) {
                     f.ReadInt32();
                     uint32_t byte_size = f.ReadUint32();
                     uint32_t num       = byte_size / singile_bone_frame;
-                    if (byte_size % singile_bone_frame != 0) {
+                    if (byte_size % singile_bone_frame != 0 || byte_size > 10000000) {
                         LOG_ERROR("wrong bone frame size %d", byte_size);
                         return false;
                     }

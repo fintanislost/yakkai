@@ -711,8 +711,13 @@ bool WPShaderParser::CompileToSpv(std::string_view scene_id, std::span<WPShaderU
                 LOG_ERROR("load shader from \'%s\' failed", cache_file_path.c_str());
                 return false;
             }
+            // cache hit — no compilation needed
         } else {
+            auto t0 = std::chrono::steady_clock::now();
             if (! compile(units, codes)) return false;
+            auto t1 = std::chrono::steady_clock::now();
+            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+            LOG_INFO("shader compiled in %lldms, caching: %s", (long long)ms, sha1.c_str());
             if (auto cache_file = vfs.OpenW(cache_file_path); cache_file) {
                 ::SaveShaderToFile(codes, *cache_file);
             }

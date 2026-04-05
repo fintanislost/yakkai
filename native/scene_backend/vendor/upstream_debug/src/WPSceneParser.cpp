@@ -2600,7 +2600,6 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         }
 
         shaderInfo.baseConstSvs = baseConstSvs;
-
         if (! LoadMaterial(vfs,
                            sourceMaterial,
                            context.scene.get(),
@@ -2769,9 +2768,11 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         }
         // set renderTarget for ping-pong operate
         {
+            uint16_t rtW = (uint16_t)wpimgobj.size[0];
+            uint16_t rtH = (uint16_t)wpimgobj.size[1];
             scene.renderTargets[effect_ppong_a] = {
-                .width      = (uint16_t)wpimgobj.size[0],
-                .height     = (uint16_t)wpimgobj.size[1],
+                .width      = rtW,
+                .height     = rtH,
                 .allowReuse = true,
             };
             if (wpimgobj.fullscreen) {
@@ -3902,7 +3903,7 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
 
     for (WPObjectVar& obj : wp_objs) {
         std::visit(visitor::overload {
-                       [&context](wpscene::WPImageObject& obj) {                           
+                       [&context](wpscene::WPImageObject& obj) {
                             ParseImageObj(context, obj);
                        },
                        [&context](wpscene::WPParticleObject& obj) {

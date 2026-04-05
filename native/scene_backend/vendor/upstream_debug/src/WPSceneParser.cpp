@@ -2512,12 +2512,19 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         // causing transparent regions to become opaque (hiding layers behind).
         // Strip effects from all regular layers until the offscreen alpha path
         // is fixed. Composelayer and flare/lens layers keep their effects.
-        if (! isCompose && ! isEssentialEffect) {
+        if (! isEssentialEffect) {
             LOG_INFO("stripping %d effects from layer (alpha fix): name=%s",
                      count_eff, wpimgobj.name.c_str());
             count_eff = 0;
             hasEffect = false;
             effectObjects.clear();
+            // Utility layers only exist as effect carriers — hide them entirely
+            // when their effects are stripped, since they render as garbage without.
+            const bool isUtilityLayer =
+                wpimgobj.image.find("solidlayer") != std::string::npos ||
+                wpimgobj.image.find("projectlayer") != std::string::npos ||
+                wpimgobj.image.find("fullscreenlayer") != std::string::npos;
+            if (isUtilityLayer) return;
         } else if (true) {
             // Keep effects for composelayer and flare/lens
         } else {

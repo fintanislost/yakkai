@@ -253,6 +253,15 @@ WallpaperItem {
                     ? "SceneGuard.qml"
                     : (root.sceneMode ? "ScenePlaceholder.qml" : "GradientBackground.qml")))
 
+        onItemChanged: {
+            if (item) {
+                root.log("loader item changed, rebinding source=" + source)
+                root.contentLoadFailed = false
+                root.contentLoadErrorText = ""
+                root.bindLoadedContent()
+            }
+        }
+
         onStatusChanged: {
             root.log("loader status=" + status + " source=" + source)
 

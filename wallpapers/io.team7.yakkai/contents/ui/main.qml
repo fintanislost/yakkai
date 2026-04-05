@@ -136,7 +136,30 @@ WallpaperItem {
         onTriggered: root.playlistCheckSchedule()
     }
 
+    onPlaylistActiveChanged: {
+        if (playlistActive) {
+            const mode = activePlaylist.mode || 0
+            if (mode === 2) {
+                playlistCheckSchedule()
+            } else {
+                const items = activePlaylist.items || []
+                if (items.length > 0) playlistApplyItem(items[0])
+            }
+        }
+    }
 
+    onActivePlaylistChanged: {
+        if (playlistActive) {
+            playlistCurrentIndex = 0
+            const mode = activePlaylist.mode || 0
+            if (mode === 2) {
+                playlistCheckSchedule()
+            } else {
+                const items = activePlaylist.items || []
+                if (items.length > 0) playlistApplyItem(items[0])
+            }
+        }
+    }
 
     property int contentMode: configuration.ContentMode ?? 0
     property color manualStartColor: configuration.StartColor ?? "#0b1f33"

@@ -136,29 +136,33 @@ WallpaperItem {
         onTriggered: root.playlistCheckSchedule()
     }
 
-    onPlaylistActiveChanged: {
-        if (playlistActive) {
-            const mode = activePlaylist.mode || 0
-            if (mode === 2) {
-                playlistCheckSchedule()
-            } else {
-                const items = activePlaylist.items || []
-                if (items.length > 0) playlistApplyItem(items[0])
-            }
+    function playlistTryApply() {
+        if (contentMode !== 6) return
+        const pl = activePlaylist
+        if (!pl) return
+        const items = pl.items || []
+        if (items.length === 0) return
+        const mode = pl.mode || 0
+        if (mode === 2) {
+            playlistCheckSchedule()
+        } else {
+            if (playlistCurrentIndex < 0 || playlistCurrentIndex >= items.length)
+                playlistCurrentIndex = 0
+            playlistApplyItem(items[playlistCurrentIndex])
         }
     }
 
+    onContentModeChanged: {
+        if (contentMode === 6) playlistTryApply()
+    }
+
     onActivePlaylistChanged: {
-        if (playlistActive) {
-            playlistCurrentIndex = 0
-            const mode = activePlaylist.mode || 0
-            if (mode === 2) {
-                playlistCheckSchedule()
-            } else {
-                const items = activePlaylist.items || []
-                if (items.length > 0) playlistApplyItem(items[0])
-            }
-        }
+        playlistCurrentIndex = 0
+        playlistTryApply()
+    }
+
+    onPlaylistDataChanged: {
+        if (contentMode === 6) playlistTryApply()
     }
 
     property int contentMode: configuration.ContentMode ?? 0
@@ -396,15 +400,7 @@ WallpaperItem {
                     ? activeVideoSource
                     : (webMode ? activeWebSource : ((sceneMode || sceneNativeMode) ? activeSceneSource : ""))
             ))
-        if (playlistActive) {
-            const mode = activePlaylist.mode || 0
-            if (mode === 2) {
-                playlistCheckSchedule()
-            } else {
-                const items = activePlaylist.items || []
-                if (items.length > 0) playlistApplyItem(items[0])
-            }
-        }
+        playlistTryApply()
     }
 
     Rectangle {

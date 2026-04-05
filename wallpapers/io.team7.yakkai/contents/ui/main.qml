@@ -218,11 +218,7 @@ WallpaperItem {
     readonly property string umbrellaResolvedType: contentMode === 7 ? umbrellaMode.resolvedType : ""
     onUmbrellaResolvedTypeChanged: {
         if (contentMode === 7) {
-            log("umbrella resolved type: " + umbrellaResolvedType + " scene=" + wallpaperEngineSceneSource + " video=" + wallpaperEngineVideoSource + " web=" + wallpaperEngineWebSource)
-            // Re-bind after type settles — initial bind may fire before type resolves
-            if (contentLoader.status === Loader.Ready && contentLoader.item) {
-                bindLoadedContent()
-            }
+            log("umbrella resolved type: " + umbrellaResolvedType)
         }
     }
     readonly property url activeVideoSource: wallpaperEngineVideoMode ? wallpaperEngineVideoSource : videoSource
@@ -285,7 +281,7 @@ WallpaperItem {
             return
         }
 
-        if (root.videoMode || (root.contentMode === 7 && root.umbrellaResolvedType === "video")) {
+        if (root.videoMode) {
             root.log("binding video content source=" + String(root.activeVideoSource)
                 + " fill=" + root.videoFillMode
                 + " muted=" + root.videoMuted)
@@ -304,7 +300,7 @@ WallpaperItem {
             return
         }
 
-        if (root.webMode || (root.contentMode === 7 && root.umbrellaResolvedType === "web")) {
+        if (root.webMode) {
             root.log("binding web content source=" + String(root.activeWebSource)
                 + " muted=" + root.videoMuted
                 + " title=" + root.wallpaperEngineWebProjectTitle)
@@ -326,7 +322,7 @@ WallpaperItem {
             return
         }
 
-        if (root.sceneMode || root.sceneNativeMode || root.contentMode === 7) {
+        if (root.sceneMode || root.sceneNativeMode) {
             root.log("binding scene content source=" + String(root.activeSceneSource)
                 + " title=" + root.wallpaperEngineSceneProjectTitle)
             contentLoader.item.sceneSource = Qt.binding(function() {

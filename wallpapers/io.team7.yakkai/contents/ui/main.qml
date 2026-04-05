@@ -119,11 +119,7 @@ WallpaperItem {
         onTriggered: root.playlistApplyTimeOfDay()
     }
 
-    Component.onCompleted: {
-        if (playlistEnabled && playlistItems.length > 0 && playlistMode === 2) {
-            playlistApplyTimeOfDay()
-        }
-    }
+
 
     property int contentMode: configuration.ContentMode ?? 0
     property color manualStartColor: configuration.StartColor ?? "#0b1f33"
@@ -359,6 +355,9 @@ WallpaperItem {
                     ? activeVideoSource
                     : (webMode ? activeWebSource : ((sceneMode || sceneNativeMode) ? activeSceneSource : ""))
             ))
+        if (playlistEnabled && playlistItems.length > 0 && playlistMode === 2) {
+            playlistApplyTimeOfDay()
+        }
     }
 
     Rectangle {

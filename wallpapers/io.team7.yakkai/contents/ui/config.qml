@@ -231,12 +231,13 @@ Kirigami.FormLayout {
         : (wallpaperEngineAnySceneContentMode
             ? "scene"
             : (wallpaperEngineWebContentMode ? "web" : "video"))
+    // Track umbrella selection locally for immediate highlight feedback
+    property string umbrellaSelectedProjectPath: ""
+
     readonly property var selectedWallpaperEngineProject: {
         let savedPath = ""
         if (umbrellaContentMode) {
-            const utype = root.cfg_UmbrellaSelectedType || "scene"
-            savedPath = utype === "video" ? root.cfg_WEVideoProjectPath
-                : (utype === "web" ? root.cfg_WEWebProjectPath : root.cfg_WESceneProjectPath)
+            savedPath = root.umbrellaSelectedProjectPath
         } else {
             savedPath = wallpaperEngineAnySceneContentMode
                 ? root.cfg_WESceneProjectPath
@@ -425,6 +426,7 @@ Kirigami.FormLayout {
 
         if (umbrellaContentMode) {
             root.cfg_UmbrellaSelectedType = itemType
+            root.umbrellaSelectedProjectPath = item.projectPath
         }
 
         if (itemType === "web") {

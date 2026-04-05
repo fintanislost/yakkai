@@ -45,6 +45,86 @@ WallpaperItem {
         return base + child
     }
 
+    // Playlist state
+    property bool playlistEnabled: configuration.PlaylistEnabled ?? false
+    property string playlistItemsJson: configuration.PlaylistItemsJson ?? ""
+    property int playlistMode: configuration.PlaylistMode ?? 0
+    property int playlistInterval: configuration.PlaylistInterval ?? 30
+    property int playlistDayItemIndex: configuration.PlaylistDayItemIndex ?? 0
+    property int playlistNightItemIndex: configuration.PlaylistNightItemIndex ?? 0
+    property var playlistItems: {
+        if (!playlistItemsJson || playlistItemsJson.length === 0) return []
+        try { return JSON.parse(playlistItemsJson) } catch(e) { return [] }
+    }
+    property int playlistCurrentIndex: 0
+
+    function playlistAdvance() {
+        if (playlistItems.length === 0) return
+        if (playlistMode === 1) {
+            // Random
+            let next = Math.floor(Math.random() * playlistItems.length)
+            if (playlistItems.length > 1) {
+                while (next === playlistCurrentIndex) next = Math.floor(Math.random() * playlistItems.length)
+            }
+            playlistCurrentIndex = next
+        } else {
+            // Sequential
+            playlistCurrentIndex = (playlistCurrentIndex + 1) % playlistItems.length
+        }
+        playlistApplyCurrent()
+    }
+
+    function playlistApplyTimeOfDay() {
+        if (playlistItems.length === 0) return
+        const hour = new Date().getHours()
+        const dayStart = root.dayStartHour
+        const nightStart = root.nightStartHour
+        const isDay = (dayStart < nightStart) ? (hour >= dayStart && hour < nightStart) : (hour >= dayStart || hour < nightStart)
+        const idx = isDay ? root.playlistDayItemIndex : root.playlistNightItemIndex
+        if (idx >= 0 && idx < playlistItems.length && idx !== playlistCurrentIndex) {
+            playlistCurrentIndex = idx
+            playlistApplyCurrent()
+        }
+    }
+
+    function playlistApplyCurrent() {
+        if (playlistCurrentIndex < 0 || playlistCurrentIndex >= playlistItems.length) return
+        const item = playlistItems[playlistCurrentIndex]
+        log("playlist switch to [" + playlistCurrentIndex + "]: " + (item.title || "untitled"))
+
+        // Apply the playlist item's wallpaper config
+        if (item.contentMode !== undefined) configuration.ContentMode = item.contentMode
+        if (item.sceneSource) configuration.WESceneSource = item.sceneSource
+        if (item.sceneProjectPath) configuration.WESceneProjectPath = item.sceneProjectPath
+        if (item.sceneProjectTitle) configuration.WESceneProjectTitle = item.sceneProjectTitle
+        if (item.sceneSourceKind) configuration.WESceneSourceKind = item.sceneSourceKind
+        if (item.scenePropertiesJson !== undefined) configuration.WEScenePropertiesJson = item.scenePropertiesJson
+        if (item.videoSource) configuration.WEVideoSource = item.videoSource
+        if (item.webSource) configuration.WEWebSource = item.webSource
+    }
+
+    Timer {
+        id: playlistTimer
+        interval: root.playlistInterval * 60 * 1000
+        repeat: true
+        running: root.playlistEnabled && root.playlistItems.length > 1 && root.playlistMode !== 2
+        onTriggered: root.playlistAdvance()
+    }
+
+    Timer {
+        id: playlistTimeOfDayTimer
+        interval: 60000 // check every minute
+        repeat: true
+        running: root.playlistEnabled && root.playlistItems.length > 1 && root.playlistMode === 2
+        onTriggered: root.playlistApplyTimeOfDay()
+    }
+
+    Component.onCompleted: {
+        if (playlistEnabled && playlistItems.length > 0 && playlistMode === 2) {
+            playlistApplyTimeOfDay()
+        }
+    }
+
     property int contentMode: configuration.ContentMode ?? 0
     property color manualStartColor: configuration.StartColor ?? "#0b1f33"
     property color manualEndColor: configuration.EndColor ?? "#4d7cff"

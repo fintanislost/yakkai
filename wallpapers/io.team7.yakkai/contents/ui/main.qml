@@ -153,6 +153,7 @@ WallpaperItem {
     }
 
     onContentModeChanged: {
+        log("contentMode=" + contentMode + " videoMode=" + videoMode + " webMode=" + webMode + " sceneMode=" + sceneMode + " sceneNativeMode=" + sceneNativeMode)
         if (contentMode === 6) playlistTryApply()
     }
 
@@ -220,7 +221,6 @@ WallpaperItem {
     property bool contentLoadFailed: false
     property string contentLoadErrorText: ""
 
-    onContentModeChanged: log("contentMode=" + contentMode + " videoMode=" + videoMode + " webMode=" + webMode + " sceneMode=" + sceneMode + " sceneNativeMode=" + sceneNativeMode)
     onVideoSourceChanged: log("videoSource=" + String(videoSource))
     onWallpaperEngineVideoSourceChanged: log("wallpaperEngineVideoSource=" + String(wallpaperEngineVideoSource))
     onWallpaperEngineWebSourceChanged: log("wallpaperEngineWebSource=" + String(wallpaperEngineWebSource))

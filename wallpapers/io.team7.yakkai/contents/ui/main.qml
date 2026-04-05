@@ -217,7 +217,13 @@ WallpaperItem {
     }
     readonly property string umbrellaResolvedType: contentMode === 7 ? umbrellaMode.resolvedType : ""
     onUmbrellaResolvedTypeChanged: {
-        if (contentMode === 7) log("umbrella resolved type: " + umbrellaResolvedType + " scene=" + wallpaperEngineSceneSource + " video=" + wallpaperEngineVideoSource + " web=" + wallpaperEngineWebSource)
+        if (contentMode === 7) {
+            log("umbrella resolved type: " + umbrellaResolvedType + " scene=" + wallpaperEngineSceneSource + " video=" + wallpaperEngineVideoSource + " web=" + wallpaperEngineWebSource)
+            // Re-bind after type settles — initial bind may fire before type resolves
+            if (contentLoader.status === Loader.Ready && contentLoader.item) {
+                bindLoadedContent()
+            }
+        }
     }
     readonly property url activeVideoSource: wallpaperEngineVideoMode ? wallpaperEngineVideoSource : videoSource
     readonly property url activeWebSource: wallpaperEngineWebSource

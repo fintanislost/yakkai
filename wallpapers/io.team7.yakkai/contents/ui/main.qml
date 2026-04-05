@@ -281,7 +281,13 @@ WallpaperItem {
             return
         }
 
-        if (root.videoMode) {
+        // Detect which component is loaded by checking for its unique properties.
+        // This avoids race conditions with mode flags that depend on async config.
+        const isVideo = "videoSource" in contentLoader.item
+        const isWeb = "webSource" in contentLoader.item
+        const isScene = "sceneSource" in contentLoader.item
+
+        if (isVideo) {
             root.log("binding video content source=" + String(root.activeVideoSource)
                 + " fill=" + root.videoFillMode
                 + " muted=" + root.videoMuted)
@@ -300,7 +306,7 @@ WallpaperItem {
             return
         }
 
-        if (root.webMode) {
+        if (isWeb) {
             root.log("binding web content source=" + String(root.activeWebSource)
                 + " muted=" + root.videoMuted
                 + " title=" + root.wallpaperEngineWebProjectTitle)
@@ -322,7 +328,7 @@ WallpaperItem {
             return
         }
 
-        if (root.sceneMode || root.sceneNativeMode) {
+        if (isScene) {
             root.log("binding scene content source=" + String(root.activeSceneSource)
                 + " title=" + root.wallpaperEngineSceneProjectTitle)
             contentLoader.item.sceneSource = Qt.binding(function() {
@@ -353,7 +359,7 @@ WallpaperItem {
                 return root.sceneEmptyMessage
             })
             contentLoader.item.experimentalEnabled = Qt.binding(function() {
-                return root.sceneNativeMode
+                return root.sceneNativeMode || root.contentMode === 7
             })
             return
         }

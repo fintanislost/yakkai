@@ -208,18 +208,16 @@ WallpaperItem {
     readonly property bool sceneMode: wallpaperEngineSceneMode
     readonly property bool sceneNativeMode: wallpaperEngineSceneNativeMode
 
-    // Umbrella mode: use persisted type from config, fall back to source detection
-    readonly property string umbrellaResolvedType: {
-        if (contentMode !== 7) return ""
-        const saved = configuration.UmbrellaSelectedType || ""
-        if (saved === "video" && wallpaperEngineVideoSource.toString().length > 0) return "video"
-        if (saved === "web" && wallpaperEngineWebSource.toString().length > 0) return "web"
-        if (saved === "scene" && wallpaperEngineSceneSource.toString().length > 0) return "scene"
-        // Fallback: detect from whichever source is set
-        if (wallpaperEngineSceneSource.toString().length > 0) return "scene"
-        if (wallpaperEngineWebSource.toString().length > 0) return "web"
-        if (wallpaperEngineVideoSource.toString().length > 0) return "video"
-        return saved || "scene"
+    UmbrellaMode {
+        id: umbrellaMode
+        selectedType: configuration.UmbrellaSelectedType || "scene"
+        sceneSource: wallpaperEngineSceneSource.toString()
+        videoSource: wallpaperEngineVideoSource.toString()
+        webSource: wallpaperEngineWebSource.toString()
+    }
+    readonly property string umbrellaResolvedType: contentMode === 7 ? umbrellaMode.resolvedType : ""
+    onUmbrellaResolvedTypeChanged: {
+        if (contentMode === 7) log("umbrella resolved type: " + umbrellaResolvedType + " scene=" + wallpaperEngineSceneSource + " video=" + wallpaperEngineVideoSource + " web=" + wallpaperEngineWebSource)
     }
     readonly property url activeVideoSource: wallpaperEngineVideoMode ? wallpaperEngineVideoSource : videoSource
     readonly property url activeWebSource: wallpaperEngineWebSource

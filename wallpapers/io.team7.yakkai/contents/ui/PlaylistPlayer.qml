@@ -26,8 +26,8 @@ QtObject {
         const pls = playlistData.playlists || []
         return (idx >= 0 && idx < pls.length) ? pls[idx] : null
     }
-    readonly property var items: playlist ? (playlist.items || []) : []
-    readonly property var currentItem: (currentIndex >= 0 && currentIndex < items.length) ? items[currentIndex] : null
+    readonly property var items: (playlist && playlist.items) ? playlist.items : []
+    readonly property var currentItem: (items && currentIndex >= 0 && currentIndex < items.length) ? items[currentIndex] : null
     readonly property string currentType: currentItem ? (currentItem.weType || "scene") : "scene"
     readonly property int cycleMode: playlist ? (playlist.mode || 0) : 0
     readonly property int intervalMinutes: playlist ? (playlist.interval || 30) : 30
@@ -36,18 +36,23 @@ QtObject {
     signal applyItem(var item)
 
     function tryApply() {
-        if (!active || items.length === 0) return
+        if (!active || !items || items.length === 0) return
         if (cycleMode === 2) {
             checkSchedule()
         } else {
             if (currentIndex < 0 || currentIndex >= items.length)
                 currentIndex = 0
-            applyItem(items[currentIndex])
+            var item = items[currentIndex]
+            console.log("[Yakkai] playlist tryApply: index=" + currentIndex
+                + " title=" + (item ? item.title : "null")
+                + " type=" + (item ? item.weType : "null")
+                + " items=" + items.length)
+            applyItem(item)
         }
     }
 
     function advance() {
-        if (items.length < 2) return
+        if (!items || items.length < 2) return
         if (cycleMode === 1) {
             // Random
             let next = Math.floor(Math.random() * items.length)
@@ -61,7 +66,7 @@ QtObject {
     }
 
     function checkSchedule() {
-        if (items.length === 0) return
+        if (!items || items.length === 0) return
         const now = new Date()
         const nowMins = now.getHours() * 60 + now.getMinutes()
         let bestIdx = 0

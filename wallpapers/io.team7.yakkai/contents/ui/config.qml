@@ -1086,7 +1086,6 @@ Kirigami.FormLayout {
                         hoverEnabled: true
                         onClicked: {
                             if (root.playlistAllContentMode && playlistAllConfig.activePlaylist) {
-                                // Playlist (All) mode — add to playlist
                                 playlistAllConfig.addItem(modelData)
                             } else if (root.playlistContentMode && root.activePlaylist) {
                                 // Playlist mode — add to playlist
@@ -1244,8 +1243,8 @@ Kirigami.FormLayout {
         Layout.maximumWidth: 460
         playlistsJson: root.cfg_PlaylistsJson
         activePlaylistIndex: root.cfg_ActivePlaylistIndex
-        onPlaylistsJsonChanged: function(json) { root.cfg_PlaylistsJson = json }
-        onActivePlaylistIndexChanged: function(index) { root.cfg_ActivePlaylistIndex = index }
+        onPlaylistsUpdated: function(json) { root.cfg_PlaylistsJson = json }
+        onActiveIndexUpdated: function(index) { root.cfg_ActivePlaylistIndex = index }
     }
 
     // ---- Playlist section (visible when content mode is Playlist) ----

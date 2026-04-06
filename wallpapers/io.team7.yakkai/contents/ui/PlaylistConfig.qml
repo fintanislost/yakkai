@@ -20,9 +20,9 @@ ColumnLayout {
     property string playlistsJson: ""
     property int activePlaylistIndex: -1
 
-    // Signals to parent config
-    signal playlistsJsonChanged(string json)
-    signal activePlaylistIndexChanged(int index)
+    // Signals to parent config (distinct names to avoid property signal conflict)
+    signal playlistsUpdated(string json)
+    signal activeIndexUpdated(int index)
 
     // Parsed data
     readonly property var playlistData: {
@@ -36,14 +36,14 @@ ColumnLayout {
     }
 
     function save(data) {
-        playlistsJsonChanged(JSON.stringify(data))
+        playlistsUpdated(JSON.stringify(data))
     }
 
     function createPlaylist(name) {
         const data = JSON.parse(JSON.stringify(playlistData))
         data.playlists.push({ name: name, mode: 0, interval: 30, items: [] })
         save(data)
-        activePlaylistIndexChanged(data.playlists.length - 1)
+        activeIndexUpdated(data.playlists.length - 1)
     }
 
     function deletePlaylist(index) {
@@ -51,7 +51,7 @@ ColumnLayout {
         data.playlists.splice(index, 1)
         save(data)
         if (activePlaylistIndex >= data.playlists.length)
-            activePlaylistIndexChanged(data.playlists.length - 1)
+            activeIndexUpdated(data.playlists.length - 1)
     }
 
     function renamePlaylist(index, newName) {
@@ -139,7 +139,7 @@ ColumnLayout {
             Layout.fillWidth: true
             model: (playlistPanel.playlistData.playlists || []).map(p => p.name)
             currentIndex: playlistPanel.activePlaylistIndex
-            onActivated: playlistPanel.activePlaylistIndexChanged(currentIndex)
+            onActivated: playlistPanel.activeIndexUpdated(currentIndex)
         }
 
         QQC2.Button {

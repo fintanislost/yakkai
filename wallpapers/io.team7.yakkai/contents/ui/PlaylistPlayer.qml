@@ -96,14 +96,14 @@ QtObject {
     property Timer cycleTimer: Timer {
         interval: player.intervalMinutes * 60 * 1000
         repeat: true
-        running: player.active && player.items.length > 1 && player.cycleMode !== 2
+        running: player.active && player.items && player.items.length > 1 && player.cycleMode !== 2
         onTriggered: player.advance()
     }
 
     property Timer scheduleTimer: Timer {
         interval: 60000
         repeat: true
-        running: player.active && player.items.length > 1 && player.cycleMode === 2
+        running: player.active && player.items && player.items.length > 1 && player.cycleMode === 2
         onTriggered: player.checkSchedule()
     }
 

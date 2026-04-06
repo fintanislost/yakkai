@@ -65,6 +65,8 @@ Kirigami.FormLayout {
     property bool cfg_WESceneMouseInput
     property string cfg_PlaylistsJson
     property int cfg_ActivePlaylistIndex
+    property string cfg_PlaylistAllJson
+    property int cfg_ActivePlaylistAllIndex
 
     property var playlistData: {
         if (!cfg_PlaylistsJson || cfg_PlaylistsJson.length === 0) return { playlists: [] }
@@ -1241,10 +1243,10 @@ Kirigami.FormLayout {
         visible: root.playlistAllContentMode
         Layout.fillWidth: true
         Layout.maximumWidth: 460
-        playlistsJson: root.cfg_PlaylistsJson
-        activePlaylistIndex: root.cfg_ActivePlaylistIndex
-        onPlaylistsUpdated: function(json) { root.cfg_PlaylistsJson = json }
-        onActiveIndexUpdated: function(index) { root.cfg_ActivePlaylistIndex = index }
+        playlistsJson: root.cfg_PlaylistAllJson
+        activePlaylistIndex: root.cfg_ActivePlaylistAllIndex
+        onPlaylistsUpdated: function(json) { root.cfg_PlaylistAllJson = json }
+        onActiveIndexUpdated: function(index) { root.cfg_ActivePlaylistAllIndex = index }
     }
 
     // ---- Playlist section (visible when content mode is Playlist) ----

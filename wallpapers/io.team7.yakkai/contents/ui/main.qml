@@ -227,8 +227,8 @@ WallpaperItem {
     // Playlist (All) runtime
     PlaylistPlayer {
         id: playlistAllPlayer
-        playlistsJson: configuration.PlaylistsJson ?? ""
-        activePlaylistIndex: configuration.ActivePlaylistIndex ?? -1
+        playlistsJson: configuration.PlaylistAllJson ?? ""
+        activePlaylistIndex: configuration.ActivePlaylistAllIndex ?? -1
         active: contentMode === 8
         onApplyItem: function(item) {
             const t = item.weType || "scene"

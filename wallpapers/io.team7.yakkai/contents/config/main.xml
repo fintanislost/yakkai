@@ -154,5 +154,13 @@
       <label>Selected wallpaper type in All Wallpapers mode (scene/video/web)</label>
       <default>scene</default>
     </entry>
+    <entry name="PlaylistAllJson" type="String">
+      <label>JSON object containing all-type playlists</label>
+      <default></default>
+    </entry>
+    <entry name="ActivePlaylistAllIndex" type="Int">
+      <label>Index of the currently active all-type playlist</label>
+      <default>-1</default>
+    </entry>
   </group>
 </kcfg>

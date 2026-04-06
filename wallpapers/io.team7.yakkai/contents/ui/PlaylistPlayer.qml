@@ -102,6 +102,18 @@ QtObject {
         onTriggered: player.checkSchedule()
     }
 
-    onActiveChanged: tryApply()
-    onPlaylistDataChanged: if (active) tryApply()
+    onActiveChanged: {
+        currentIndex = 0
+        tryApply()
+    }
+    onPlaylistDataChanged: {
+        if (active) {
+            currentIndex = 0
+            tryApply()
+        }
+    }
+    onActivePlaylistIndexChanged: {
+        currentIndex = 0
+        if (active) tryApply()
+    }
 }

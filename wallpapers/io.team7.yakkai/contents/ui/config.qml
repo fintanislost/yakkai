@@ -359,7 +359,7 @@ Kirigami.FormLayout {
                     entry.value = p.value ?? 0
                 } else if (ptype === "combo" && p.options) {
                     entry.options = p.options
-                    entry.value = p.value ?? (p.options[0]?.value ?? "")
+                    entry.value = p.value !== undefined ? p.value : (p.options.length > 0 ? p.options[0].value : "")
                 } else if (ptype === "color") {
                     entry.value = p.value ?? "#ffffff"
                 } else {

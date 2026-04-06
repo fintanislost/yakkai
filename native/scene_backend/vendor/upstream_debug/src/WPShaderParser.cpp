@@ -440,8 +440,15 @@ vec3 PerformLighting_V1(vec3 worldPos, vec3 albedo, vec3 normal,
             std::string varName = m[4].str();
             std::string varType = m[3].str();
             // Check if this variable is assigned anywhere in the source
-            std::regex re_assign("\\b" + varName + R"(\s*[\.\[]?\s*[xyzwrgba]*\s*[\]]?\s*[+\-\*\/]?=)");
-            if (std::regex_search(res, re_assign)) {
+            // Use simple string search instead of regex to avoid catastrophic backtracking
+            bool isAssigned = false;
+            try {
+                isAssigned = res.find(varName + " =") != std::string::npos ||
+                             res.find(varName + "=") != std::string::npos ||
+                             res.find(varName + ".") != std::string::npos ||
+                             res.find(varName + "[") != std::string::npos;
+            } catch (...) {}
+            if (isAssigned) {
                 // Rename the in declaration and add a local copy
                 std::string prefixed = "_wp_in_" + varName;
                 patched = std::regex_replace(patched,

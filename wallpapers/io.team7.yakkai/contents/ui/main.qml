@@ -197,11 +197,11 @@ WallpaperItem {
     property bool videoMuted: configuration.VideoMuted ?? true
 
     readonly property bool localVideoMode: contentMode === 1
-    readonly property bool wallpaperEngineVideoMode: contentMode === 2 || (contentMode === 7 && umbrellaResolvedType === "video")
-    readonly property bool wallpaperEngineWebMode: contentMode === 3 || (contentMode === 7 && umbrellaResolvedType === "web")
+    readonly property bool wallpaperEngineVideoMode: contentMode === 2 || ((contentMode === 7 || contentMode === 8) && umbrellaResolvedType === "video")
+    readonly property bool wallpaperEngineWebMode: contentMode === 3 || ((contentMode === 7 || contentMode === 8) && umbrellaResolvedType === "web")
     readonly property bool legacySceneNativeMode: contentMode === 4 && wallpaperEngineSceneExperimentalEnabled
     readonly property bool wallpaperEngineSceneMode: contentMode === 4 && !legacySceneNativeMode
-    readonly property bool wallpaperEngineSceneNativeMode: contentMode === 5 || legacySceneNativeMode || contentMode === 6 || (contentMode === 7 && umbrellaResolvedType === "scene")
+    readonly property bool wallpaperEngineSceneNativeMode: contentMode === 5 || legacySceneNativeMode || contentMode === 6 || ((contentMode === 7 || contentMode === 8) && umbrellaResolvedType === "scene")
     readonly property bool playlistMode_: contentMode === 6
     readonly property bool videoMode: localVideoMode || wallpaperEngineVideoMode
     readonly property bool webMode: wallpaperEngineWebMode
@@ -215,10 +215,39 @@ WallpaperItem {
         videoSource: wallpaperEngineVideoSource.toString()
         webSource: wallpaperEngineWebSource.toString()
     }
-    readonly property string umbrellaResolvedType: contentMode === 7 ? umbrellaMode.resolvedType : ""
+    readonly property string umbrellaResolvedType: (contentMode === 7 || contentMode === 8)
+        ? (contentMode === 8 && playlistAllPlayer.currentItem ? playlistAllPlayer.currentType : umbrellaMode.resolvedType)
+        : ""
     onUmbrellaResolvedTypeChanged: {
-        if (contentMode === 7) {
+        if (contentMode === 7 || contentMode === 8) {
             log("umbrella resolved type: " + umbrellaResolvedType)
+        }
+    }
+
+    // Playlist (All) runtime
+    PlaylistPlayer {
+        id: playlistAllPlayer
+        playlistsJson: configuration.PlaylistsJson ?? ""
+        activePlaylistIndex: configuration.ActivePlaylistIndex ?? -1
+        active: contentMode === 8
+        onApplyItem: function(item) {
+            const t = item.weType || "scene"
+            log("playlist-all apply: " + (item.title || "?") + " type=" + t)
+            if (t === "scene") {
+                configuration.WESceneSource = item.sceneSource || ""
+                configuration.WESceneProjectPath = item.sceneProjectPath || ""
+                configuration.WESceneProjectTitle = item.sceneProjectTitle || ""
+                configuration.WESceneSourceKind = item.sceneSourceKind || ""
+                configuration.WEScenePropertiesJson = item.propertiesJson || ""
+                configuration.WESceneExperimentalEnabled = true
+                configuration.UmbrellaSelectedType = "scene"
+            } else if (t === "video") {
+                configuration.WEVideoSource = item.videoSource || ""
+                configuration.UmbrellaSelectedType = "video"
+            } else if (t === "web") {
+                configuration.WEWebSource = item.webSource || ""
+                configuration.UmbrellaSelectedType = "web"
+            }
         }
     }
     readonly property url activeVideoSource: wallpaperEngineVideoMode ? wallpaperEngineVideoSource : videoSource
@@ -368,7 +397,7 @@ WallpaperItem {
                 return root.sceneEmptyMessage
             })
             contentLoader.item.experimentalEnabled = Qt.binding(function() {
-                return root.sceneNativeMode || root.contentMode === 7
+                return root.sceneNativeMode || root.contentMode === 7 || root.contentMode === 8
             })
             return
         }

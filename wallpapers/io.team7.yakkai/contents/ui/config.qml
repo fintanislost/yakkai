@@ -186,7 +186,8 @@ Kirigami.FormLayout {
     readonly property bool wallpaperEngineWebContentMode: cfg_ContentMode === 3
     readonly property bool wallpaperEngineSceneContentMode: cfg_ContentMode === 4
     readonly property bool wallpaperEngineSceneNativeContentMode: cfg_ContentMode === 5
-    readonly property bool umbrellaContentMode: cfg_ContentMode === 7
+    readonly property bool umbrellaContentMode: cfg_ContentMode === 7 || cfg_ContentMode === 8
+    readonly property bool playlistAllContentMode: cfg_ContentMode === 8
     readonly property bool wallpaperEngineAnySceneContentMode: wallpaperEngineSceneContentMode || wallpaperEngineSceneNativeContentMode || playlistContentMode
     readonly property bool wallpaperEngineContentMode: wallpaperEngineVideoContentMode || wallpaperEngineWebContentMode || wallpaperEngineAnySceneContentMode || playlistContentMode || umbrellaContentMode
     // Umbrella needs its own scanner type — not always "scene"
@@ -653,7 +654,8 @@ Kirigami.FormLayout {
             qsTr("WE Scene (diagnostics)"),
             qsTr("WE Scene (native)"),
             qsTr("Playlist"),
-            qsTr("All Wallpapers")
+            qsTr("All Wallpapers"),
+            qsTr("Playlist (All)")
         ]
         currentIndex: root.cfg_ContentMode
 
@@ -1083,8 +1085,11 @@ Kirigami.FormLayout {
                         anchors.fill: parent
                         hoverEnabled: true
                         onClicked: {
-                            if (root.playlistContentMode && root.activePlaylist) {
-                                // In playlist mode, add to playlist
+                            if (root.playlistAllContentMode && playlistAllConfig.activePlaylist) {
+                                // Playlist (All) mode — add to playlist
+                                playlistAllConfig.addItem(modelData)
+                            } else if (root.playlistContentMode && root.activePlaylist) {
+                                // Playlist mode — add to playlist
                                 root.playlistAddFromPicker(modelData)
                             } else {
                                 // Normal mode, select wallpaper
@@ -1225,6 +1230,22 @@ Kirigami.FormLayout {
                 }
             }
         }
+    }
+
+    // ---- Playlist (All) section ----
+    Kirigami.Separator {
+        visible: root.playlistAllContentMode
+    }
+
+    PlaylistConfig {
+        id: playlistAllConfig
+        visible: root.playlistAllContentMode
+        Layout.fillWidth: true
+        Layout.maximumWidth: 460
+        playlistsJson: root.cfg_PlaylistsJson
+        activePlaylistIndex: root.cfg_ActivePlaylistIndex
+        onPlaylistsJsonChanged: function(json) { root.cfg_PlaylistsJson = json }
+        onActivePlaylistIndexChanged: function(index) { root.cfg_ActivePlaylistIndex = index }
     }
 
     // ---- Playlist section (visible when content mode is Playlist) ----

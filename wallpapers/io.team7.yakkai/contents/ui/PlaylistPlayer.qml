@@ -15,6 +15,7 @@ QtObject {
     property int activePlaylistIndex: -1
     property bool active: false
     property int currentIndex: 0
+    property var shuffleBag: []
 
     // Parsed data
     readonly property var playlistData: {
@@ -51,14 +52,27 @@ QtObject {
         }
     }
 
+    function fillShuffleBag() {
+        var bag = []
+        for (var i = 0; i < items.length; i++) {
+            if (i !== currentIndex) bag.push(i)
+        }
+        // Fisher-Yates shuffle
+        for (var j = bag.length - 1; j > 0; j--) {
+            var k = Math.floor(Math.random() * (j + 1))
+            var tmp = bag[j]; bag[j] = bag[k]; bag[k] = tmp
+        }
+        shuffleBag = bag
+    }
+
     function advance() {
         if (!items || items.length < 2) return
         if (cycleMode === 1) {
-            // Random
-            let next = Math.floor(Math.random() * items.length)
-            while (next === currentIndex && items.length > 1)
-                next = Math.floor(Math.random() * items.length)
-            currentIndex = next
+            // Shuffle bag: play every item before repeating
+            if (shuffleBag.length === 0) fillShuffleBag()
+            var bag = shuffleBag.slice()
+            currentIndex = bag.shift()
+            shuffleBag = bag
         } else {
             currentIndex = (currentIndex + 1) % items.length
         }
@@ -117,16 +131,19 @@ QtObject {
 
     onActiveChanged: {
         currentIndex = 0
+        shuffleBag = []
         tryApply()
     }
     onPlaylistDataChanged: {
         if (active) {
             currentIndex = 0
+            shuffleBag = []
             tryApply()
         }
     }
     onActivePlaylistIndexChanged: {
         currentIndex = 0
+        shuffleBag = []
         if (active) tryApply()
     }
 }

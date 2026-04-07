@@ -11,6 +11,9 @@ A KDE Plasma 6 wallpaper plugin with native Wallpaper Engine scene rendering sup
   - **Web** projects via QtWebEngine with WE API compatibility shim
   - **Scene** projects via a native Vulkan C++ renderer with puppet animation, particle systems, QuickJS script evaluation, and day-night cycle support
 - **Scene property editor** — in-settings controls for WE scene toggles (rain, snow, effects, etc.)
+- **Playlist mode** — sequential, random, or time-scheduled wallpaper cycling for scenes
+- **All Wallpapers picker** — unified browser across scene, video, and web types
+- **Playlist (All)** — playlists that mix scene, video, and web wallpapers
 - **Thumbnail wallpaper picker** — visual grid with previews and search
 
 ## Install
@@ -85,11 +88,14 @@ Add `--capture /tmp/output.png --capture-delay-ms 10000` for automated testing.
 | WE Web | Wallpaper Engine web projects via QtWebEngine |
 | WE Scene (diagnostics) | Safe scan/selection with placeholder diagnostics |
 | WE Scene (native) | Native Vulkan renderer for WE scene projects |
+| Playlist | Sequential, random, or scheduled cycling of scene wallpapers |
+| All Wallpapers | Unified picker across scene, video, and web types |
+| Playlist (All) | Playlists mixing scene, video, and web wallpapers |
 
 ## Native scene renderer
 
 The native backend supports:
-- **Textures**: TEXB v1-v4 with LZ4 decompression, BC1/BC2/BC3 formats, video textures via FFmpeg
+- **Textures**: TEXB v1-v4 with LZ4 decompression, BC1/BC2/BC3/BC7 formats, embedded PNG/JPEG detection, video textures via FFmpeg
 - **Puppets**: MDL bone animation with additive layer blending, UTF-8 names
 - **Shaders**: GLSL 150 preprocessing, `inverse()` polyfill stripping, varying type mismatch fix, `#require LightingV1` injection, ENABLEMASK/MASK combo mapping
 - **Effects**: Composelayer support, selective effect stripping for alpha compositing, colorkey preservation, flare/lens detection via colorBlendMode

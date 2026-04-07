@@ -961,13 +961,11 @@ Kirigami.FormLayout {
         }
 
         QQC2.Label {
-            text: root.wallpaperEngineScanError.length > 0
-                ? root.wallpaperEngineScanError
-                : root.wallpaperEngineScanStatus
+            text: root.wallpaperEngineScanError
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
-            visible: text.length > 0
-            color: root.wallpaperEngineScanError.length > 0 ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
+            visible: root.wallpaperEngineScanError.length > 0
+            color: Kirigami.Theme.negativeTextColor
         }
     }
 
@@ -1416,6 +1414,12 @@ Kirigami.FormLayout {
         text: qsTr("Show all content modes")
         checked: root.debugModes
         onToggled: root.debugModes = checked
+    }
+
+    QQC2.CheckBox {
+        text: qsTr("Verbose logging")
+        checked: root.cfg_VerboseLogging
+        onToggled: root.cfg_VerboseLogging = checked
     }
 
     // Playlist name dialog

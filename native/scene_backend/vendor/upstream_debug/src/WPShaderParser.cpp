@@ -431,13 +431,18 @@ vec3 PerformLighting_V1(vec3 worldPos, vec3 albedo, vec3 normal,
     // Fix mutable varying: WE shaders (OpenGL) write to varying inputs in
     // fragment shaders, but GLSL 150 core `in` variables are read-only.
     // Create local mutable copies for any `in` variable that is assigned.
+    //
+    // Two-pass approach: first collect varyings that need patching, then
+    // apply all replacements. This avoids iterator invalidation — modifying
+    // `patched` inside the regex_search loop would dangle searchStart.
     if (type == ShaderType::FRAGMENT) {
         std::regex re_in_decl(R"((\s+)(in)\s+([\w]+)\s+([\w]+)\s*;)");
         std::smatch m;
-        std::string patched = res;
-        std::string mainInit;
-        auto searchStart = patched.cbegin();
-        while (std::regex_search(searchStart, patched.cend(), m, re_in_decl)) {
+        // Pass 1: find all in-declarations whose variable is assigned.
+        struct VaryingPatch { std::string varType; std::string varName; };
+        std::vector<VaryingPatch> patches;
+        auto searchStart = res.cbegin();
+        while (std::regex_search(searchStart, res.cend(), m, re_in_decl)) {
             std::string varName = m[4].str();
             std::string varType = m[3].str();
             // Check if this variable is assigned anywhere in the source.
@@ -499,18 +504,23 @@ vec3 PerformLighting_V1(vec3 worldPos, vec3 albedo, vec3 normal,
                 }
             }
             if (varIsAssigned) {
-                // Rename the in declaration and add a local copy
-                std::string prefixed = "_wp_in_" + varName;
-                patched = std::regex_replace(patched,
-                    std::regex("\\bin\\s+" + varType + "\\s+" + varName + "\\s*;"),
-                    "in " + varType + " " + prefixed + ";");
-                mainInit += "  " + varType + " " + varName + " = " + prefixed + ";\n";
-                LOG_INFO("patched mutable varying: %s %s -> local copy from %s",
-                         varType.c_str(), varName.c_str(), prefixed.c_str());
+                patches.push_back({varType, varName});
             }
             searchStart = m.suffix().first;
         }
-        if (! mainInit.empty()) {
+        // Pass 2: apply collected patches (safe — no iterators into patched).
+        if (!patches.empty()) {
+            std::string patched = res;
+            std::string mainInit;
+            for (const auto& vp : patches) {
+                std::string prefixed = "_wp_in_" + vp.varName;
+                patched = std::regex_replace(patched,
+                    std::regex("\\bin\\s+" + vp.varType + "\\s+" + vp.varName + "\\s*;"),
+                    "in " + vp.varType + " " + prefixed + ";");
+                mainInit += "  " + vp.varType + " " + vp.varName + " = " + prefixed + ";\n";
+                LOG_INFO("patched mutable varying: %s %s -> local copy from %s",
+                         vp.varType.c_str(), vp.varName.c_str(), prefixed.c_str());
+            }
             auto mainPos = patched.find("void main()");
             if (mainPos != std::string::npos) {
                 auto bracePos = patched.find('{', mainPos);

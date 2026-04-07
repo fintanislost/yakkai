@@ -164,6 +164,7 @@ WallpaperItem {
         if (contentMode === 6) playlistTryApply()
     }
 
+    property bool verboseLogging: configuration.VerboseLogging ?? false
     property int contentMode: configuration.ContentMode ?? 0
     property color manualStartColor: configuration.StartColor ?? "#0b1f33"
     property color manualEndColor: configuration.EndColor ?? "#4d7cff"
@@ -357,6 +358,9 @@ WallpaperItem {
             })
             contentLoader.item.emptyMessage = Qt.binding(function() {
                 return root.videoEmptyMessage
+            })
+            contentLoader.item.verboseLogging = Qt.binding(function() {
+                return root.verboseLogging
             })
             return
         }

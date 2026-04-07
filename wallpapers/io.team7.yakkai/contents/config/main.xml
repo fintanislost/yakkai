@@ -162,5 +162,9 @@
       <label>Index of the currently active all-type playlist</label>
       <default>-1</default>
     </entry>
+    <entry name="VerboseLogging" type="Bool">
+      <label>Enable verbose per-frame logging for debugging</label>
+      <default>false</default>
+    </entry>
   </group>
 </kcfg>

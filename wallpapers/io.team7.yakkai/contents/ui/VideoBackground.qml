@@ -14,6 +14,7 @@ Item {
     property string emptyMessage: qsTr("Select a local video file in the wallpaper settings.")
     property int fillModeValue: 0
     property bool muted: true
+    property bool verboseLogging: false
     property int stalledTicks: 0
     property int previousPosition: -1
     property int receivedFrameCount: 0
@@ -130,6 +131,7 @@ Item {
     }
 
     function logState(reason) {
+        if (!verboseLogging) return
         log(reason
             + " source=" + String(videoSource)
             + " playerSource=" + String(player.source)

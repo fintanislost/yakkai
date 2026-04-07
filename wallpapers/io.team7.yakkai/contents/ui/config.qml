@@ -1,5 +1,5 @@
 /*
-    SPDX-FileCopyrightText: 2026 Papercompany
+    SPDX-FileCopyrightText: 2026 Team7
 
     SPDX-License-Identifier: MIT
 */
@@ -645,23 +645,40 @@ Kirigami.FormLayout {
         }
     }
 
+    property bool debugModes: false
+
+    readonly property var allContentModes: [
+        { label: qsTr("Gradient"),                mode: 0 },
+        { label: qsTr("Video"),                   mode: 1 },
+        { label: qsTr("WE Video"),                mode: 2 },
+        { label: qsTr("WE Web"),                  mode: 3 },
+        { label: qsTr("WE Scene (diagnostics)"),  mode: 4 },
+        { label: qsTr("WE Scene (native)"),       mode: 5 },
+        { label: qsTr("Playlist"),                mode: 6 },
+        { label: qsTr("All Wallpapers"),          mode: 7 },
+        { label: qsTr("Playlist (All)"),          mode: 8 }
+    ]
+    readonly property var visibleContentModes: {
+        if (debugModes) return allContentModes
+        return allContentModes.filter(function(e) { return e.mode === 7 || e.mode === 8 })
+    }
+
     QQC2.ComboBox {
         id: contentModeComboBox
         Kirigami.FormData.label: qsTr("Content:")
-        model: [
-            qsTr("Gradient"),
-            qsTr("Video"),
-            qsTr("WE Video"),
-            qsTr("WE Web"),
-            qsTr("WE Scene (diagnostics)"),
-            qsTr("WE Scene (native)"),
-            qsTr("Playlist"),
-            qsTr("All Wallpapers"),
-            qsTr("Playlist (All)")
-        ]
-        currentIndex: root.cfg_ContentMode
+        model: root.visibleContentModes.map(function(e) { return e.label })
+        currentIndex: {
+            const modes = root.visibleContentModes
+            for (let i = 0; i < modes.length; i++)
+                if (modes[i].mode === root.cfg_ContentMode) return i
+            return 0
+        }
 
-        onActivated: root.cfg_ContentMode = currentIndex
+        onActivated: {
+            const modes = root.visibleContentModes
+            if (currentIndex >= 0 && currentIndex < modes.length)
+                root.cfg_ContentMode = modes[currentIndex].mode
+        }
     }
 
     QQC2.ComboBox {
@@ -1113,11 +1130,9 @@ Kirigami.FormLayout {
         }
 
         QQC2.Label {
-            text: root.currentWallpaperEngineItems.length === 0
-                ? qsTr("Select a Steam library, scan, and choose a wallpaper.")
-                : qsTr("%1 wallpapers found").arg(root.currentWallpaperEngineItems.length)
+            text: qsTr("Select a Steam library, scan, and choose a wallpaper.")
             opacity: 0.7
-            visible: wallpaperGrid.count === 0 || root.currentWallpaperEngineItems.length > 0
+            visible: root.currentWallpaperEngineItems.length === 0
         }
     }
 
@@ -1391,6 +1406,16 @@ Kirigami.FormLayout {
         wrapMode: Text.WordWrap
         Layout.fillWidth: true
         opacity: 0.7
+    }
+
+    // ---- Debug section ----
+    Kirigami.Separator {}
+
+    QQC2.CheckBox {
+        Kirigami.FormData.label: qsTr("Debug:")
+        text: qsTr("Show all content modes")
+        checked: root.debugModes
+        onToggled: root.debugModes = checked
     }
 
     // Playlist name dialog

@@ -1,5 +1,5 @@
 /*
-    SPDX-FileCopyrightText: 2026 Papercompany
+    SPDX-FileCopyrightText: 2026 Team7
 
     SPDX-License-Identifier: MIT
 */

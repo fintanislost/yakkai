@@ -12,6 +12,7 @@
 
 #include "Vulkan/ShaderComp.hpp"
 
+#include <algorithm>
 #include <regex>
 #include <fstream>
 #include <stack>
@@ -439,9 +440,65 @@ vec3 PerformLighting_V1(vec3 worldPos, vec3 albedo, vec3 normal,
         while (std::regex_search(searchStart, patched.cend(), m, re_in_decl)) {
             std::string varName = m[4].str();
             std::string varType = m[3].str();
-            // Check if this variable is assigned anywhere in the source
-            std::regex re_assign("\\b" + varName + R"(\s*[\.\[]?\s*[xyzwrgba]*\s*[\]]?\s*[+\-\*\/]?=)");
-            if (std::regex_search(res, re_assign)) {
+            // Check if this variable is assigned anywhere in the source.
+            // Uses a deterministic string scan instead of std::regex to avoid
+            // catastrophic backtracking / stack overflow on complex shaders.
+            bool varIsAssigned = false;
+            {
+                size_t sp = 0;
+                while ((sp = res.find(varName, sp)) != std::string::npos) {
+                    // word boundary before
+                    if (sp > 0 && (std::isalnum((unsigned char)res[sp - 1]) || res[sp - 1] == '_')) {
+                        sp += varName.size(); continue;
+                    }
+                    // skip local declarations: "type varName =" is not a varying assignment
+                    if (sp > 0) {
+                        size_t bk = sp;
+                        while (bk > 0 && std::isspace((unsigned char)res[bk - 1])) bk--;
+                        size_t wEnd = bk;
+                        while (bk > 0 && (std::isalnum((unsigned char)res[bk - 1]) || res[bk - 1] == '_')) bk--;
+                        std::string prev = res.substr(bk, wEnd - bk);
+                        if (prev == varType || prev == "float" || prev == "int" || prev == "uint" ||
+                            prev == "bool" || prev == "vec2" || prev == "vec3" || prev == "vec4" ||
+                            prev == "ivec2" || prev == "ivec3" || prev == "ivec4" ||
+                            prev == "mat2" || prev == "mat3" || prev == "mat4") {
+                            sp += varName.size(); continue;
+                        }
+                    }
+                    size_t p = sp + varName.size();
+                    // word boundary after
+                    if (p < res.size() && (std::isalnum((unsigned char)res[p]) || res[p] == '_')) {
+                        sp = p; continue;
+                    }
+                    // skip whitespace
+                    while (p < res.size() && std::isspace((unsigned char)res[p])) p++;
+                    // optional .swizzle
+                    if (p < res.size() && res[p] == '.') {
+                        p++;
+                        while (p < res.size() && std::string("xyzwrgba").find(res[p]) != std::string::npos) p++;
+                    }
+                    // optional [index]
+                    if (p < res.size() && res[p] == '[') {
+                        auto cl = res.find(']', p);
+                        if (cl != std::string::npos) p = cl + 1;
+                    }
+                    // skip whitespace
+                    while (p < res.size() && std::isspace((unsigned char)res[p])) p++;
+                    // check for assignment operator (= but not ==, +=, -=, *=, /=)
+                    if (p < res.size()) {
+                        char c = res[p];
+                        if (c == '=' && (p + 1 >= res.size() || res[p + 1] != '=')) {
+                            varIsAssigned = true; break;
+                        }
+                        if ((c == '+' || c == '-' || c == '*' || c == '/') &&
+                            p + 1 < res.size() && res[p + 1] == '=') {
+                            varIsAssigned = true; break;
+                        }
+                    }
+                    sp = p;
+                }
+            }
+            if (varIsAssigned) {
                 // Rename the in declaration and add a local copy
                 std::string prefixed = "_wp_in_" + varName;
                 patched = std::regex_replace(patched,

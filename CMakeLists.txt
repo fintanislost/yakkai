@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(PaperCompany LANGUAGES C CXX)
+project(Yakkai LANGUAGES C CXX)
 
 option(YAKKAI_BUILD_SCENE_BACKEND "Build the Yakkai scene backend scaffold" ON)
 option(YAKKAI_BUILD_SCENE_HARNESS "Build the standalone scene harness app" ON)

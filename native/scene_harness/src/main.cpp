@@ -41,7 +41,7 @@ int main(int argc, char* argv[])
 {
     QGuiApplication app(argc, argv);
     QCoreApplication::setApplicationName(QStringLiteral("yakkai_scene_harness"));
-    QCoreApplication::setOrganizationName(QStringLiteral("Papercompany"));
+    QCoreApplication::setOrganizationName(QStringLiteral("Team7"));
 
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("Standalone Yakkai scene harness"));

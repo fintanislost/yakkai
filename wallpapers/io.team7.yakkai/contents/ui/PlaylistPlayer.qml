@@ -69,15 +69,17 @@ QtObject {
         if (!items || items.length === 0) return
         const now = new Date()
         const nowMins = now.getHours() * 60 + now.getMinutes()
-        let bestIdx = 0
         let bestMins = -1
+        let candidates = []
         for (let i = 0; i < items.length; i++) {
             const t = items[i].scheduleTime || "00:00"
             const parts = t.split(":")
             const mins = parseInt(parts[0] || "0") * 60 + parseInt(parts[1] || "0")
             if (mins <= nowMins && mins > bestMins) {
                 bestMins = mins
-                bestIdx = i
+                candidates = [i]
+            } else if (mins <= nowMins && mins === bestMins) {
+                candidates.push(i)
             }
         }
         if (bestMins < 0) {
@@ -85,9 +87,15 @@ QtObject {
                 const t = items[i].scheduleTime || "00:00"
                 const parts = t.split(":")
                 const mins = parseInt(parts[0] || "0") * 60 + parseInt(parts[1] || "0")
-                if (mins > bestMins) { bestMins = mins; bestIdx = i }
+                if (mins > bestMins) {
+                    bestMins = mins
+                    candidates = [i]
+                } else if (mins === bestMins) {
+                    candidates.push(i)
+                }
             }
         }
+        const bestIdx = candidates[Math.floor(Math.random() * candidates.length)]
         currentIndex = bestIdx
         applyItem(items[bestIdx])
     }

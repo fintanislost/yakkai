@@ -1,5 +1,5 @@
 /*
-    SPDX-FileCopyrightText: 2026 Papercompany
+    SPDX-FileCopyrightText: 2026 Team7
 
     SPDX-License-Identifier: MIT
 */
@@ -181,15 +181,46 @@ WallpaperItem {
     property color nightStartColor: configuration.NightStartColor ?? "#0b1f33"
     property color nightEndColor: configuration.NightEndColor ?? "#4d7cff"
     property url videoSource: resolvedVideoSource(configuration.VideoSource ?? "")
-    property url wallpaperEngineVideoSource: resolvedVideoSource(configuration.WEVideoSource ?? "")
+    // In playlist-all mode (8), derive sources directly from the playlist player's
+    // current item rather than configuration.WE*Source. This avoids a race where
+    // Plasma's config batch commit overwrites the sources with stale cfg_ values.
+    readonly property bool playlistAllDriven: contentMode === 8
+        && playlistAllPlayer.active && playlistAllPlayer.currentItem !== null
+    readonly property var playlistAllItem: playlistAllDriven ? playlistAllPlayer.currentItem : null
+
+    property url wallpaperEngineVideoSource: {
+        if (playlistAllItem && playlistAllPlayer.currentType === "video")
+            return resolvedVideoSource(playlistAllItem.videoSource || "")
+        return resolvedVideoSource(configuration.WEVideoSource ?? "")
+    }
     property string wallpaperEngineVideoProjectTitle: configuration.WEVideoProjectTitle ?? ""
-    property url wallpaperEngineWebSource: resolvedVideoSource(configuration.WEWebSource ?? "")
+    property url wallpaperEngineWebSource: {
+        if (playlistAllItem && playlistAllPlayer.currentType === "web")
+            return resolvedVideoSource(playlistAllItem.webSource || "")
+        return resolvedVideoSource(configuration.WEWebSource ?? "")
+    }
     property string wallpaperEngineWebProjectTitle: configuration.WEWebProjectTitle ?? ""
     property string wallpaperEngineWebPropertiesJson: configuration.WEWebPropertiesJson ?? ""
-    property url wallpaperEngineSceneSource: resolvedVideoSource(configuration.WESceneSource ?? "")
-    property string wallpaperEngineSceneProjectTitle: configuration.WESceneProjectTitle ?? ""
-    property string wallpaperEngineSceneSourceKind: configuration.WESceneSourceKind ?? ""
-    property string wallpaperEngineScenePropertiesJson: configuration.WEScenePropertiesJson ?? ""
+    property url wallpaperEngineSceneSource: {
+        if (playlistAllItem && playlistAllPlayer.currentType === "scene")
+            return resolvedVideoSource(playlistAllItem.sceneSource || "")
+        return resolvedVideoSource(configuration.WESceneSource ?? "")
+    }
+    property string wallpaperEngineSceneProjectTitle: {
+        if (playlistAllItem && playlistAllPlayer.currentType === "scene")
+            return playlistAllItem.sceneProjectTitle || ""
+        return configuration.WESceneProjectTitle ?? ""
+    }
+    property string wallpaperEngineSceneSourceKind: {
+        if (playlistAllItem && playlistAllPlayer.currentType === "scene")
+            return playlistAllItem.sceneSourceKind || ""
+        return configuration.WESceneSourceKind ?? ""
+    }
+    property string wallpaperEngineScenePropertiesJson: {
+        if (playlistAllItem && playlistAllPlayer.currentType === "scene")
+            return playlistAllItem.propertiesJson || ""
+        return configuration.WEScenePropertiesJson ?? ""
+    }
     property bool wallpaperEngineSceneExperimentalEnabled: configuration.WESceneExperimentalEnabled ?? false
     property bool wallpaperEngineSceneMouseInput: configuration.WESceneMouseInput ?? false
     property string wallpaperEngineLibraryPath: configuration.WEVideoLibraryPath ?? ""
@@ -231,23 +262,9 @@ WallpaperItem {
         activePlaylistIndex: parseInt(configuration.ActivePlaylistAllIndex) >= 0 ? parseInt(configuration.ActivePlaylistAllIndex) : -1
         active: contentMode === 8 && playlistsJson.length > 0 && activePlaylistIndex >= 0
         onApplyItem: function(item) {
-            const t = item.weType || "scene"
-            log("playlist-all apply: " + (item.title || "?") + " type=" + t)
-            if (t === "scene") {
-                configuration.WESceneSource = item.sceneSource || ""
-                configuration.WESceneProjectPath = item.sceneProjectPath || ""
-                configuration.WESceneProjectTitle = item.sceneProjectTitle || ""
-                configuration.WESceneSourceKind = item.sceneSourceKind || ""
-                configuration.WEScenePropertiesJson = item.propertiesJson || ""
-                configuration.WESceneExperimentalEnabled = true
-                configuration.UmbrellaSelectedType = "scene"
-            } else if (t === "video") {
-                configuration.WEVideoSource = item.videoSource || ""
-                configuration.UmbrellaSelectedType = "video"
-            } else if (t === "web") {
-                configuration.WEWebSource = item.webSource || ""
-                configuration.UmbrellaSelectedType = "web"
-            }
+            // Source properties are now derived reactively from currentItem —
+            // no need to write to configuration.WE*Source here.
+            log("playlist-all apply: " + (item.title || "?") + " type=" + (item.weType || "scene"))
         }
     }
     readonly property url activeVideoSource: wallpaperEngineVideoMode ? wallpaperEngineVideoSource : videoSource

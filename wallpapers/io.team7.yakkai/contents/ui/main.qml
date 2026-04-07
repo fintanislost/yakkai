@@ -165,6 +165,15 @@ WallpaperItem {
     }
 
     property bool verboseLogging: configuration.VerboseLogging ?? false
+    property string postEffect: configuration.PostEffect ?? "none"
+    property real crtScanline: (configuration.CrtScanline ?? 30) / 100.0
+    property real crtCurvature: (configuration.CrtCurvature ?? 25) / 100.0
+    property real crtAberration: (configuration.CrtAberration ?? 25) / 100.0
+    property real crtVignette: (configuration.CrtVignette ?? 50) / 100.0
+    property real crtPhosphor: (configuration.CrtPhosphor ?? 20) / 100.0
+    property real crtBrightness: (configuration.CrtBrightness ?? 20) / 100.0
+    property real crtVibrance: (configuration.CrtVibrance ?? 0) / 100.0
+    property real crtZoom: (configuration.CrtZoom ?? 0) / 100.0
     property int contentMode: configuration.ContentMode ?? 0
     property color manualStartColor: configuration.StartColor ?? "#0b1f33"
     property color manualEndColor: configuration.EndColor ?? "#4d7cff"
@@ -280,6 +289,7 @@ WallpaperItem {
     property bool contentLoadFailed: false
     property string contentLoadErrorText: ""
 
+    onPostEffectChanged: log("postEffect=" + postEffect + " active=" + postEffectActive)
     onVideoSourceChanged: log("videoSource=" + String(videoSource))
     onWallpaperEngineVideoSourceChanged: log("wallpaperEngineVideoSource=" + String(wallpaperEngineVideoSource))
     onWallpaperEngineWebSourceChanged: log("wallpaperEngineWebSource=" + String(wallpaperEngineWebSource))
@@ -500,5 +510,34 @@ WallpaperItem {
         text: root.contentLoadErrorText
         visible: root.contentLoadFailed
         z: 11
+    }
+
+    // --- Post-processing shader pipeline ---
+    // Only active when an effect is selected; avoids FBO overhead otherwise.
+    readonly property bool postEffectActive: postEffect !== "none"
+
+    ShaderEffectSource {
+        id: postEffectSource
+        sourceItem: contentLoader
+        hideSource: root.postEffectActive
+        live: root.postEffectActive
+        visible: false
+    }
+
+    ShaderEffect {
+        anchors.fill: parent
+        visible: root.postEffectActive
+        property variant source: postEffectSource
+        property real resWidth: width
+        property real resHeight: height
+        property real scanlineIntensity: root.crtScanline
+        property real curvature: root.crtCurvature
+        property real aberration: root.crtAberration
+        property real vignetteStrength: root.crtVignette
+        property real phosphorIntensity: root.crtPhosphor
+        property real brightness: root.crtBrightness
+        property real vibrance: root.crtVibrance
+        property real zoom: root.crtZoom
+        fragmentShader: root.postEffect === "crt" ? "shaders/crt.frag.qsb" : ""
     }
 }

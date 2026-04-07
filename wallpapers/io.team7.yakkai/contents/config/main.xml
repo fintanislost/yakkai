@@ -162,6 +162,42 @@
       <label>Index of the currently active all-type playlist</label>
       <default>-1</default>
     </entry>
+    <entry name="PostEffect" type="String">
+      <label>Post-processing shader effect applied over the wallpaper</label>
+      <default>none</default>
+    </entry>
+    <entry name="CrtScanline" type="Int">
+      <label>CRT scanline intensity (0-100)</label>
+      <default>30</default>
+    </entry>
+    <entry name="CrtCurvature" type="Int">
+      <label>CRT barrel distortion (0-100)</label>
+      <default>25</default>
+    </entry>
+    <entry name="CrtAberration" type="Int">
+      <label>CRT chromatic aberration (0-100)</label>
+      <default>25</default>
+    </entry>
+    <entry name="CrtVignette" type="Int">
+      <label>CRT vignette edge darkening (0-100)</label>
+      <default>50</default>
+    </entry>
+    <entry name="CrtPhosphor" type="Int">
+      <label>CRT phosphor mask intensity (0-100)</label>
+      <default>20</default>
+    </entry>
+    <entry name="CrtBrightness" type="Int">
+      <label>CRT brightness boost (0-100)</label>
+      <default>20</default>
+    </entry>
+    <entry name="CrtZoom" type="Int">
+      <label>CRT zoom to crop curvature edges (0-100)</label>
+      <default>0</default>
+    </entry>
+    <entry name="CrtVibrance" type="Int">
+      <label>CRT digital vibrance / saturation boost (0-100)</label>
+      <default>0</default>
+    </entry>
     <entry name="VerboseLogging" type="Bool">
       <label>Enable verbose per-frame logging for debugging</label>
       <default>false</default>

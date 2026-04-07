@@ -67,6 +67,16 @@ Kirigami.FormLayout {
     property int cfg_ActivePlaylistIndex
     property string cfg_PlaylistAllJson
     property int cfg_ActivePlaylistAllIndex
+    property string cfg_PostEffect: "none"
+    property int cfg_CrtScanline: 30
+    property int cfg_CrtCurvature: 25
+    property int cfg_CrtAberration: 25
+    property int cfg_CrtVignette: 50
+    property int cfg_CrtPhosphor: 20
+    property int cfg_CrtBrightness: 20
+    property int cfg_CrtVibrance: 0
+    property int cfg_CrtZoom: 0
+    property bool cfg_VerboseLogging
 
     property var playlistData: {
         if (!cfg_PlaylistsJson || cfg_PlaylistsJson.length === 0) return { playlists: [] }
@@ -1404,6 +1414,69 @@ Kirigami.FormLayout {
         wrapMode: Text.WordWrap
         Layout.fillWidth: true
         opacity: 0.7
+    }
+
+    // ---- Post-processing ----
+    Kirigami.Separator {}
+
+    readonly property var postEffects: [
+        { label: qsTr("None"), value: "none" },
+        { label: qsTr("CRT"), value: "crt" }
+    ]
+
+    QQC2.ComboBox {
+        Kirigami.FormData.label: qsTr("Shader effect:")
+        model: root.postEffects.map(function(e) { return e.label })
+        currentIndex: {
+            const effects = root.postEffects
+            for (let i = 0; i < effects.length; i++)
+                if (effects[i].value === root.cfg_PostEffect) return i
+            return 0
+        }
+        onActivated: {
+            const effects = root.postEffects
+            if (currentIndex >= 0 && currentIndex < effects.length)
+                root.cfg_PostEffect = effects[currentIndex].value
+        }
+    }
+
+    // CRT shader controls
+    ColumnLayout {
+        Kirigami.FormData.label: qsTr("CRT settings:")
+        visible: root.cfg_PostEffect === "crt"
+        Layout.fillWidth: true
+        Layout.maximumWidth: 460
+
+        Repeater {
+            model: [
+                { label: qsTr("Scanlines"), prop: "cfg_CrtScanline" },
+                { label: qsTr("Curvature"), prop: "cfg_CrtCurvature" },
+                { label: qsTr("Aberration"), prop: "cfg_CrtAberration" },
+                { label: qsTr("Vignette"), prop: "cfg_CrtVignette" },
+                { label: qsTr("Phosphor"), prop: "cfg_CrtPhosphor" },
+                { label: qsTr("Brightness"), prop: "cfg_CrtBrightness" },
+                { label: qsTr("Vibrance"), prop: "cfg_CrtVibrance" },
+                { label: qsTr("Zoom"), prop: "cfg_CrtZoom" }
+            ]
+
+            delegate: RowLayout {
+                Layout.fillWidth: true
+                QQC2.Label {
+                    text: modelData.label
+                    Layout.minimumWidth: 80
+                }
+                QQC2.Slider {
+                    Layout.fillWidth: true
+                    from: 0; to: 100; stepSize: 1
+                    value: root[modelData.prop]
+                    onMoved: root[modelData.prop] = value
+                }
+                QQC2.Label {
+                    text: Math.round(root[modelData.prop]) + "%"
+                    Layout.minimumWidth: 35
+                }
+            }
+        }
     }
 
     // ---- Debug section ----

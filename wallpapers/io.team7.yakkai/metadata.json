@@ -4,7 +4,7 @@
         "Authors": [
             {
                 "Email": "noreply@example.invalid",
-                "Name": "Papercompany"
+                "Name": "Team7"
             }
         ],
         "ServiceTypes": [
@@ -15,7 +15,7 @@
         "Id": "io.team7.yakkai",
         "License": "MIT",
         "Name": "Yakkai",
-        "Version": "0.9.0"
+        "Version": "0.1.1"
     },
     "X-KDE-ParentApp": "org.kde.plasmashell",
     "X-Plasma-MainScript": "ui/main.qml"

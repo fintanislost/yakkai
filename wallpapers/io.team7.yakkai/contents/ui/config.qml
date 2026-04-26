@@ -421,8 +421,6 @@ Kirigami.FormLayout {
             root.cfg_WEVideoProjectTitle = ""
             root.cfg_WEVideoSource = ""
         }
-
-        wallpaperEngineProjectComboBox.currentIndex = -1
     }
 
     property string cfg_UmbrellaSelectedType
@@ -471,7 +469,6 @@ Kirigami.FormLayout {
             : (projectType === "scene" ? wallpaperEngineSceneItems : wallpaperEngineVideoItems)
 
         if (items.length === 0) {
-            wallpaperEngineProjectComboBox.currentIndex = -1
             return
         }
 
@@ -499,7 +496,6 @@ Kirigami.FormLayout {
             index = 0
         }
 
-        wallpaperEngineProjectComboBox.currentIndex = index
         applyWallpaperEngineSelection(index)
     }
 

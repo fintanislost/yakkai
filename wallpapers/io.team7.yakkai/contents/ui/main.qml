@@ -174,7 +174,7 @@ WallpaperItem {
     property real crtBrightness: (configuration.CrtBrightness ?? 20) / 100.0
     property real crtVibrance: (configuration.CrtVibrance ?? 0) / 100.0
     property real crtZoom: (configuration.CrtZoom ?? 0) / 100.0
-    property int contentMode: configuration.ContentMode ?? 0
+    property int contentMode: configuration.ContentMode ?? 7
     property color manualStartColor: configuration.StartColor ?? "#0b1f33"
     property color manualEndColor: configuration.EndColor ?? "#4d7cff"
     property int baseAngle: configuration.Angle ?? 125
@@ -513,31 +513,45 @@ WallpaperItem {
     }
 
     // --- Post-processing shader pipeline ---
-    // Only active when an effect is selected; avoids FBO overhead otherwise.
+    // Loaded only when an effect is selected. Keeping ShaderEffectSource
+    // permanently in the tree was capturing contentLoader to an FBO even
+    // with live:false, breaking native Vulkan compositing.
     readonly property bool postEffectActive: postEffect !== "none"
 
-    ShaderEffectSource {
-        id: postEffectSource
-        sourceItem: contentLoader
-        hideSource: root.postEffectActive
-        live: root.postEffectActive
-        visible: false
+    Loader {
+        anchors.fill: parent
+        active: root.postEffectActive
+        sourceComponent: postEffectComponent
+        z: 10
     }
 
-    ShaderEffect {
-        anchors.fill: parent
-        visible: root.postEffectActive
-        property variant source: postEffectSource
-        property real resWidth: width
-        property real resHeight: height
-        property real scanlineIntensity: root.crtScanline
-        property real curvature: root.crtCurvature
-        property real aberration: root.crtAberration
-        property real vignetteStrength: root.crtVignette
-        property real phosphorIntensity: root.crtPhosphor
-        property real brightness: root.crtBrightness
-        property real vibrance: root.crtVibrance
-        property real zoom: root.crtZoom
-        fragmentShader: root.postEffect === "crt" ? "shaders/crt.frag.qsb" : ""
+    Component {
+        id: postEffectComponent
+        Item {
+            anchors.fill: parent
+            ShaderEffectSource {
+                id: postEffectSource
+                anchors.fill: parent
+                sourceItem: contentLoader
+                hideSource: true
+                live: true
+                visible: false
+            }
+            ShaderEffect {
+                anchors.fill: parent
+                property variant source: postEffectSource
+                property real resWidth: width
+                property real resHeight: height
+                property real scanlineIntensity: root.crtScanline
+                property real curvature: root.crtCurvature
+                property real aberration: root.crtAberration
+                property real vignetteStrength: root.crtVignette
+                property real phosphorIntensity: root.crtPhosphor
+                property real brightness: root.crtBrightness
+                property real vibrance: root.crtVibrance
+                property real zoom: root.crtZoom
+                fragmentShader: root.postEffect === "crt" ? "shaders/crt.frag.qsb" : ""
+            }
+        }
     }
 }

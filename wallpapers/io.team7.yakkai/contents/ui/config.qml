@@ -19,6 +19,8 @@ Kirigami.FormLayout {
     wideMode: false
 
     property alias formLayout: root
+    property var configDialog
+    property var wallpaperConfiguration
 
     property var presets: [
         { name: qsTr("Custom") },
@@ -65,6 +67,7 @@ Kirigami.FormLayout {
     property bool cfg_WESceneMouseInput
     property string cfg_PlaylistsJson
     property int cfg_ActivePlaylistIndex
+    property string cfg_UmbrellaSelectedType
     property string cfg_PlaylistAllJson
     property int cfg_ActivePlaylistAllIndex
     property string cfg_PostEffect: "none"
@@ -247,10 +250,25 @@ Kirigami.FormLayout {
     // Track umbrella selection locally for immediate highlight feedback
     property string umbrellaSelectedProjectPath: ""
 
+    function savedWallpaperEngineProjectPath(projectType) {
+        if (projectType === "web") {
+            return root.cfg_WEWebProjectPath || ""
+        }
+
+        if (projectType === "video") {
+            return root.cfg_WEVideoProjectPath || ""
+        }
+
+        return root.cfg_WESceneProjectPath || ""
+    }
+
     readonly property var selectedWallpaperEngineProject: {
         let savedPath = ""
         if (umbrellaContentMode) {
-            savedPath = root.umbrellaSelectedProjectPath
+            savedPath = root.savedWallpaperEngineProjectPath(root.umbrellaCurrentType)
+            if (!savedPath || savedPath.length === 0) {
+                savedPath = root.umbrellaSelectedProjectPath
+            }
         } else {
             savedPath = wallpaperEngineAnySceneContentMode
                 ? root.cfg_WESceneProjectPath
@@ -291,6 +309,33 @@ Kirigami.FormLayout {
             root.cfg_ContentMode = 5
         } else {
             syncSceneModeFlags()
+        }
+    }
+
+    function wallpaperConfigurationKeys() {
+        if (!root.wallpaperConfiguration) {
+            return []
+        }
+
+        if (typeof root.wallpaperConfiguration.keys === "function") {
+            return root.wallpaperConfiguration.keys()
+        }
+
+        return Object.keys(root.wallpaperConfiguration)
+    }
+
+    function hydrateFromWallpaperConfiguration() {
+        if (!root.wallpaperConfiguration) {
+            return
+        }
+
+        const keys = wallpaperConfigurationKeys()
+        for (let i = 0; i < keys.length; i++) {
+            const key = keys[i]
+            const cfgKey = "cfg_" + key
+            if (cfgKey in root && root.wallpaperConfiguration[key] !== undefined) {
+                root[cfgKey] = root.wallpaperConfiguration[key]
+            }
         }
     }
 
@@ -422,8 +467,6 @@ Kirigami.FormLayout {
             root.cfg_WEVideoSource = ""
         }
     }
-
-    property string cfg_UmbrellaSelectedType
 
     function applyWallpaperEngineSelection(index) {
         const item = currentWallpaperEngineItems[index]
@@ -642,6 +685,7 @@ Kirigami.FormLayout {
     }
 
     Component.onCompleted: {
+        hydrateFromWallpaperConfiguration()
         migrateLegacySceneMode()
         startupComplete = true
         buildScenePropertyModel()
@@ -1057,7 +1101,7 @@ Kirigami.FormLayout {
                             source: modelData.previewPath ? ("file://" + modelData.previewPath) : ""
                             fillMode: Image.PreserveAspectCrop
                             asynchronous: true
-                            visible: modelData.previewPath && modelData.previewPath.length > 0
+                            visible: !!modelData.previewPath && modelData.previewPath.length > 0
 
                             Rectangle {
                                 anchors.fill: parent

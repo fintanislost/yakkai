@@ -20,6 +20,7 @@ Item {
     property int fillModeValue: 0
     property bool muted: true
     property string runtimeErrorText: ""
+    property string graphicsBackendName: ""
 
     property string sourceExistsStatus: qsTr("Not checked")
     property string assetsExistsStatus: qsTr("Not checked")
@@ -170,6 +171,15 @@ Item {
             color: "#d6deea"
             text: qsTr("Experimental native renderer enabled: %1")
                 .arg(experimentalEnabled ? qsTr("Yes") : qsTr("No"))
+        }
+
+        Text {
+            width: parent.width
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.WordWrap
+            color: "#d6deea"
+            visible: graphicsBackendName.length > 0
+            text: qsTr("Qt Quick graphics backend: %1").arg(graphicsBackendName)
         }
 
         Text {

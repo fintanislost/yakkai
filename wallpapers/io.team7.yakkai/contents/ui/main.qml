@@ -237,12 +237,17 @@ WallpaperItem {
     property int videoFillMode: configuration.VideoFillMode ?? 0
     property bool videoMuted: configuration.VideoMuted ?? true
 
-    readonly property bool localVideoMode: contentMode === 1
-    readonly property bool wallpaperEngineVideoMode: contentMode === 2 || ((contentMode === 7 || contentMode === 8) && umbrellaResolvedType === "video")
-    readonly property bool wallpaperEngineWebMode: contentMode === 3 || ((contentMode === 7 || contentMode === 8) && umbrellaResolvedType === "web")
+    readonly property bool localVideoMode: contentMode === 1 && String(videoSource).length > 0
+    readonly property bool wallpaperEngineVideoModeRaw: contentMode === 2 || ((contentMode === 7 || contentMode === 8) && umbrellaResolvedType === "video")
+    readonly property bool wallpaperEngineVideoMode: wallpaperEngineVideoModeRaw && String(wallpaperEngineVideoSource).length > 0
+    readonly property bool wallpaperEngineWebModeRaw: contentMode === 3 || ((contentMode === 7 || contentMode === 8) && umbrellaResolvedType === "web")
+    readonly property bool wallpaperEngineWebMode: wallpaperEngineWebModeRaw && String(wallpaperEngineWebSource).length > 0
     readonly property bool legacySceneNativeMode: contentMode === 4 && wallpaperEngineSceneExperimentalEnabled
     readonly property bool wallpaperEngineSceneMode: contentMode === 4 && !legacySceneNativeMode
-    readonly property bool wallpaperEngineSceneNativeMode: contentMode === 5 || legacySceneNativeMode || contentMode === 6 || ((contentMode === 7 || contentMode === 8) && umbrellaResolvedType === "scene")
+    // Gate scene-native mode on actually having a source. Loading the
+    // native backend with an empty path crashes TextureNode in libyakkai_scene_backend.
+    readonly property bool wallpaperEngineSceneNativeModeRaw: contentMode === 5 || legacySceneNativeMode || contentMode === 6 || ((contentMode === 7 || contentMode === 8) && umbrellaResolvedType === "scene")
+    readonly property bool wallpaperEngineSceneNativeMode: wallpaperEngineSceneNativeModeRaw && String(wallpaperEngineSceneSource).length > 0
     readonly property bool playlistMode_: contentMode === 6
     readonly property bool videoMode: localVideoMode || wallpaperEngineVideoMode
     readonly property bool webMode: wallpaperEngineWebMode

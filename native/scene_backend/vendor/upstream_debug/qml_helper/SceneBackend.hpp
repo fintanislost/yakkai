@@ -2,6 +2,7 @@
 
 #include <QtQuick/QQuickFramebufferObject>
 #include <QtCore/QLoggingCategory>
+#include <QtCore/QString>
 #include <QtCore/QTimer>
 #include <QtGui/QMouseEvent>
 #include <QtGui/QHoverEvent>
@@ -80,6 +81,7 @@ signals:
     void speedChanged();
     void volumeChanged();
     void firstFrame();
+    void backendError(QString message);
 
 private:
     QUrl m_source;
@@ -100,8 +102,10 @@ public:
 
 private:
     void setScenePropertyQurl(std::string_view, QUrl);
+    void reportBackendError(const QString& message);
     bool m_inited { false };
     bool m_enable_valid { false };
+    bool m_reportedBackendError { false };
 
     std::shared_ptr<wallpaper::SceneWallpaper> m_scene { nullptr };
 

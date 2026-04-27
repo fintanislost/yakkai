@@ -28,15 +28,42 @@ Item {
     property int runtimeFillModeValue: 0
     property bool runtimeMouseInputEnabled: false
 
+    readonly property bool openGlScenegraph: GraphicsInfo.api === GraphicsInfo.OpenGL
+    readonly property string graphicsBackendName: graphicsApiName()
     readonly property bool readyForExperimentalAttempt: experimentalEnabled
         && String(sceneSource).length > 0
         && String(assetsPath).length > 0
+        && openGlScenegraph
     readonly property string runtimeErrorText: runtimeLoader.status === Loader.Error
         ? qsTr("The experimental scene renderer failed to load. Yakkai stayed on the safe placeholder instead of invoking the renderer.")
-        : ""
+        : ((!openGlScenegraph && experimentalEnabled && String(sceneSource).length > 0 && String(assetsPath).length > 0)
+            ? qsTr("The experimental scene renderer needs Plasma's Qt Quick OpenGL backend. Plasma is currently using %1, so Yakkai stayed on the safe placeholder instead of invoking the native renderer.")
+                .arg(graphicsBackendName)
+            : "")
 
     function log(message) {
         console.log(logPrefix + " " + message)
+    }
+
+    function graphicsApiName() {
+        switch (GraphicsInfo.api) {
+        case GraphicsInfo.OpenGL:
+            return "OpenGL"
+        case GraphicsInfo.Software:
+            return "Software"
+        case GraphicsInfo.Direct3D11:
+            return "Direct3D11"
+        case GraphicsInfo.Vulkan:
+            return "Vulkan"
+        case GraphicsInfo.Metal:
+            return "Metal"
+        case GraphicsInfo.Null:
+            return "Null"
+        case GraphicsInfo.OpenVG:
+            return "OpenVG"
+        default:
+            return "Unknown(" + GraphicsInfo.api + ")"
+        }
     }
 
     function syncRuntimeInputs() {
@@ -108,13 +135,19 @@ Item {
         log("scene guard readyForExperimentalAttempt=" + readyForExperimentalAttempt)
         activateRuntime()
     }
+    onGraphicsBackendNameChanged: {
+        log("scene guard graphicsApi=" + graphicsBackendName + " openGlScenegraph=" + openGlScenegraph)
+        activateRuntime()
+    }
 
     Component.onCompleted: {
         log("scene guard completed source=" + String(sceneSource)
             + " assets=" + assetsPath
             + " experimentalEnabled=" + experimentalEnabled
             + " mouseInputEnabled=" + mouseInputEnabled
-            + " fillModeValue=" + fillModeValue)
+            + " fillModeValue=" + fillModeValue
+            + " graphicsApi=" + graphicsBackendName
+            + " openGlScenegraph=" + openGlScenegraph)
         activateRuntime()
     }
 
@@ -190,5 +223,6 @@ Item {
         emptyMessage: root.emptyMessage
         experimentalEnabled: root.experimentalEnabled
         runtimeErrorText: root.runtimeErrorText
+        graphicsBackendName: root.graphicsBackendName
     }
 }

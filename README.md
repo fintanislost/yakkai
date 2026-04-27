@@ -12,7 +12,7 @@ A KDE Plasma 6 wallpaper plugin with native Wallpaper Engine scene rendering sup
   - **Scene** projects via a native Vulkan C++ renderer with puppet animation, particle systems, QuickJS script evaluation, and day-night cycle support
 - **Scene property editor** — in-settings controls for WE scene toggles (rain, snow, effects, etc.)
 - **Playlist mode** — sequential, random, or time-scheduled wallpaper cycling for scenes
-- **All Wallpapers picker** — unified browser across scene, video, and web types
+- **All Wallpapers picker** — unified browser across scene, video, and web types, restoring the selected type and project from persisted Plasma config
 - **Playlist (All)** — playlists that mix scene, video, and web wallpapers
 - **Thumbnail wallpaper picker** — visual grid with previews and search
 
@@ -53,6 +53,14 @@ The native backend builds `libyakkai_scene_backend.so` and stages it into `wallp
 
 Add `--capture /tmp/output.png --capture-delay-ms 10000` for automated testing.
 
+### Settings persistence test
+
+```bash
+QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner \
+  -input tools/tst_config_persistence.qml \
+  -o -,txt -v2 -maxwarnings 0 -nocrashhandler
+```
+
 ## Repo layout
 
 ```
@@ -73,6 +81,7 @@ Add `--capture /tmp/output.png --capture-delay-ms 10000` for automated testing.
 │           └── ui/          # QML UI components
 ├── tools/                   # Development utilities
 │   ├── color-lab/           # Interactive color debugging web tool
+│   ├── tst_config_persistence.qml # QML regression test for settings persistence
 │   └── validate-scene.sh    # Automated render validator
 ├── smoke-tests/             # Regression test runner
 └── references/              # Third-party reference materials
@@ -95,6 +104,8 @@ Add `--capture /tmp/output.png --capture-delay-ms 10000` for automated testing.
 ## Native scene renderer
 
 The native backend supports:
+- **Qt Quick startup safety**: image-backed placeholder texture before the first external Vulkan frame
+- **Plasma backend guard**: the native scene runtime only starts when Plasma reports an OpenGL Qt Quick scenegraph; software-rendered Plasma sessions stay on the diagnostic placeholder instead of invoking the Vulkan/OpenGL interop path
 - **Textures**: TEXB v1-v4 with LZ4 decompression, BC1/BC2/BC3/BC7 formats, embedded PNG/JPEG detection, video textures via FFmpeg
 - **Puppets**: MDL bone animation with additive layer blending, UTF-8 names
 - **Shaders**: GLSL 150 preprocessing, `inverse()` polyfill stripping, varying type mismatch fix, `#require LightingV1` injection, ENABLEMASK/MASK combo mapping

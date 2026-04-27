@@ -222,7 +222,9 @@ Item {
         horizontalAlignment: Text.AlignHCenter
         wrapMode: Text.WordWrap
         color: "white"
-        text: qsTr("Starting experimental Wallpaper Engine scene renderer…")
+        text: String(player.backendStatus ?? "").length > 0
+            ? player.backendStatus
+            : qsTr("Starting experimental Wallpaper Engine scene renderer…")
         visible: !root.firstFrameSeen
     }
 }

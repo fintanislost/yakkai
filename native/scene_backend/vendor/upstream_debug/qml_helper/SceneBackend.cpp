@@ -6,6 +6,7 @@
 #include <QtCore/QThread>
 
 #include <QtGui/QGuiApplication>
+#include <QtGui/QImage>
 #include <QtGui/QOpenGLContext>
 #include <QtQuick/QQuickWindow>
 
@@ -64,6 +65,16 @@ QSGTexture* createTextureFromGl(uint32_t handle, QSize size, QQuickWindow* windo
 #endif
 }
 
+QSGTexture* createFallbackTexture(QQuickWindow* window) {
+    if (window == nullptr) {
+        return nullptr;
+    }
+
+    QImage image(QSize(64, 64), QImage::Format_RGBA8888);
+    image.fill(Qt::black);
+    return window->createTextureFromImage(image);
+}
+
 wallpaper::FillMode ToWPFillMode(int fillMode) {
     switch ((SceneObject::FillMode)fillMode) {
     case SceneObject::FillMode::STRETCH: return wallpaper::FillMode::STRETCH;
@@ -91,11 +102,17 @@ public:
           m_eatFrameOp(eatFrameOp),
           m_window(window),
           m_first_frame(false) {
-        // texture node must have a texture, so use the default 0 texture.
-        m_texture      = createTextureFromGl(0, QSize(64, 64), window);
+        // Use a real Qt-created placeholder until the external Vulkan frame arrives.
+        // Wrapping GL texture id 0 can produce an invalid QSGTexture and crash
+        // QSGSimpleTextureNode::setTexture() on Plasma/Qt 6.
+        m_texture      = createFallbackTexture(window);
         m_init_texture = m_texture;
-        setTexture(m_texture);
-        setFiltering(QSGTexture::Linear);
+        if (m_texture != nullptr) {
+            setTexture(m_texture);
+            setFiltering(QSGTexture::Linear);
+        } else {
+            qCWarning(wekdeScene, "failed to create initial fallback texture");
+        }
         setOwnsTexture(false);
     }
 
@@ -285,28 +302,56 @@ void SceneObject::resizeFb() {
     size.setHeight(this->height());
 }
 
+void SceneObject::reportBackendError(const QString& message) {
+    if (m_reportedBackendError) {
+        return;
+    }
+
+    m_reportedBackendError = true;
+    qCWarning(wekdeScene).noquote() << message;
+    Q_EMIT backendError(message);
+}
+
 QSGNode* SceneObject::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*) {
     TextureNode* node = static_cast<TextureNode*>(oldNode);
     if (! node) {
-        node = new TextureNode(window(), m_scene, m_enable_valid, [this](QQuickWindow* window) {
+        QQuickWindow* quickWindow = window();
+        node = new TextureNode(quickWindow, m_scene, m_enable_valid, [this](QQuickWindow* window) {
             return (QSGTexture*)nullptr;
         });
+
+        if (quickWindow == nullptr) {
+            reportBackendError(
+                QStringLiteral("Yakkai scene backend cannot start without a Qt Quick window."));
+            return node;
+        }
+
+        if (QOpenGLContext::currentContext() == nullptr) {
+            reportBackendError(QStringLiteral(
+                "Yakkai scene backend cannot start because Plasma is not rendering this wallpaper with a current OpenGL context."));
+            return node;
+        }
+
         if (node->initGl()) {
-            node->initVulkan(width()*window()->devicePixelRatio(), height()*window()->devicePixelRatio());
+            node->initVulkan(width()*quickWindow->devicePixelRatio(),
+                             height()*quickWindow->devicePixelRatio());
 
             connect(
-                node, &TextureNode::redraw, window(), &QQuickWindow::update, Qt::QueuedConnection);
-            connect(window(),
+                node, &TextureNode::redraw, quickWindow, &QQuickWindow::update, Qt::QueuedConnection);
+            connect(quickWindow,
                     &QQuickWindow::beforeRendering,
                     node,
                     &TextureNode::newTexture,
                     Qt::DirectConnection);
-            connect(window(),
+            connect(quickWindow,
                     &QQuickWindow::afterRendering,
                     node,
                     &TextureNode::frameRendered,
                     Qt::DirectConnection);
             connect(node, &TextureNode::sceneFirstFrame, this, &SceneObject::firstFrame);
+        } else {
+            reportBackendError(QStringLiteral(
+                "Yakkai scene backend failed to initialize OpenGL/GLAD for external scene textures."));
         }
     }
 

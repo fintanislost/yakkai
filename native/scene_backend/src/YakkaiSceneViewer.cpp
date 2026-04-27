@@ -35,6 +35,14 @@ YakkaiSceneViewer::YakkaiSceneViewer(QQuickItem* parent)
                     setBackendStatus(QStringLiteral("Vendored Yakkai scene backend rendered a first frame."));
                 }
             });
+    connect(this,
+            &scenebackend::SceneObject::backendError,
+            this,
+            [this](const QString& message) {
+                setBackendStatus(
+                    QStringLiteral("Vendored Yakkai scene backend could not start: %1")
+                        .arg(message));
+            });
     applyMouseInput();
 }
 

@@ -152,7 +152,7 @@
     </entry>
     <entry name="UmbrellaSelectedType" type="String">
       <label>Selected wallpaper type in All Wallpapers mode (scene/video/web)</label>
-      <default>scene</default>
+      <default>video</default>
     </entry>
     <entry name="PlaylistAllJson" type="String">
       <label>JSON object containing all-type playlists</label>

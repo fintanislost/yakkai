@@ -133,7 +133,9 @@ inline void ParseWPShader(const std::string& src, WPShaderInfo* pWPShaderInfo,
                     int32_t     value = 0;
                     GET_JSON_NAME_VALUE(combo_json, "combo", name);
                     GET_JSON_NAME_VALUE(combo_json, "default", value);
-                    combos[name] = std::to_string(value);
+                    if (combos.count(name) == 0) {
+                        combos[name] = std::to_string(value);
+                    }
                 }
             }
         } else if (line.find("uniform ") != std::string::npos) {

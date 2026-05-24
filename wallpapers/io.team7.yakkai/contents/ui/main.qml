@@ -5,12 +5,20 @@
 */
 
 import QtQuick
+import QtCore
 import org.kde.plasma.plasmoid
 
 WallpaperItem {
     id: root
 
     readonly property string logPrefix: "[Yakkai]"
+
+    Settings {
+        id: sharedPlaylistSettings
+        category: "io.team7.yakkai.playlists"
+        property string playlistsJson: ""
+        property string playlistAllJson: ""
+    }
 
     function resolvedVideoSource(value) {
         const asText = String(value ?? "")
@@ -46,7 +54,13 @@ WallpaperItem {
     }
 
     // Playlist runtime
-    property string playlistsJson: configuration.PlaylistsJson ?? ""
+    readonly property string effectivePlaylistsJson: sharedPlaylistSettings.playlistsJson.length > 0
+        ? sharedPlaylistSettings.playlistsJson
+        : String(configuration.PlaylistsJson || "")
+    readonly property string effectivePlaylistAllJson: sharedPlaylistSettings.playlistAllJson.length > 0
+        ? sharedPlaylistSettings.playlistAllJson
+        : String(configuration.PlaylistAllJson || "")
+    property string playlistsJson: effectivePlaylistsJson
     property int activePlaylistIndex: configuration.ActivePlaylistIndex ?? -1
     property var playlistData: {
         if (!playlistsJson || playlistsJson.length === 0) return { playlists: [] }
@@ -59,6 +73,16 @@ WallpaperItem {
     }
     property bool playlistActive: contentMode === 6 && activePlaylist !== null && (activePlaylist.items || []).length > 0
     property int playlistCurrentIndex: 0
+
+    function migrateSharedPlaylistSettings() {
+        const localPlaylistsJson = String(configuration.PlaylistsJson || "")
+        if (sharedPlaylistSettings.playlistsJson.length === 0 && localPlaylistsJson.length > 0)
+            sharedPlaylistSettings.playlistsJson = localPlaylistsJson
+
+        const localPlaylistAllJson = String(configuration.PlaylistAllJson || "")
+        if (sharedPlaylistSettings.playlistAllJson.length === 0 && localPlaylistAllJson.length > 0)
+            sharedPlaylistSettings.playlistAllJson = localPlaylistAllJson
+    }
 
     function playlistApplyItem(item) {
         if (!item) return
@@ -273,7 +297,7 @@ WallpaperItem {
     // Playlist (All) runtime
     PlaylistPlayer {
         id: playlistAllPlayer
-        playlistsJson: String(configuration.PlaylistAllJson || "")
+        playlistsJson: root.effectivePlaylistAllJson
         activePlaylistIndex: parseInt(configuration.ActivePlaylistAllIndex) >= 0 ? parseInt(configuration.ActivePlaylistAllIndex) : -1
         active: contentMode === 8 && playlistsJson.length > 0 && activePlaylistIndex >= 0
         onApplyItem: function(item) {
@@ -486,6 +510,7 @@ WallpaperItem {
     }
 
     Component.onCompleted: {
+        migrateSharedPlaylistSettings()
         log("wallpaper loaded contentMode=" + contentMode
             + " resolvedMediaSource=" + String(
                 videoMode

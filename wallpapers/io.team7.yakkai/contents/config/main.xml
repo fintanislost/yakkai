@@ -143,7 +143,7 @@
       <default>false</default>
     </entry>
     <entry name="PlaylistsJson" type="String">
-      <label>JSON object containing all playlists and active playlist index</label>
+      <label>Legacy per-monitor playlist JSON migrated into the shared playlist library</label>
       <default></default>
     </entry>
     <entry name="ActivePlaylistIndex" type="Int">
@@ -155,7 +155,7 @@
       <default>video</default>
     </entry>
     <entry name="PlaylistAllJson" type="String">
-      <label>JSON object containing all-type playlists</label>
+      <label>Legacy per-monitor all-type playlist JSON migrated into the shared playlist library</label>
       <default></default>
     </entry>
     <entry name="ActivePlaylistAllIndex" type="Int">

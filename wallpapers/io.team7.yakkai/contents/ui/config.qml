@@ -81,9 +81,40 @@ Kirigami.FormLayout {
     property int cfg_CrtZoom: 0
     property bool cfg_VerboseLogging
 
+    Settings {
+        id: sharedPlaylistSettings
+        category: "io.team7.yakkai.playlists"
+        property string playlistsJson: ""
+        property string playlistAllJson: ""
+    }
+
+    readonly property string effectivePlaylistsJson: sharedPlaylistSettings.playlistsJson.length > 0
+        ? sharedPlaylistSettings.playlistsJson
+        : cfg_PlaylistsJson
+    readonly property string effectivePlaylistAllJson: sharedPlaylistSettings.playlistAllJson.length > 0
+        ? sharedPlaylistSettings.playlistAllJson
+        : cfg_PlaylistAllJson
+
+    function setSharedPlaylistsJson(json) {
+        sharedPlaylistSettings.playlistsJson = json
+        cfg_PlaylistsJson = json
+    }
+
+    function setSharedPlaylistAllJson(json) {
+        sharedPlaylistSettings.playlistAllJson = json
+        cfg_PlaylistAllJson = json
+    }
+
+    function migrateSharedPlaylistSettings() {
+        if (sharedPlaylistSettings.playlistsJson.length === 0 && cfg_PlaylistsJson.length > 0)
+            sharedPlaylistSettings.playlistsJson = cfg_PlaylistsJson
+        if (sharedPlaylistSettings.playlistAllJson.length === 0 && cfg_PlaylistAllJson.length > 0)
+            sharedPlaylistSettings.playlistAllJson = cfg_PlaylistAllJson
+    }
+
     property var playlistData: {
-        if (!cfg_PlaylistsJson || cfg_PlaylistsJson.length === 0) return { playlists: [] }
-        try { return JSON.parse(cfg_PlaylistsJson) } catch(e) { return { playlists: [] } }
+        if (!effectivePlaylistsJson || effectivePlaylistsJson.length === 0) return { playlists: [] }
+        try { return JSON.parse(effectivePlaylistsJson) } catch(e) { return { playlists: [] } }
     }
     property var activePlaylist: {
         const idx = cfg_ActivePlaylistIndex
@@ -93,20 +124,20 @@ Kirigami.FormLayout {
     readonly property bool playlistContentMode: cfg_ContentMode === 6
 
     function savePlaylistData() {
-        cfg_PlaylistsJson = JSON.stringify(playlistData)
+        setSharedPlaylistsJson(JSON.stringify(playlistData))
     }
 
     function playlistCreate(name) {
         const data = JSON.parse(JSON.stringify(playlistData))
         data.playlists.push({ name: name, mode: 0, interval: 30, items: [] })
-        cfg_PlaylistsJson = JSON.stringify(data)
+        setSharedPlaylistsJson(JSON.stringify(data))
         cfg_ActivePlaylistIndex = data.playlists.length - 1
     }
 
     function playlistDelete(index) {
         const data = JSON.parse(JSON.stringify(playlistData))
         data.playlists.splice(index, 1)
-        cfg_PlaylistsJson = JSON.stringify(data)
+        setSharedPlaylistsJson(JSON.stringify(data))
         if (cfg_ActivePlaylistIndex >= data.playlists.length)
             cfg_ActivePlaylistIndex = data.playlists.length - 1
     }
@@ -115,7 +146,7 @@ Kirigami.FormLayout {
         const data = JSON.parse(JSON.stringify(playlistData))
         if (index >= 0 && index < data.playlists.length) {
             data.playlists[index].name = newName
-            cfg_PlaylistsJson = JSON.stringify(data)
+            setSharedPlaylistsJson(JSON.stringify(data))
         }
     }
 
@@ -124,7 +155,7 @@ Kirigami.FormLayout {
         const idx = cfg_ActivePlaylistIndex
         if (idx >= 0 && idx < data.playlists.length) {
             data.playlists[idx].mode = mode
-            cfg_PlaylistsJson = JSON.stringify(data)
+            setSharedPlaylistsJson(JSON.stringify(data))
         }
     }
 
@@ -133,7 +164,7 @@ Kirigami.FormLayout {
         const idx = cfg_ActivePlaylistIndex
         if (idx >= 0 && idx < data.playlists.length) {
             data.playlists[idx].interval = mins
-            cfg_PlaylistsJson = JSON.stringify(data)
+            setSharedPlaylistsJson(JSON.stringify(data))
         }
     }
 
@@ -153,7 +184,7 @@ Kirigami.FormLayout {
             workshopId: pickerItem.workshopId || "",
             scheduleTime: "00:00"
         })
-        cfg_PlaylistsJson = JSON.stringify(data)
+        setSharedPlaylistsJson(JSON.stringify(data))
     }
 
     function playlistRemoveItem(itemIndex) {
@@ -161,7 +192,7 @@ Kirigami.FormLayout {
         const idx = cfg_ActivePlaylistIndex
         if (idx < 0 || idx >= data.playlists.length) return
         data.playlists[idx].items.splice(itemIndex, 1)
-        cfg_PlaylistsJson = JSON.stringify(data)
+        setSharedPlaylistsJson(JSON.stringify(data))
     }
 
     function playlistMoveItemUp(itemIndex) {
@@ -173,7 +204,7 @@ Kirigami.FormLayout {
         const tmp = items[itemIndex - 1]
         items[itemIndex - 1] = items[itemIndex]
         items[itemIndex] = tmp
-        cfg_PlaylistsJson = JSON.stringify(data)
+        setSharedPlaylistsJson(JSON.stringify(data))
     }
 
     function playlistSetItemTime(itemIndex, time) {
@@ -181,7 +212,7 @@ Kirigami.FormLayout {
         const idx = cfg_ActivePlaylistIndex
         if (idx < 0 || idx >= data.playlists.length) return
         data.playlists[idx].items[itemIndex].scheduleTime = time
-        cfg_PlaylistsJson = JSON.stringify(data)
+        setSharedPlaylistsJson(JSON.stringify(data))
     }
 
     property var scenePropertyModel: []
@@ -685,6 +716,7 @@ Kirigami.FormLayout {
     }
 
     Component.onCompleted: {
+        migrateSharedPlaylistSettings()
         hydrateFromWallpaperConfiguration()
         migrateLegacySceneMode()
         startupComplete = true
@@ -1036,11 +1068,13 @@ Kirigami.FormLayout {
         GridView {
             id: wallpaperGrid
             Layout.fillWidth: true
+            Layout.preferredWidth: 460
             Layout.preferredHeight: Math.min(cellHeight * Math.ceil(count / columns), 320)
             Layout.maximumHeight: 320
             clip: true
 
             readonly property int columns: Math.max(1, Math.floor(width / 140))
+            readonly property int pickerScrollBarWidth: Math.max(14, Math.round(Kirigami.Units.gridUnit * 0.75))
             cellWidth: width / columns
             cellHeight: 110
 
@@ -1054,6 +1088,44 @@ Kirigami.FormLayout {
                     const wtype = (item.weType || "").toLowerCase()
                     return title.includes(query) || wid.includes(query) || wtype.includes(query)
                 })
+            }
+
+            QQC2.ScrollBar.vertical: QQC2.ScrollBar {
+                id: wallpaperScrollBar
+                parent: wallpaperGrid
+                anchors.top: wallpaperGrid.top
+                anchors.right: wallpaperGrid.right
+                anchors.bottom: wallpaperGrid.bottom
+                z: 10
+                visible: wallpaperGrid.contentHeight > wallpaperGrid.height
+                policy: QQC2.ScrollBar.AlwaysOn
+                width: wallpaperGrid.pickerScrollBarWidth
+                minimumSize: 0.18
+                padding: 1
+                interactive: true
+                hoverEnabled: true
+                active: hovered || pressed || wallpaperGrid.moving || wallpaperGrid.flicking
+
+                contentItem: Rectangle {
+                    implicitWidth: wallpaperGrid.pickerScrollBarWidth
+                    implicitHeight: Kirigami.Units.gridUnit * 2
+                    radius: width / 2
+                    color: wallpaperScrollBar.pressed
+                        ? Kirigami.Theme.highlightColor
+                        : Qt.rgba(Kirigami.Theme.textColor.r,
+                            Kirigami.Theme.textColor.g,
+                            Kirigami.Theme.textColor.b,
+                            wallpaperScrollBar.hovered ? 0.75 : 0.55)
+                }
+
+                background: Rectangle {
+                    implicitWidth: wallpaperGrid.pickerScrollBarWidth
+                    radius: width / 2
+                    color: Qt.rgba(Kirigami.Theme.textColor.r,
+                        Kirigami.Theme.textColor.g,
+                        Kirigami.Theme.textColor.b,
+                        0.2)
+                }
             }
 
             delegate: Item {
@@ -1306,9 +1378,9 @@ Kirigami.FormLayout {
         visible: root.playlistAllContentMode
         Layout.fillWidth: true
         Layout.maximumWidth: 460
-        playlistsJson: root.cfg_PlaylistAllJson
+        playlistsJson: root.effectivePlaylistAllJson
         activePlaylistIndex: root.cfg_ActivePlaylistAllIndex
-        onPlaylistsUpdated: function(json) { root.cfg_PlaylistAllJson = json }
+        onPlaylistsUpdated: function(json) { root.setSharedPlaylistAllJson(json) }
         onActiveIndexUpdated: function(index) { root.cfg_ActivePlaylistAllIndex = index }
     }
 

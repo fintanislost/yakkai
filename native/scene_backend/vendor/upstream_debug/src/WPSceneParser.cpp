@@ -2518,6 +2518,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             count_eff = 0;
             hasEffect = false;
             effectObjects.clear();
+            if (isCompose || wpimgobj.fullscreen) return;
             // Utility layers only exist as effect carriers — hide them entirely
             // when their effects are stripped, since they render as garbage without.
             const bool isUtilityLayer =

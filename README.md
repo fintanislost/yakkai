@@ -18,30 +18,37 @@ A KDE Plasma 6 wallpaper plugin with native Wallpaper Engine scene rendering sup
 
 ## Install
 
+From a source checkout:
+
 ```bash
-# Install the wallpaper package
-kpackagetool6 -t Plasma/Wallpaper -i wallpapers/io.team7.yakkai
-
-# Build the native scene backend
-cmake -S . -B build
-cmake --build build
-
-# Update after changes
-kpackagetool6 -t Plasma/Wallpaper -u wallpapers/io.team7.yakkai
+./scripts/install-local.sh
 ```
+
+The installer configures CMake in `${XDG_CACHE_HOME:-$HOME/.cache}/yakkai/build`, builds the native scene backend, stages the generated QML import module into `wallpapers/io.team7.yakkai/contents/imports/io/team7/scene/`, validates the package, and installs or updates the wallpaper for the current user.
 
 After installation, open the Plasma wallpaper picker and choose **Yakkai**.
 
-## Build
+Use `--clean` if CMake should start from a fresh build directory:
 
 ```bash
-cmake -S . -B build
-cmake --build build
+./scripts/install-local.sh --clean
 ```
 
-The native backend builds `libyakkai_scene_backend.so` and stages it into `wallpapers/io.team7.yakkai/contents/imports/io/team7/scene/`.
+Use `--no-install` to build, stage, and validate the package without touching the installed Plasma package:
 
-### Standalone scene harness
+```bash
+./scripts/install-local.sh --no-install
+```
+
+## Developer Build
+
+Use the dev flag when working on the renderer or smoke-test harness:
+
+```bash
+./scripts/install-local.sh --dev
+```
+
+`--dev` uses the repo-local `./build` directory and also builds the standalone scene harness. This keeps existing tooling such as `tools/validate-scene.sh`, `smoke-tests/run.sh`, and the harness path stable.
 
 ```bash
 ./build/native/scene_harness/yakkai_scene_harness \
@@ -52,6 +59,40 @@ The native backend builds `libyakkai_scene_backend.so` and stages it into `wallp
 ```
 
 Add `--capture /tmp/output.png --capture-delay-ms 10000` for automated testing.
+
+### Manual Build
+
+The normal build target for installable packages is `yakkai_stage_wallyakkai_scene_import`:
+
+```bash
+cmake -S . -B build
+cmake --build build --target yakkai_stage_wallyakkai_scene_import --parallel
+./scripts/check-package.sh
+```
+
+Then install or update the staged package:
+
+```bash
+# First install
+kpackagetool6 -t Plasma/Wallpaper -i wallpapers/io.team7.yakkai
+
+# Subsequent updates
+kpackagetool6 -t Plasma/Wallpaper -u wallpapers/io.team7.yakkai
+```
+
+## Dependencies
+
+Yakkai requires KDE Plasma 6, Qt 6.6 or newer with Core/Gui/Qml/Quick, CMake 3.24 or newer, a C++20 compiler, Vulkan development files, and liblz4. Qt Multimedia and Qt WebEngine runtime packages are needed for video and web wallpaper modes. FFmpeg development packages enable Wallpaper Engine video textures in native scene rendering when available.
+
+On distro packages, look for the Qt Quick/QML development packages, Qt Multimedia, Qt WebEngine, `extra-cmake-modules`, `vulkan-headers`/`vulkan-loader`, `lz4`, and FFmpeg libraries (`libavformat`, `libavcodec`, `libswscale`, `libavutil`). The Python scanner used by the wallpaper package needs Python 3.
+
+## Package Validation
+
+```bash
+./scripts/check-package.sh
+```
+
+The package check verifies required Plasma files, verifies the generated native QML import files are staged, runs `qmllint` when available, and performs a throwaway `kpackagetool6` install. Use `--skip-kpackage` when only the file and QML checks are needed.
 
 ### Settings persistence test
 
@@ -83,6 +124,7 @@ QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner \
 │   ├── color-lab/           # Interactive color debugging web tool
 │   ├── tst_config_persistence.qml # QML regression test for settings persistence
 │   └── validate-scene.sh    # Automated render validator
+├── scripts/                 # Local install and package validation helpers
 ├── smoke-tests/             # Regression test runner
 └── references/              # Third-party reference materials
 ```

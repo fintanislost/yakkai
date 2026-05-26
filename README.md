@@ -16,7 +16,32 @@ A KDE Plasma 6 wallpaper plugin with native Wallpaper Engine scene rendering sup
 - **Playlist (All)** — playlists that mix scene, video, and web wallpapers, also shared across monitors
 - **Thumbnail wallpaper picker** — visual grid with previews, search, and a large scrollbar for long libraries
 
-## Install
+## Install From GitHub Release
+
+For the easiest path, download a release asset from GitHub:
+
+- `yakkai-plasma6-archlinux-x86_64-<version>.tar.gz` — prebuilt Plasma package with the native scene module already staged
+- `yakkai-source-<version>.tar.gz` — source fallback for systems whose native libraries do not match the prebuilt package
+
+Prebuilt release package:
+
+```bash
+tar -xf yakkai-plasma6-archlinux-x86_64-<version>.tar.gz
+cd yakkai-plasma6-archlinux-x86_64-<version>
+./install.sh
+```
+
+If the prebuilt package does not load because Qt, KDE Frameworks, FFmpeg, or other native library versions differ on your system, use the source package instead:
+
+```bash
+tar -xf yakkai-source-<version>.tar.gz
+cd yakkai-source-<version>
+./scripts/install-local.sh
+```
+
+After installation, open the Plasma wallpaper picker and choose **Yakkai**.
+
+## Install From Source
 
 From a source checkout:
 
@@ -25,8 +50,6 @@ From a source checkout:
 ```
 
 The installer configures CMake in `${XDG_CACHE_HOME:-$HOME/.cache}/yakkai/build`, builds the native scene backend, stages the generated QML import module into `wallpapers/io.team7.yakkai/contents/imports/io/team7/scene/`, validates the package, and installs or updates the wallpaper for the current user.
-
-After installation, open the Plasma wallpaper picker and choose **Yakkai**.
 
 Use `--clean` if CMake should start from a fresh build directory:
 
@@ -94,6 +117,16 @@ On distro packages, look for the Qt Quick/QML development packages, Qt Multimedi
 
 The package check verifies required Plasma files, verifies the generated native QML import files are staged, runs `qmllint` when available, and performs a throwaway `kpackagetool6` install. Use `--skip-kpackage` when only the file and QML checks are needed.
 
+## Release Packaging
+
+Release assets are built from tags by `.github/workflows/release.yml`. To create a release, push a tag such as `v0.1.0`; the workflow builds an Arch Linux x86_64 prebuilt package, builds a source fallback tarball, writes `SHA256SUMS`, and creates or updates the matching GitHub release.
+
+The same packaging can be reproduced locally:
+
+```bash
+scripts/package-release.sh --output-dir dist --version v0.1.0 --target archlinux-x86_64
+```
+
 ### Settings persistence test
 
 ```bash
@@ -125,6 +158,7 @@ QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner \
 │   ├── tst_config_persistence.qml # QML regression test for settings persistence
 │   └── validate-scene.sh    # Automated render validator
 ├── scripts/                 # Local install and package validation helpers
+├── .github/workflows/       # GitHub release packaging workflow
 ├── smoke-tests/             # Regression test runner
 └── references/              # Third-party reference materials
 ```

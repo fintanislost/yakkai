@@ -46,6 +46,10 @@ jobs:
             vulkan-headers \
             vulkan-icd-loader
 
+      - name: Mark checkout as safe for Git
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Build and package release assets
         run: |
           bash scripts/package-release.sh \

@@ -15,6 +15,12 @@ from typing import Any
 
 
 RESULT_ORDER = {"pass": 0, "review": 1, "skip": 2, "fail": 3}
+COVERAGE_STATUS_ORDER = {
+    "missing": 0,
+    "requiresHarness": 1,
+    "candidate": 2,
+    "active": 3,
+}
 
 
 def worst_status(left: str, right: str) -> str:
@@ -131,6 +137,103 @@ def clear_shader_cache(cache_root: Path) -> list[Path]:
 def load_manifest(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def load_coverage_matrix(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def coverage_status_meets(actual: str, required: str) -> bool:
+    if actual not in COVERAGE_STATUS_ORDER:
+        raise ValueError(f"unknown coverage status: {actual}")
+    if required not in COVERAGE_STATUS_ORDER:
+        raise ValueError(f"unknown required coverage status: {required}")
+    return COVERAGE_STATUS_ORDER[actual] >= COVERAGE_STATUS_ORDER[required]
+
+
+def coverage_bucket_summaries(matrix: dict[str, Any]) -> list[dict[str, Any]]:
+    summaries: list[dict[str, Any]] = []
+    for bucket in matrix.get("buckets", []):
+        coverage = bucket.get("coverage", [])
+        statuses = [entry.get("status", "missing") for entry in coverage]
+        known_statuses = [status for status in statuses if status in COVERAGE_STATUS_ORDER]
+        best_status = "missing"
+        if known_statuses:
+            best_status = max(known_statuses, key=lambda status: COVERAGE_STATUS_ORDER[status])
+        minimum = str(bucket.get("minimumStatus", "candidate"))
+        satisfied = minimum in COVERAGE_STATUS_ORDER and coverage_status_meets(best_status, minimum)
+        summaries.append({
+            "id": bucket.get("id", ""),
+            "name": bucket.get("name", ""),
+            "minimumStatus": minimum,
+            "bestStatus": best_status,
+            "satisfied": satisfied,
+            "sceneIds": [str(entry.get("sceneId", "")) for entry in coverage if entry.get("sceneId")],
+        })
+    return summaries
+
+
+def validate_coverage_matrix(matrix: dict[str, Any], manifest: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    matrix_scene_ids: set[str] = set()
+    bucket_ids: set[str] = set()
+
+    for bucket in matrix.get("buckets", []):
+        bucket_id = str(bucket.get("id", ""))
+        if not bucket_id:
+            errors.append("coverage bucket is missing id")
+            continue
+        if bucket_id in bucket_ids:
+            errors.append(f"duplicate coverage bucket id {bucket_id}")
+        bucket_ids.add(bucket_id)
+
+        minimum = str(bucket.get("minimumStatus", "candidate"))
+        if minimum not in COVERAGE_STATUS_ORDER:
+            errors.append(f"bucket {bucket_id} has unknown minimumStatus {minimum}")
+
+        for entry in bucket.get("coverage", []):
+            scene_id = str(entry.get("sceneId", ""))
+            status = str(entry.get("status", ""))
+            if scene_id:
+                matrix_scene_ids.add(scene_id)
+            else:
+                errors.append(f"bucket {bucket_id} has coverage entry without sceneId")
+            if status not in COVERAGE_STATUS_ORDER:
+                errors.append(f"bucket {bucket_id} scene {scene_id} has unknown status {status}")
+
+    for scene in manifest.get("scenes", []):
+        scene_id = str(scene.get("id", ""))
+        if scene_id and scene_id not in matrix_scene_ids:
+            errors.append(f"active scene {scene_id} is missing from coverage matrix")
+
+    for summary in coverage_bucket_summaries(matrix):
+        if not summary["satisfied"]:
+            errors.append(
+                f"bucket {summary['id']} requires {summary['minimumStatus']} coverage but best status is {summary['bestStatus']}"
+            )
+
+    return errors
+
+
+def format_coverage_markdown(summaries: list[dict[str, Any]]) -> str:
+    lines = [
+        "# Render Coverage Matrix",
+        "",
+        "| Bucket | Name | Required | Best | Satisfied | Scenes |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
+    for summary in summaries:
+        satisfied = "yes" if summary["satisfied"] else "no"
+        scenes = ", ".join(summary["sceneIds"])
+        lines.append(
+            f"| {summary['id']} | {summary['name']} | {summary['minimumStatus']} | {summary['bestStatus']} | {satisfied} | {scenes} |"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def format_coverage_json(summaries: list[dict[str, Any]]) -> str:
+    return json.dumps({"coverage": summaries}, indent=2, sort_keys=True) + "\n"
 
 
 def expand_manifest_path(value: str, paths: dict[str, str], root: Path, env: dict[str, str] | None = None) -> Path:
@@ -292,6 +395,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--promote")
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--coverage", action="store_true")
+    parser.add_argument("--coverage-matrix", default="smoke-tests/coverage-matrix.json")
+    parser.add_argument("--coverage-format", choices=["markdown", "json"], default="markdown")
     return parser
 
 
@@ -674,6 +780,21 @@ def main(argv: list[str] | None = None) -> int:
     root = repo_root()
     manifest = load_manifest((root / args.manifest).resolve())
     scenes = select_scenes(manifest, args.suite)
+
+    if args.coverage:
+        matrix_path = Path(args.coverage_matrix)
+        if not matrix_path.is_absolute():
+            matrix_path = root / matrix_path
+        matrix = load_coverage_matrix(matrix_path.resolve())
+        summaries = coverage_bucket_summaries(matrix)
+        errors = validate_coverage_matrix(matrix, manifest)
+        if args.coverage_format == "json":
+            print(format_coverage_json(summaries), end="")
+        else:
+            print(format_coverage_markdown(summaries), end="")
+        for error in errors:
+            print(f"coverage error: {error}", file=sys.stderr)
+        return 1 if errors else 0
 
     if args.promote:
         paths = dict(manifest["paths"])

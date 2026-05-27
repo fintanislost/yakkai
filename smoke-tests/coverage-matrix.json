@@ -1,0 +1,130 @@
+{
+  "version": 1,
+  "buckets": [
+    {
+      "id": "puppet-effects-alpha",
+      "name": "Puppet Effects And Alpha",
+      "requiredForPhase": 3,
+      "minimumStatus": "active",
+      "coverage": [
+        {
+          "sceneId": "3228578419",
+          "status": "active",
+          "source": "smoke-tests/scenes.json",
+          "notes": "Sleeping Arona covers puppet rendering, flare/lens layers, particles, alpha-sensitive composition, and existing effect stripping constraints."
+        }
+      ]
+    },
+    {
+      "id": "main-video-texture",
+      "name": "Main Embedded Video Texture",
+      "requiredForPhase": 4,
+      "minimumStatus": "active",
+      "coverage": [
+        {
+          "sceneId": "3327063360",
+          "status": "active",
+          "source": "smoke-tests/scenes.json",
+          "notes": "Shiroko Night Video covers main embedded video texture playback, particles, effect chain, and decoder timing tolerance."
+        }
+      ]
+    },
+    {
+      "id": "effect-chain-regression",
+      "name": "Effect Chain Regression Replay",
+      "requiredForPhase": 3,
+      "minimumStatus": "candidate",
+      "coverage": [
+        {
+          "sceneId": "1591277437",
+          "status": "candidate",
+          "source": "RENDERER_FIXTURE_CANDIDATE_SLICES.md",
+          "notes": "Spider-Verse candidate covers godrays, shake, pulse, and a prior visual regression class. Local probe on 2026-05-27 found the Workshop item installed and structural validation passed with one composelayer warning; visual review found a bottom-right-to-center diagonal godray/artifact that must be compared against Wallpaper Engine before baseline promotion."
+        }
+      ]
+    },
+    {
+      "id": "scene-script-bindings",
+      "name": "SceneScript Bindings And Runtime",
+      "requiredForPhase": 6,
+      "minimumStatus": "candidate",
+      "coverage": [
+        {
+          "sceneId": "3301291394",
+          "status": "candidate",
+          "source": "RENDERER_FIXTURE_CANDIDATE_SLICES.md",
+          "notes": "Alya Clock and Date covers clock/date script bindings and user property toggles. Local probe on 2026-05-27 found the Workshop item installed and structural validation passed with one composelayer warning; validator reported no QuickJS bindings, so script coverage must be visually reviewed before baseline promotion."
+        },
+        {
+          "sceneId": "3326873240",
+          "status": "candidate",
+          "source": "RENDERER_FIXTURE_CANDIDATE_SLICES.md",
+          "notes": "Elaina Day Night Gradient covers non-puppet SceneScript and day-night tint/property behavior. Local probe on 2026-05-27 found the Workshop item installed and structural validation passed with effect/composelayer warnings; validator reported 23 QuickJS bindings resolved."
+        }
+      ]
+    },
+    {
+      "id": "overlay-video-texture",
+      "name": "Overlay Or Small Embedded Video Texture",
+      "requiredForPhase": 4,
+      "minimumStatus": "candidate",
+      "coverage": [
+        {
+          "sceneId": "2788691565",
+          "status": "candidate",
+          "source": "RENDERER_FIXTURE_CANDIDATE_SLICES.md",
+          "notes": "Girl and Fluorescent Beach covers embedded mp4 references inside a scene package. Local probe on 2026-05-27 found the Workshop item installed and structural validation passed with one composelayer warning."
+        }
+      ]
+    },
+    {
+      "id": "static-model-material-lighting",
+      "name": "Static Model, Material, And Lighting",
+      "requiredForPhase": 5,
+      "minimumStatus": "candidate",
+      "coverage": [
+        {
+          "sceneId": "1576514332",
+          "status": "candidate",
+          "source": "RENDERER_FIXTURE_CANDIDATE_SLICES.md",
+          "notes": "Cyber City Parkour covers non-puppet models, camera framing, material fallback, composelayers, and lights. Local probe on 2026-05-27 found the Workshop item installed and structural validation passed with material-loading warnings that need review before baseline promotion."
+        }
+      ]
+    },
+    {
+      "id": "we-web-wallpaper",
+      "name": "Wallpaper Engine Web Project",
+      "requiredForPhase": "stretch",
+      "minimumStatus": "requiresHarness",
+      "coverage": [
+        {
+          "sceneId": "1509243786",
+          "status": "requiresHarness",
+          "source": "RENDERER_FIXTURE_CANDIDATE_SLICES.md",
+          "notes": "CWAV Engine is a web project and must stay out of the native scene manifest until a web or Plasma-live harness exists. Local probe on 2026-05-27 found the Workshop item installed."
+        }
+      ]
+    },
+    {
+      "id": "we-video-wallpaper",
+      "name": "Wallpaper Engine Video Project",
+      "requiredForPhase": "stretch",
+      "minimumStatus": "requiresHarness",
+      "coverage": [
+        {
+          "sceneId": "2478419118",
+          "status": "requiresHarness",
+          "source": "RENDERER_FIXTURE_CANDIDATE_SLICES.md",
+          "notes": "Blue Archive Shiroko Live2D is a plain WE video project and needs a video wallpaper harness before strict gating. Local probe on 2026-05-27 found the Workshop item installed."
+        }
+      ]
+    }
+  ],
+  "promotionCriteria": [
+    "Candidate is locally installed and still matches the documented project type.",
+    "Scene-package candidates pass tools/validate-scene.sh when that tool supports the package.",
+    "Candidate artifacts are generated with ./smoke-tests/run.sh --suite deep --write-candidates after it is temporarily added to a non-release run.",
+    "Manual review confirms camera angle, visible elements, color balance, composition, effect intensity, and expected motion.",
+    "Promoted candidates enter deep first and release only after repeated strict runs are stable."
+  ]
+}

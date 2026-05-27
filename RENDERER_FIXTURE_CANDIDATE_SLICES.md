@@ -40,6 +40,7 @@ Do not add a candidate directly to `release`.
   - Review godray placement, brightness, visible character/background composition, and effect intensity.
 - Future phase fit: Phase 3, per-layer effect alpha and effect-family re-enable work.
 - Add to gate: optional `deep` after baseline promotion.
+- Phase 1 status: locally present on 2026-05-27; structural validation passed with one composelayer warning; visual review found a bottom-right-to-center diagonal godray/artifact that must be compared against Wallpaper Engine before baseline promotion; coverage tracked in `smoke-tests/coverage-matrix.json`.
 
 ### Slice B: Alya Clock And Date SceneScript Candidate
 
@@ -55,6 +56,7 @@ Do not add a candidate directly to `release`.
   - Review whether clock/date elements render, text placement is stable, and scripts do not produce fatal errors.
 - Future phase fit: Phase 6, persistent SceneScript runtime and update lifecycle.
 - Add to gate: optional `deep` after baseline promotion.
+- Phase 1 status: locally present on 2026-05-27; structural validation passed with one composelayer warning; validator reported no QuickJS bindings, so script coverage needs visual review before baseline promotion; coverage tracked in `smoke-tests/coverage-matrix.json`.
 
 ### Slice C: Elaina Day-Night Script Candidate
 
@@ -69,6 +71,7 @@ Do not add a candidate directly to `release`.
   - Review tint/color balance, layer visibility, and whether script-driven changes are visible.
 - Future phase fit: Phase 6, SceneScript runtime; possibly Phase 2 script boundary refactor.
 - Add to gate: optional `deep` after baseline promotion.
+- Phase 1 status: locally present on 2026-05-27; structural validation passed with effect/composelayer warnings and 23 QuickJS bindings resolved; coverage tracked in `smoke-tests/coverage-matrix.json`.
 
 ### Slice D: Embedded Overlay Video Texture Candidate
 
@@ -84,6 +87,7 @@ Do not add a candidate directly to `release`.
   - Record whether this is main-video-like or overlay-video-like before promoting.
 - Future phase fit: Phase 4, video texture fidelity and decoder budget policy.
 - Add to gate: optional `deep` after baseline promotion.
+- Phase 1 status: locally present on 2026-05-27; structural validation passed with one composelayer warning; coverage tracked in `smoke-tests/coverage-matrix.json`.
 
 ### Slice E: Static Model And Lighting Candidate
 
@@ -98,6 +102,7 @@ Do not add a candidate directly to `release`.
   - Review camera angle, model orientation, visible foreground/background elements, light balance, and material fidelity.
 - Future phase fit: Phase 5, static model, material, and lighting fidelity.
 - Add to gate: optional `deep` after baseline promotion.
+- Phase 1 status: locally present on 2026-05-27; structural validation passed with material-loading warnings that need review before baseline promotion; coverage tracked in `smoke-tests/coverage-matrix.json`.
 
 ### Slice F: WE Web Harness Candidate
 
@@ -112,6 +117,7 @@ Do not add a candidate directly to `release`.
   - Once a harness exists, capture a deterministic default preset state.
 - Future phase fit: Stretch Phase, Plasma-live capture; possible separate web regression harness.
 - Add to gate: not until a web-specific harness exists.
+- Phase 1 status: locally present on 2026-05-27; not active in `smoke-tests/scenes.json`; requires a web or Plasma-live harness before baseline promotion; coverage tracked in `smoke-tests/coverage-matrix.json`.
 
 ### Slice G: WE Video Harness Candidate
 
@@ -126,6 +132,7 @@ Do not add a candidate directly to `release`.
   - Once a harness exists, capture a short deterministic playback sequence with temporal tolerance.
 - Future phase fit: Stretch Phase, Plasma-live capture; possibly separate video regression harness.
 - Add to gate: not until a video-specific harness exists.
+- Phase 1 status: locally present on 2026-05-27; not active in `smoke-tests/scenes.json`; requires a video wallpaper or Plasma-live harness before baseline promotion; coverage tracked in `smoke-tests/coverage-matrix.json`.
 
 ## Future Fix Backlog
 

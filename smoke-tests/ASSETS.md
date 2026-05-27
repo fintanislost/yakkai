@@ -7,6 +7,8 @@ These Workshop scenes are used by the local render regression harness. Install t
 | 3228578419 | https://steamcommunity.com/sharedfiles/filedetails/?id=3228578419 | quick, deep, release | yes | Puppet, flare, particles, alpha-sensitive composition; motion sequence uses a 2-frame temporal tolerance for animation jitter | camera angle, desk/background/character, lens flare intensity, halo glow, sleep particles |
 | 3327063360 | https://steamcommunity.com/sharedfiles/filedetails/?id=3327063360 | quick, deep, release | yes | Main video texture, particles, effect chain; sequence-only fixture with a 6-frame temporal tolerance for decoder phase drift | video progression, green particles, background composition, color balance |
 
+Candidate and deferred fixtures are tracked in `smoke-tests/COVERAGE.md` and `smoke-tests/coverage-matrix.json`. Keep this file focused on active smoke-test assets; move a candidate here only after baseline promotion.
+
 Future fixtures should be added only after a local candidate is reviewed and baselines are promoted. Useful gaps are SceneScript-heavy scenes, static model/material/light scenes, small overlay video texture scenes, and separate WE Web or WE Video harness coverage.
 
 Default Steam paths used by the harness:

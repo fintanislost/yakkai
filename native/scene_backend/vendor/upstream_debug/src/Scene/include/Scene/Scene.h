@@ -1,7 +1,10 @@
 #pragma once
+#include <memory>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
+#include "Debug/EffectCaptureDebug.hpp"
 #include "SceneTexture.h"
 #include "SceneRenderTarget.h"
 #include "SceneNode.h"
@@ -21,13 +24,6 @@ class VFS;
 }
 class Scene : NoCopy, NoMove {
 public:
-    struct DebugRenderDump {
-        std::string label;
-        std::string renderTarget;
-        std::string path;
-        bool        completed { false };
-    };
-
     Scene();
     ~Scene();
 
@@ -47,7 +43,9 @@ public:
     std::string scene_id { "unknown_id" };
 
     bool first_frame_ok { false };
-    std::vector<DebugRenderDump> debugRenderDumps;
+    wallpaper::debug::EffectCaptureConfig              debugEffectCaptures;
+    std::vector<wallpaper::debug::EffectCaptureRecord> debugEffectCaptureRecords;
+    std::vector<wallpaper::debug::EffectPassState>     debugEffectPassStates;
 
     SceneMesh default_effect_mesh;
 

@@ -10,6 +10,8 @@ Item {
     property bool mouseInputEnabled: false
     property bool muted: true
     property string backendStatus: "System SceneViewer backend"
+    property string debugEffectCapturesPath: ""
+    property string debugEffectCaptureCommand: ""
 
     function assetsUrl(path) {
         const asText = String(path ?? "")

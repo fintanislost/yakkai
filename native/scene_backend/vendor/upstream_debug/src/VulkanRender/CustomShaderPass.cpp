@@ -1,4 +1,5 @@
 #include "CustomShaderPass.hpp"
+#include "Debug/EffectCaptureDebug.hpp"
 #include "Scene/Scene.h"
 #include "Scene/SceneShader.h"
 
@@ -46,6 +47,16 @@ const char* LoadOpText(VkAttachmentLoadOp loadOp) {
         case VK_ATTACHMENT_LOAD_OP_DONT_CARE: return "DONT_CARE";
         default: return "UNKNOWN";
     }
+}
+
+std::string ColorMaskText(VkColorComponentFlags mask)
+{
+    std::string value;
+    if ((mask & VK_COLOR_COMPONENT_R_BIT) != 0) value.push_back('R');
+    if ((mask & VK_COLOR_COMPONENT_G_BIT) != 0) value.push_back('G');
+    if ((mask & VK_COLOR_COMPONENT_B_BIT) != 0) value.push_back('B');
+    if ((mask & VK_COLOR_COMPONENT_A_BIT) != 0) value.push_back('A');
+    return value.empty() ? "none" : value;
 }
 
 bool IsInterestingModelUniform(std::string_view name) {
@@ -493,6 +504,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
         VkPipelineColorBlendAttachmentState color_blend;
         VkAttachmentLoadOp                  loadOp { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
         VkAttachmentLoadOp                  depthLoadOp { VK_ATTACHMENT_LOAD_OP_DONT_CARE };
+        wallpaper::BlendMode                blendmode { wallpaper::BlendMode::Normal };
         {
             VkColorComponentFlags colorMask =
                 VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT;
@@ -502,7 +514,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             if (alpha) colorMask |= VK_COLOR_COMPONENT_A_BIT;
             color_blend.colorWriteMask = colorMask;
 
-            auto blendmode = mesh.Material()->blenmode;
+            blendmode = mesh.Material()->blenmode;
             SetBlend(blendmode, color_blend);
             m_desc.blending = color_blend.blendEnable;
 
@@ -528,6 +540,16 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
                          static_cast<unsigned>(color_blend.colorWriteMask));
             }
         }
+        wallpaper::debug::recordEffectPassState(scene, {
+            .output = m_desc.output,
+            .loadOp = LoadOpText(loadOp),
+            .depthLoadOp = LoadOpText(depthLoadOp),
+            .colorMask = ColorMaskText(color_blend.colorWriteMask),
+            .blendMode = std::to_string(static_cast<int>(blendmode)),
+            .blendEnabled = color_blend.blendEnable == VK_TRUE,
+            .preserveOutput = m_desc.preserve_output,
+            .usesDepth = m_desc.use_depth,
+        });
         auto opt = CreateRenderPass(device.handle(),
                                     VK_FORMAT_R8G8B8A8_UNORM,
                                     loadOp,

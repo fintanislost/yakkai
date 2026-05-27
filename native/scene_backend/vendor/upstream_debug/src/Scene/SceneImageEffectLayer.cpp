@@ -37,9 +37,21 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
         auto& eff = m_effects[effectIndex];
         const bool isLastEffect = effectIndex + 1 == m_effects.size();
         for (auto& cmd : eff->commands) {
-            if (sstart_with(cmd.src, WE_EFFECT_PPONG_PREFIX_A)) cmd.src = ppong_a;
+            if (sstart_with(cmd.src, WE_DEBUG_EFFECT_FINAL_OUTPUT_PREFIX)) {
+                cmd.srcFinalEffectOutput = true;
+            }
+            if (cmd.srcFinalEffectOutput)
+                cmd.src = ppong_b;
+            else if (sstart_with(cmd.src, WE_EFFECT_PPONG_PREFIX_A))
+                cmd.src = ppong_a;
 
-            if (sstart_with(cmd.dst, WE_EFFECT_PPONG_PREFIX_A)) cmd.dst = ppong_a;
+            if (sstart_with(cmd.dst, WE_DEBUG_EFFECT_FINAL_OUTPUT_PREFIX)) {
+                cmd.dstFinalEffectOutput = true;
+            }
+            if (cmd.dstFinalEffectOutput)
+                cmd.dst = ppong_b;
+            else if (sstart_with(cmd.dst, WE_EFFECT_PPONG_PREFIX_A))
+                cmd.dst = ppong_a;
         }
         for (auto it = eff->nodes.begin(); it != eff->nodes.end(); it++) {
             if (sstart_with(it->output, WE_EFFECT_PPONG_PREFIX_B) ||

@@ -72,6 +72,8 @@ class YakkaiSceneViewer : public QQuickItem
     Q_PROPERTY(bool mouseInputEnabled READ mouseInputEnabled WRITE setMouseInputEnabled NOTIFY mouseInputEnabledChanged)
     Q_PROPERTY(bool validationLayersEnabled READ validationLayersEnabled WRITE setValidationLayersEnabled NOTIFY validationLayersEnabledChanged)
     Q_PROPERTY(QString backendStatus READ backendStatus NOTIFY backendStatusChanged)
+    Q_PROPERTY(QString debugEffectCapturesPath READ debugEffectCapturesPath WRITE setDebugEffectCapturesPath NOTIFY debugEffectCapturesPathChanged)
+    Q_PROPERTY(QString debugEffectCaptureCommand READ debugEffectCaptureCommand WRITE setDebugEffectCaptureCommand NOTIFY debugEffectCaptureCommandChanged)
 
 public:
     enum FillMode
@@ -113,6 +115,12 @@ public:
 
     QString backendStatus() const;
 
+    QString debugEffectCapturesPath() const;
+    void setDebugEffectCapturesPath(const QString& value);
+
+    QString debugEffectCaptureCommand() const;
+    void setDebugEffectCaptureCommand(const QString& value);
+
     Q_INVOKABLE void requestGraphvizDump();
 
 signals:
@@ -126,6 +134,8 @@ signals:
     void mouseInputEnabledChanged();
     void validationLayersEnabledChanged();
     void backendStatusChanged();
+    void debugEffectCapturesPathChanged();
+    void debugEffectCaptureCommandChanged();
 
 private:
     void updateMouseAcceptance();
@@ -141,6 +151,8 @@ private:
     bool m_mouseInputEnabled = false;
     bool m_validationLayersEnabled = false;
     QString m_backendStatus;
+    QString m_debugEffectCapturesPath;
+    QString m_debugEffectCaptureCommand;
 };
 
 #endif

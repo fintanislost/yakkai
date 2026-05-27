@@ -370,6 +370,8 @@ void SceneObject::setScenePropertyQurl(std::string_view name, QUrl value) {
 QUrl SceneObject::source() const { return m_source; }
 QUrl SceneObject::assets() const { return m_assets; }
 QString SceneObject::scenePropertiesJson() const { return m_scenePropertiesJson; }
+QString SceneObject::debugEffectCapturesPath() const { return m_debugEffectCapturesPath; }
+QString SceneObject::debugEffectCaptureCommand() const { return m_debugEffectCaptureCommand; }
 
 int   SceneObject::fps() const { return m_fps; }
 int   SceneObject::fillMode() const { return m_fillMode; }
@@ -397,6 +399,24 @@ void SceneObject::setScenePropertiesJson(const QString& value) {
                  wallpaper::PROPERTY_SCENE_PROPERTIES_JSON,
                  m_scenePropertiesJson.toStdString());
     Q_EMIT scenePropertiesJsonChanged();
+}
+
+void SceneObject::setDebugEffectCapturesPath(const QString& value) {
+    if (m_debugEffectCapturesPath == value) return;
+    m_debugEffectCapturesPath = value;
+    SET_PROPERTY(String,
+                 wallpaper::PROPERTY_DEBUG_EFFECT_CAPTURES,
+                 m_debugEffectCapturesPath.toStdString());
+    Q_EMIT debugEffectCapturesPathChanged();
+}
+
+void SceneObject::setDebugEffectCaptureCommand(const QString& value) {
+    if (m_debugEffectCaptureCommand == value) return;
+    m_debugEffectCaptureCommand = value;
+    SET_PROPERTY(String,
+                 wallpaper::PROPERTY_DEBUG_EFFECT_CAPTURE_COMMAND,
+                 m_debugEffectCaptureCommand.toStdString());
+    Q_EMIT debugEffectCaptureCommandChanged();
 }
 
 void SceneObject::setFps(int value) {

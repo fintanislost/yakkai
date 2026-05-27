@@ -628,6 +628,18 @@ std::string ResolveEffectPingPongFinalTarget(const std::string& pingpongA,
     return (authoredEffectCount % 2 == 0) ? pingpongA : pingpongB;
 }
 
+std::string SceneTypeText(ParseContext::SceneType sceneType) {
+    switch (sceneType) {
+    case ParseContext::SceneType::Puppet:
+        return "Puppet";
+    case ParseContext::SceneType::Video:
+        return "Video";
+    case ParseContext::SceneType::Standard:
+    default:
+        return "Standard";
+    }
+}
+
 bool TryPreparePuppetChannelMapPrepass(const wpscene::WPImageObject& imageObject,
                                        const WPMdl&                  puppet,
                                        fs::VFS&                      vfs,
@@ -2494,6 +2506,25 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     WPShaderInfo   shaderInfo;
     wpscene::WPMaterial sourceMaterial = wpimgobj.material;
     const auto puppetEffectDecision = wallpaper::policy::decideLayerEffects(buildEffectInput());
+    wallpaper::debug::EffectCaptureLayerInfo effectCaptureInfo;
+    effectCaptureInfo.sceneId = context.scene ? context.scene->scene_id : "unknown_scene";
+    effectCaptureInfo.sceneType = SceneTypeText(context.scene_type);
+    effectCaptureInfo.layerName = wpimgobj.name;
+    effectCaptureInfo.layerImage = wpimgobj.image;
+    effectCaptureInfo.layerId = wpimgobj.id;
+    effectCaptureInfo.visibleEffectCount = count_eff;
+    effectCaptureInfo.alpha = wpimgobj.alpha;
+    effectCaptureInfo.keepLayer = puppetEffectDecision.keepLayer;
+    effectCaptureInfo.keepEffects = puppetEffectDecision.keepEffects;
+    effectCaptureInfo.strippedEffects = puppetEffectDecision.strippedEffects;
+    effectCaptureInfo.forceAlphaOne = puppetEffectDecision.forceAlphaOne;
+    effectCaptureInfo.policyReason = std::string(puppetEffectDecision.reason);
+    for (const auto& effect : effectObjects) {
+        effectCaptureInfo.effectNames.push_back(effect.name);
+        for (const auto& material : effect.materials) {
+            effectCaptureInfo.materialShaders.push_back(material.shader);
+        }
+    }
     if (puppetEffectDecision.reason == "puppet-alpha-strip") {
         LOG_INFO("stripping %d effects from layer (alpha fix): name=%s",
                  count_eff, wpimgobj.name.c_str());
@@ -2700,9 +2731,11 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         std::string effect_ppong_a, effect_ppong_b;
         effect_ppong_a = WE_EFFECT_PPONG_PREFIX_A.data() + nodeAddr;
         effect_ppong_b = WE_EFFECT_PPONG_PREFIX_B.data() + nodeAddr;
-        const bool debugAronaRenderTargets = wpimgobj.name == "ARONA_CROP_SHEET";
-        std::string aronaDebugSourceTarget;
-        std::string aronaDebugLastEffectTarget;
+        const bool debugEffectCaptures =
+            scene.debugEffectCaptures.enabled() && ! effectObjects.empty();
+        std::string debugEffectInputTarget;
+        std::string debugEffectOutputSourceTarget;
+        std::string debugEffectOutputTarget;
         // set image effect
         auto imgEffectLayer = std::make_shared<SceneImageEffectLayer>(
             spImgNode.get(), wpimgobj.size[0], wpimgobj.size[1], effect_ppong_a, effect_ppong_b);
@@ -2750,34 +2783,31 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 scene.renderTargets[effect_ppong_a].bind = { .enable = true, .screen = true };
             }
             scene.renderTargets[effect_ppong_b] = scene.renderTargets.at(effect_ppong_a);
-            if (debugAronaRenderTargets) {
-                aronaDebugSourceTarget     = "_rt_debug_arona_source_" + nodeAddr;
-                aronaDebugLastEffectTarget =
-                    ResolveEffectPingPongFinalTarget(effect_ppong_a, effect_ppong_b, count_eff);
-                scene.renderTargets[aronaDebugSourceTarget] = {
+            if (debugEffectCaptures) {
+                debugEffectInputTarget = "_rt_debug_effect_input_" + nodeAddr;
+                scene.renderTargets[debugEffectInputTarget] = {
                     .width      = scene.renderTargets.at(effect_ppong_a).width,
                     .height     = scene.renderTargets.at(effect_ppong_a).height,
                     .allowReuse = false,
                 };
-                scene.debugRenderDumps.push_back({
-                    .label        = "arona-source-puppet",
-                    .renderTarget = aronaDebugSourceTarget,
-                    .path         = "/tmp/yakkai-debug/arona-source-puppet.tga",
-                });
-                scene.debugRenderDumps.push_back({
-                    .label        = "arona-last-effect",
-                    .renderTarget = aronaDebugLastEffectTarget,
-                    .path         = "/tmp/yakkai-debug/arona-last-effect.tga",
-                });
-                scene.debugRenderDumps.push_back({
-                    .label        = "arona-final-default",
-                    .renderTarget = SpecTex_Default.data(),
-                    .path         = "/tmp/yakkai-debug/arona-final-default.tga",
-                });
-                LOG_INFO("registered arona debug render dumps: source=%s last=%s final=%s",
-                         aronaDebugSourceTarget.c_str(),
-                         aronaDebugLastEffectTarget.c_str(),
-                         SpecTex_Default.data());
+                debugEffectOutputSourceTarget =
+                    useStandalonePuppetFinalDisplay
+                        ? std::string(WE_DEBUG_EFFECT_FINAL_OUTPUT_PREFIX) + nodeAddr
+                        : std::string(SpecTex_Default);
+                debugEffectOutputTarget = "_rt_debug_effect_output_" + nodeAddr;
+                scene.renderTargets[debugEffectOutputTarget] =
+                    scene.renderTargets.at(
+                        useStandalonePuppetFinalDisplay ? effect_ppong_a : debugEffectOutputSourceTarget);
+                scene.renderTargets[debugEffectOutputTarget].allowReuse = false;
+                wallpaper::debug::registerEffectCapture(
+                    scene, effectCaptureInfo, "effect-input", debugEffectInputTarget);
+                wallpaper::debug::registerEffectCapture(
+                    scene,
+                    effectCaptureInfo,
+                    "effect-output",
+                    debugEffectOutputTarget);
+                wallpaper::debug::registerEffectCapture(
+                    scene, effectCaptureInfo, "final-publish", SpecTex_Default);
             }
         }
 
@@ -2823,9 +2853,9 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             }
             // load! effect commands
             {
-                if (debugAronaRenderTargets && i_eff == 0 && ! aronaDebugSourceTarget.empty()) {
+                if (debugEffectCaptures && i_eff == 0 && ! debugEffectInputTarget.empty()) {
                     imgEffect->commands.push_back({ .cmd      = SceneImageEffect::CmdType::Copy,
-                                                    .dst      = aronaDebugSourceTarget,
+                                                    .dst      = debugEffectInputTarget,
                                                     .src      = inRT,
                                                     .afterpos = 0 });
                 }
@@ -2937,6 +2967,15 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
 
                 context.shader_updater->SetNodeData(spEffNode.get(), svData);
                 imgEffect->nodes.push_back({ matOutRT, spEffNode, preservePuppetMesh });
+            }
+
+            if (debugEffectCaptures && eff_mat_ok && i_eff == count_eff - 1 &&
+                ! debugEffectOutputTarget.empty() && ! debugEffectOutputSourceTarget.empty()) {
+                imgEffect->commands.push_back({ .cmd      = SceneImageEffect::CmdType::Copy,
+                                                .dst      = debugEffectOutputTarget,
+                                                .src      = debugEffectOutputSourceTarget,
+                                                .afterpos = static_cast<i32>(imgEffect->nodes.size()),
+                                                .srcFinalEffectOutput = useStandalonePuppetFinalDisplay });
             }
 
             if (eff_mat_ok)
@@ -3878,6 +3917,7 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
     }
 
     context.scene->scene_id = scene_id;
+    context.scene->debugEffectCaptures = m_debug_effect_captures;
 
     WPShaderParser::InitGlslang();
 

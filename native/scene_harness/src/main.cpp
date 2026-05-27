@@ -1,7 +1,10 @@
 #include <QtCore/QCommandLineOption>
 #include <QtCore/QCommandLineParser>
 #include <QtCore/QDir>
+#include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
 #include <QtCore/QMetaObject>
 #include <QtCore/QPointer>
 #include <QtCore/QSize>
@@ -254,6 +257,11 @@ int main(int argc, char* argv[])
         QStringLiteral("Capture sequence START_MS:FRAME_COUNT:INTERVAL_MS, used with --capture-dir."),
         QStringLiteral("sequence")
     );
+    QCommandLineOption debugEffectCapturesOption(
+        QStringList{QStringLiteral("debug-effect-captures")},
+        QStringLiteral("Write effect input/output/final-publish debug captures and manifest into the given directory. Only supported by --backend paper."),
+        QStringLiteral("path")
+    );
 
     parser.addOption(backendOption);
     parser.addOption(sourceOption);
@@ -268,6 +276,7 @@ int main(int argc, char* argv[])
     parser.addOption(captureDirOption);
     parser.addOption(captureTimesOption);
     parser.addOption(captureSequenceOption);
+    parser.addOption(debugEffectCapturesOption);
     parser.process(app);
 
     const QString qmlDir = QStringLiteral(YAKKAI_SCENE_HARNESS_QML_DIR);
@@ -284,10 +293,23 @@ int main(int argc, char* argv[])
     const QString captureDirPath = parser.value(captureDirOption).trimmed();
     const QString captureTimesValue = parser.value(captureTimesOption).trimmed();
     const QString captureSequenceValue = parser.value(captureSequenceOption).trimmed();
+    const QString debugEffectCapturesPath = parser.value(debugEffectCapturesOption).trimmed();
+    const bool debugEffectCapturesRequested = !debugEffectCapturesPath.isEmpty();
+    const QString debugEffectCapturesDir =
+        debugEffectCapturesRequested ? QFileInfo(debugEffectCapturesPath).absoluteFilePath() : QString();
+    const QString debugEffectCaptureCommand = app.arguments().join(QLatin1Char(' '));
     const bool multiCaptureRequested = !captureDirPath.isEmpty() || !captureTimesValue.isEmpty() || !captureSequenceValue.isEmpty();
     std::optional<std::vector<CaptureRequest>> parsedCaptures;
     const std::optional<QSize> windowSize = parseWindowSize(windowSizeValue);
 
+    if (debugEffectCapturesRequested && backend != QStringLiteral("paper")) {
+        qWarning() << "yakkai_scene_harness: --debug-effect-captures requires --backend paper";
+        return 2;
+    }
+    if (debugEffectCapturesRequested && !QDir().mkpath(debugEffectCapturesDir)) {
+        qWarning() << "yakkai_scene_harness: failed to create debug effect capture directory" << debugEffectCapturesDir;
+        return 5;
+    }
     if (!windowSize) {
         qWarning() << "yakkai_scene_harness: invalid --window-size" << windowSizeValue;
         return 2;
@@ -342,6 +364,8 @@ int main(int argc, char* argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessShowInfoOverlay"), !parser.isSet(hideInfoOverlayOption));
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessBackendQmlFile"), backendQmlFile(qmlDir, backend));
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessQmlDir"), qmlDir);
+    engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugEffectCapturesPath"), debugEffectCapturesDir);
+    engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugEffectCaptureCommand"), debugEffectCaptureCommand);
 
     const QUrl mainQml = QUrl::fromLocalFile(QDir(qmlDir).filePath(QStringLiteral("Main.qml")));
     QObject::connect(
@@ -440,5 +464,24 @@ int main(int argc, char* argv[])
         qInfo() << "yakkai_scene_harness: rootObjects after load" << engine.rootObjects().size();
     });
 
-    return app.exec();
+    const int appStatus = app.exec();
+    if (appStatus != 0 || !debugEffectCapturesRequested) {
+        return appStatus;
+    }
+
+    const QString manifestPath = QDir(debugEffectCapturesDir).filePath(QStringLiteral("manifest.json"));
+    QFile manifestFile(manifestPath);
+    if (!manifestFile.open(QIODevice::ReadOnly)) {
+        qWarning() << "yakkai_scene_harness: debug effect manifest was not written" << manifestPath;
+        return 6;
+    }
+
+    const QJsonDocument manifest = QJsonDocument::fromJson(manifestFile.readAll());
+    if (!manifest.isObject() ||
+        manifest.object().value(QStringLiteral("status")).toString() != QStringLiteral("ok")) {
+        qWarning() << "yakkai_scene_harness: debug effect manifest reports failure" << manifestPath;
+        return 6;
+    }
+
+    return 0;
 }

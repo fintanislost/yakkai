@@ -9,6 +9,8 @@ Item {
     property int fillModeValue: 0
     property bool mouseInputEnabled: false
     property bool muted: true
+    property string debugEffectCapturesPath: ""
+    property string debugEffectCaptureCommand: ""
 
     function assetsUrl(path) {
         const asText = String(path ?? "")
@@ -54,6 +56,8 @@ Item {
     YakkaiSceneViewer {
         id: viewer
         anchors.fill: parent
+        debugEffectCapturesPath: root.debugEffectCapturesPath
+        debugEffectCaptureCommand: root.debugEffectCaptureCommand
         source: root.sceneSource
         assets: root.assetsUrl(root.assetsPath)
         fillMode: root.sceneFillMode()

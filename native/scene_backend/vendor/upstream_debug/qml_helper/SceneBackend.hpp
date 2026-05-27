@@ -19,6 +19,8 @@ class SceneObject : public QQuickItem {
     Q_PROPERTY(QUrl source READ source WRITE setSource NOTIFY sourceChanged)
     Q_PROPERTY(QUrl assets READ assets WRITE setAssets)
     Q_PROPERTY(QString scenePropertiesJson READ scenePropertiesJson WRITE setScenePropertiesJson NOTIFY scenePropertiesJsonChanged)
+    Q_PROPERTY(QString debugEffectCapturesPath READ debugEffectCapturesPath WRITE setDebugEffectCapturesPath NOTIFY debugEffectCapturesPathChanged)
+    Q_PROPERTY(QString debugEffectCaptureCommand READ debugEffectCaptureCommand WRITE setDebugEffectCaptureCommand NOTIFY debugEffectCaptureCommandChanged)
     Q_PROPERTY(int fps READ fps WRITE setFps NOTIFY fpsChanged)
     Q_PROPERTY(int fillMode READ fillMode WRITE setFillMode NOTIFY fillModeChanged)
     Q_PROPERTY(float speed READ speed WRITE setSpeed NOTIFY speedChanged)
@@ -39,9 +41,13 @@ public:
     QUrl source() const;
     QUrl assets() const;
     QString scenePropertiesJson() const;
+    QString debugEffectCapturesPath() const;
+    QString debugEffectCaptureCommand() const;
     void setSource(const QUrl& source);
     void setAssets(const QUrl& assets);
     void setScenePropertiesJson(const QString& value);
+    void setDebugEffectCapturesPath(const QString& value);
+    void setDebugEffectCaptureCommand(const QString& value);
 
     int   fps() const;
     int   fillMode() const;
@@ -76,6 +82,8 @@ public slots:
 signals:
     void sourceChanged();
     void scenePropertiesJsonChanged();
+    void debugEffectCapturesPathChanged();
+    void debugEffectCaptureCommandChanged();
     void fpsChanged();
     void fillModeChanged();
     void speedChanged();
@@ -87,6 +95,8 @@ private:
     QUrl m_source;
     QUrl m_assets;
     QString m_scenePropertiesJson;
+    QString m_debugEffectCapturesPath;
+    QString m_debugEffectCaptureCommand;
 
     int   m_fps { 15 };
     int   m_fillMode { FillMode::ASPECTCROP };

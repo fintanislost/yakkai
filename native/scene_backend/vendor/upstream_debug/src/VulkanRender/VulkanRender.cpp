@@ -1,5 +1,6 @@
 #include "VulkanRender.hpp"
 
+#include "Debug/EffectCaptureDebug.hpp"
 #include "Utils/Logging.h"
 #include "RenderGraph/RenderGraph.hpp"
 #include "Scene/Scene.h"
@@ -332,14 +333,42 @@ void VulkanRender::Impl::drawFrame(Scene& scene) {
 }
 
 void VulkanRender::Impl::dumpDebugRenderTargets(Scene& scene) {
-    for (auto& dump : scene.debugRenderDumps) {
-        if (dump.completed) continue;
-        if (! m_device->tex_cache().DumpTexture(dump.renderTarget, dump.path)) continue;
-        dump.completed = true;
-        LOG_INFO("debug render dump complete: label=%s key=%s path=%s",
-                 dump.label.c_str(),
-                 dump.renderTarget.c_str(),
-                 dump.path.c_str());
+    if (! scene.debugEffectCaptures.enabled()) {
+        return;
+    }
+
+    bool changed = scene.debugEffectCaptureRecords.empty();
+    for (auto& dump : scene.debugEffectCaptureRecords) {
+        if (dump.completed || dump.failed) {
+            continue;
+        }
+
+        if (auto it = scene.renderTargets.find(dump.renderTarget); it != scene.renderTargets.end()) {
+            dump.renderTargetWidth = it->second.width;
+            dump.renderTargetHeight = it->second.height;
+        }
+
+        if (m_device->tex_cache().DumpTexture(dump.renderTarget, dump.path)) {
+            dump.completed = true;
+            changed = true;
+            LOG_INFO("debug effect capture complete: stage=%s key=%s path=%s",
+                     dump.stage.c_str(),
+                     dump.renderTarget.c_str(),
+                     dump.path.c_str());
+        } else {
+            dump.failed = true;
+            dump.failureReason = "texture dump failed";
+            changed = true;
+            LOG_ERROR("debug effect capture failed: stage=%s key=%s path=%s",
+                      dump.stage.c_str(),
+                      dump.renderTarget.c_str(),
+                      dump.path.c_str());
+        }
+    }
+
+    if (changed && !wallpaper::debug::writeEffectCaptureManifest(scene)) {
+        LOG_ERROR("debug effect manifest write failed: %s",
+                  scene.debugEffectCaptures.manifestPath().string().c_str());
     }
 }
 

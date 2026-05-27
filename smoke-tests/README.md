@@ -12,6 +12,7 @@ The smoke-test harness is the local visual regression gate for Wallpaper Engine 
 ./smoke-tests/run.sh --suite release --strict --require-assets
 ./smoke-tests/run.sh --suite deep --write-candidates
 ./smoke-tests/run.sh --promote /tmp/yakkai-smoke/<run-id>
+./smoke-tests/run.sh --coverage
 ./smoke-tests/run.sh --list
 ```
 
@@ -36,6 +37,10 @@ Baseline updates are two-step:
 ```
 
 Review the artifact bundle before promotion. Check camera angle, visible elements, character position, color balance, composition, effect intensity, and motion.
+
+## Coverage Matrix
+
+`smoke-tests/coverage-matrix.json` tracks active fixtures, candidate fixtures, and harness gaps by renderer limitation. Run `./smoke-tests/run.sh --coverage` before starting a renderer phase to confirm the phase has active or candidate coverage. Candidate coverage does not change quick/deep/release behavior until a scene is reviewed and promoted into `smoke-tests/scenes.json`.
 
 ## Assets
 

@@ -122,6 +122,7 @@ The package check verifies required Plasma files, verifies the generated native 
 Use the local smoke-test harness before renderer-risk changes and before releases:
 
 ```bash
+./smoke-tests/run.sh --coverage
 ./smoke-tests/run.sh --suite quick
 ./smoke-tests/run.sh --suite deep
 ./smoke-tests/run.sh --suite release --strict --require-assets
@@ -129,6 +130,8 @@ Use the local smoke-test harness before renderer-risk changes and before release
 
 The quick suite is for normal development loops. The deep suite is required for changes affecting pixels, scene loading, animation timing, video textures, shader preprocessing, effect policy, blend/composition, model/material/light behavior, SceneScript, QML render plumbing, harness capture behavior, or validator behavior.
 The release suite contains the currently baselined required scenes. Add optional deep candidates only after reviewing the local asset and promoting baselines.
+
+Use the coverage command before renderer phase work to confirm the limitation has an active baseline or candidate fixture. It performs no rendering and does not promote candidates into active smoke suites.
 
 The harness compares deterministic PNG captures against versioned baselines and writes review artifacts to `/tmp/yakkai-smoke`. Smoke-test captures hide the local harness info overlay; generated review videos are for human inspection only, and PNG frames remain the source of truth.
 

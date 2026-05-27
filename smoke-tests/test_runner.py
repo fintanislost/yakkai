@@ -925,6 +925,100 @@ class RunnerCoreTests(unittest.TestCase):
         find_ffmpeg.assert_not_called()
         clear_shader_cache.assert_not_called()
 
+    def test_validate_coverage_matrix_rejects_unknown_status(self):
+        matrix = {
+            "version": 1,
+            "buckets": [
+                {
+                    "id": "bad",
+                    "name": "Bad Bucket",
+                    "minimumStatus": "candidate",
+                    "coverage": [{"sceneId": "1", "status": "mystery", "source": "x", "notes": "bad"}],
+                }
+            ],
+        }
+        manifest = {"scenes": []}
+
+        errors = runner.validate_coverage_matrix(matrix, manifest)
+
+        self.assertIn("bucket bad scene 1 has unknown status mystery", errors)
+
+    def test_validate_coverage_matrix_requires_active_manifest_entries(self):
+        matrix = {"version": 1, "buckets": []}
+        manifest = {"scenes": [{"id": "3228578419", "name": "Sleeping Arona"}]}
+
+        errors = runner.validate_coverage_matrix(matrix, manifest)
+
+        self.assertIn("active scene 3228578419 is missing from coverage matrix", errors)
+
+    def test_coverage_bucket_summary_accepts_candidate_for_phase_one(self):
+        matrix = {
+            "version": 1,
+            "buckets": [
+                {
+                    "id": "scene-script-bindings",
+                    "name": "SceneScript Bindings And Runtime",
+                    "minimumStatus": "candidate",
+                    "coverage": [{"sceneId": "3301291394", "status": "candidate", "source": "doc", "notes": "script"}],
+                }
+            ],
+        }
+
+        summaries = runner.coverage_bucket_summaries(matrix)
+
+        self.assertEqual(summaries[0]["id"], "scene-script-bindings")
+        self.assertEqual(summaries[0]["bestStatus"], "candidate")
+        self.assertTrue(summaries[0]["satisfied"])
+
+    def test_format_coverage_markdown_includes_bucket_scene_and_status(self):
+        summaries = [
+            {
+                "id": "main-video-texture",
+                "name": "Main Embedded Video Texture",
+                "minimumStatus": "active",
+                "bestStatus": "active",
+                "satisfied": True,
+                "sceneIds": ["3327063360"],
+            }
+        ]
+
+        markdown = runner.format_coverage_markdown(summaries)
+
+        self.assertIn("| main-video-texture | Main Embedded Video Texture | active | active | yes | 3327063360 |", markdown)
+
+    def test_main_coverage_prints_markdown_without_render_dependencies(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "smoke-tests").mkdir()
+            manifest = root / "smoke-tests" / "scenes.json"
+            matrix = root / "smoke-tests" / "coverage-matrix.json"
+            manifest.write_text(json.dumps({"version": 1, "scenes": [{"id": "1"}]}), encoding="utf-8")
+            matrix.write_text(json.dumps({
+                "version": 1,
+                "buckets": [
+                    {
+                        "id": "bucket",
+                        "name": "Bucket",
+                        "minimumStatus": "active",
+                        "coverage": [{"sceneId": "1", "status": "active", "source": "test", "notes": "ok"}],
+                    }
+                ],
+            }), encoding="utf-8")
+
+            output = io.StringIO()
+            with (
+                mock.patch.object(runner, "repo_root", return_value=root),
+                mock.patch.object(runner, "require_imagemagick") as require_imagemagick,
+                mock.patch.object(runner, "find_ffmpeg") as find_ffmpeg,
+                redirect_stdout(output),
+            ):
+                code = runner.main(["--coverage"])
+
+            self.assertEqual(code, 0)
+            self.assertIn("| bucket | Bucket | active | active | yes | 1 |", output.getvalue())
+            require_imagemagick.assert_not_called()
+            find_ffmpeg.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

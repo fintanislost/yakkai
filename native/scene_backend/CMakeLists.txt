@@ -134,6 +134,22 @@ if(YAKKAI_ENABLE_VENDORED_SCENE_BACKEND)
             message(STATUS "Paper scene backend: FFmpeg not found, video textures disabled")
         endif()
 
+        add_executable(yakkai_scene_policy_tests
+            tests/test_scene_policies.cpp
+        )
+
+        target_compile_features(yakkai_scene_policy_tests PRIVATE cxx_std_20)
+
+        target_include_directories(yakkai_scene_policy_tests
+            PRIVATE
+                ${yakkai_scene_vendor_include_dirs}
+        )
+
+        target_link_libraries(yakkai_scene_policy_tests
+            PRIVATE
+                yakkai_scene_vendor
+        )
+
         set(YAKKAI_SCENE_USE_VENDORED_BACKEND ON)
         else()
             message(WARNING "Vendored Yakkai scene backend disabled because vendored glslang targets were not created.")

@@ -32,6 +32,15 @@ Automated validator that checks both structural rendering state and pixel output
 
 Regression tests for known-good scenes. Clears shader cache before each run. Used to verify existing scenes aren't broken by changes.
 
+### Policy Tests
+
+Phase 2 adds `yakkai_scene_policy_tests` for behavior-preserving renderer policy boundaries. Run it before and after touching `EffectPolicy`, `VideoTexturePolicy`, `ModelFallbackPolicy`, or `SceneScriptRuntimePolicy`:
+
+```bash
+cmake --build build --target yakkai_scene_policy_tests -j2
+build/native/scene_backend/yakkai_scene_policy_tests
+```
+
 ## Iteration Cycle
 
 ### 1. Baseline

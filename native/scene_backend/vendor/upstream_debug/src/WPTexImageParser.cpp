@@ -1,5 +1,6 @@
 #include "WPTexImageParser.hpp"
 
+#include "Policy/VideoTexturePolicy.hpp"
 #include "Type.hpp"
 #include "WPCommon.hpp"
 #include <cstdint>
@@ -601,7 +602,14 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
                 const bool hasVideoMagic = isMp4Magic || isWebMmagic;
 
 #ifdef YAKKAI_HAS_FFMPEG
-                if ((sizeMismatch || hasVideoMagic) && ! img.video_decoder) {
+                const auto decodeProbe = wallpaper::policy::decideVideoTexturePolicy({
+                    .sourceSize = src_size,
+                    .expectedRawSize = expectedRawSize,
+                    .hasVideoMagic = hasVideoMagic,
+                    .decodedWidth = 0,
+                });
+                const i32 encodedSourceSize = src_size;
+                if (decodeProbe.shouldAttemptDecode && ! img.video_decoder) {
                     auto decoder = std::make_shared<VideoFrameDecoder>(
                         (const uint8_t*)result, src_size, mipmap.width, mipmap.height);
                     if (decoder->IsValid()) {
@@ -617,8 +625,13 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
                             // wallpaper content — enable continuous playback.
                             // Small videos are overlays — use static first frame
                             // to avoid CPU overhead.
-                            const bool isMainVideo = decoder->Width() >= 1920;
-                            if (isMainVideo) {
+                            const auto playbackDecision = wallpaper::policy::decideVideoTexturePolicy({
+                                .sourceSize = encodedSourceSize,
+                                .expectedRawSize = expectedRawSize,
+                                .hasVideoMagic = hasVideoMagic,
+                                .decodedWidth = decoder->Width(),
+                            });
+                            if (playbackDecision.enablePlayback) {
                                 img.video_decoder = decoder;
                                 decoder->Start();
                                 LOG_INFO("video texture decoded (playback): name=%s %dx%d", img.key.c_str(), mipmap.width, mipmap.height);

@@ -9,6 +9,7 @@
 #include <QtCore/QJsonValue>
 
 #if YAKKAI_SCENE_USE_VENDORED_BACKEND
+#include "Policy/ModelFallbackPolicy.hpp"
 
 YakkaiSceneViewer::YakkaiSceneViewer(QQuickItem* parent)
     : scenebackend::SceneObject(parent)
@@ -27,7 +28,11 @@ YakkaiSceneViewer::YakkaiSceneViewer(QQuickItem* parent)
             this,
             [this]() {
                 refreshSceneSupportStatus();
-                if (m_unsupportedModelObjectCount > 0) {
+                const auto statusDecision = wallpaper::policy::describeModelFallbackSupport({
+                    .modelObjectCount = m_unsupportedModelObjectCount,
+                    .firstFrameRendered = true,
+                });
+                if (statusDecision.kind == wallpaper::policy::ModelFallbackStatusKind::FirstFrameRendered) {
                     setBackendStatus(
                         QStringLiteral("Vendored Yakkai scene backend rendered a first frame while using the experimental model fallback for %1 model object(s). Output may still be incomplete.")
                             .arg(m_unsupportedModelObjectCount));
@@ -153,16 +158,25 @@ void YakkaiSceneViewer::refreshSceneSupportStatus()
     }
 
     m_unsupportedModelObjectCount = unsupportedModelObjectCount;
-    if (unsupportedModelObjectCount > 0) {
-        if (supportedDrawableObjectCount > 0) {
+    const auto statusDecision = wallpaper::policy::describeModelFallbackSupport({
+        .supportedDrawableObjectCount = supportedDrawableObjectCount,
+        .modelObjectCount = unsupportedModelObjectCount,
+        .firstFrameRendered = false,
+    });
+    switch (statusDecision.kind) {
+        case wallpaper::policy::ModelFallbackStatusKind::MixedSceneDetected:
             setBackendStatus(
                 QStringLiteral("Vendored Yakkai scene backend detected %1 model object(s) and will use an experimental static fallback for them. Output may be incomplete.")
                     .arg(unsupportedModelObjectCount));
-        } else {
+            break;
+        case wallpaper::policy::ModelFallbackStatusKind::ModelOnlyDetected:
             setBackendStatus(
                 QStringLiteral("Vendored Yakkai scene backend is using an experimental static fallback for %1 model object(s). Output may still be blank or incomplete.")
                     .arg(unsupportedModelObjectCount));
-        }
+            break;
+        case wallpaper::policy::ModelFallbackStatusKind::None:
+        case wallpaper::policy::ModelFallbackStatusKind::FirstFrameRendered:
+            break;
     }
 }
 

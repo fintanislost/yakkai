@@ -101,6 +101,8 @@ Slices:
 - Tighten SceneScript wrapper/stub ownership into a clear runtime boundary.
 - Run upgraded smoke tests after each refactor slice.
 
+Implementation note: Phase 2 policy boundaries are C++ modules under `native/scene_backend/vendor/upstream_debug/src/Policy/` with native tests in `native/scene_backend/tests/test_scene_policies.cpp`. The phase is complete only if policy tests, package validation, and strict release smoke all pass without baseline changes.
+
 ## Phase 3: Per-Layer Effect Alpha
 
 Goal: preserve more authored effects without washing out or occluding puppet layers.

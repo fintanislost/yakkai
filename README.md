@@ -135,6 +135,13 @@ Use the coverage command before renderer phase work to confirm the limitation ha
 
 The harness compares deterministic PNG captures against versioned baselines and writes review artifacts to `/tmp/yakkai-smoke`. Smoke-test captures hide the local harness info overlay; generated review videos are for human inspection only, and PNG frames remain the source of truth.
 
+Native renderer policy decisions for effect preservation, video texture playback, static model fallback, and SceneScript stubs live in focused C++ modules under `native/scene_backend/vendor/upstream_debug/src/Policy/`. Run `yakkai_scene_policy_tests` alongside smoke tests when changing these boundaries:
+
+```bash
+cmake --build build --target yakkai_scene_policy_tests -j2
+build/native/scene_backend/yakkai_scene_policy_tests
+```
+
 ## Release Packaging
 
 Release assets are built from tags by `.github/workflows/release.yml`. To create a release, push a tag such as `v0.1.0`; the workflow builds an Arch Linux x86_64 prebuilt package, builds a source fallback tarball, writes `SHA256SUMS`, and creates or updates the matching GitHub release.
@@ -161,7 +168,9 @@ QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner \
 ├── native/
 │   ├── scene_backend/       # Native Vulkan scene renderer (C++)
 │   │   ├── src/             # YakkaiSceneViewer QML integration
+│   │   ├── tests/           # Native no-framework renderer policy tests
 │   │   └── vendor/          # Vendored upstream scene sources + QuickJS + glslang
+│   │       └── upstream_debug/src/Policy/ # Behavior-preserving renderer policy boundaries
 │   └── scene_harness/       # Standalone debugging app
 ├── wallpapers/
 │   └── io.team7.yakkai/     # Plasma wallpaper package

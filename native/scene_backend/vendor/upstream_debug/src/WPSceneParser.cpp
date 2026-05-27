@@ -1,5 +1,7 @@
 #include "WPSceneParser.hpp"
 #include "WPJson.hpp"
+#include "Policy/EffectPolicy.hpp"
+#include "Policy/ModelFallbackPolicy.hpp"
 #include "WPSceneScript.hpp"
 #include <sstream>
 
@@ -2407,16 +2409,45 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
 
     bool isCompose = (wpimgobj.image == "models/util/composelayer.json");
 
-    // Skip effectless fullscreen/compose layers — they're no-ops
-    if (! hasEffect && wpimgobj.fullscreen) return;
-    if (! hasEffect && isCompose) return;
+    const auto buildEffectInput = [&]() {
+        wallpaper::policy::LayerEffectInput effectInput;
+        effectInput.sceneHasPuppetObjects = context.has_puppet_objects;
+        effectInput.hasVisibleEffects = hasEffect;
+        effectInput.noEffectsDebug = std::getenv("YAKKAI_NO_EFFECTS") != nullptr;
+        effectInput.isComposelayer = isCompose;
+        effectInput.fullscreen = wpimgobj.fullscreen;
+        effectInput.visibleEffectCount = count_eff;
+        effectInput.colorBlendMode = wpimgobj.colorBlendMode;
+        effectInput.alpha = wpimgobj.alpha;
+        effectInput.layerName = wpimgobj.name;
+        effectInput.imagePath = wpimgobj.image;
+        for (const auto& eff : effectObjects) {
+            wallpaper::policy::LayerEffectDescriptor effectDescriptor;
+            effectDescriptor.name = eff.name;
+            if (!eff.materials.empty()) {
+                effectDescriptor.firstMaterialShader = eff.materials[0].shader;
+            }
+            for (const auto& mat : eff.materials) {
+                effectDescriptor.materialShaders.push_back(mat.shader);
+            }
+            effectInput.effects.push_back(effectDescriptor);
+        }
+        return effectInput;
+    };
 
-    // Debug: YAKKAI_NO_EFFECTS=1 strips all effects for color debugging
-    if (std::getenv("YAKKAI_NO_EFFECTS")) {
+    const auto earlyEffectDecision = wallpaper::policy::decideLayerEffects(buildEffectInput());
+    if (earlyEffectDecision.reason == "effectless-fullscreen" ||
+        earlyEffectDecision.reason == "effectless-composelayer") {
+        return;
+    }
+    if (earlyEffectDecision.reason == "debug-no-effects" ||
+        earlyEffectDecision.reason == "debug-no-effects-composelayer") {
         count_eff = 0;
         hasEffect = false;
         effectObjects.clear();
-        if (isCompose) return; // skip composelayer entirely
+        if (earlyEffectDecision.reason == "debug-no-effects-composelayer") {
+            return;
+        }
     }
 
     if (isCompose) {
@@ -2462,87 +2493,19 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     ShaderValueMap baseConstSvs = context.global_base_uniforms;
     WPShaderInfo   shaderInfo;
     wpscene::WPMaterial sourceMaterial = wpimgobj.material;
-    // =========================================================================
-    // PUPPET SCENE EFFECT HANDLING
-    // Smoke test: smoke-tests/3228578419-sleeping-arona.png
-    //
-    // In puppet scenes, strip only KNOWN-PROBLEMATIC effects (LUT color grading
-    // on individual non-fullscreen layers) that produce washed-out output.
-    // Keep SAFE effects: waterflow, waterwaves, opacity, shine, iris, shake,
-    // pulse, blur — these are distortion/animation effects that render correctly.
-    //
-    // Flare/lens layers with alpha=0 get alpha forced to 1.0 (script-controlled
-    // visibility workaround).
-    // =========================================================================
-    if (context.has_puppet_objects && hasEffect) {
-        bool hasColorkey = false;
-        bool hasAudioEffect = false;
-        for (const auto& eff : effectObjects) {
-            if (eff.name.find("colorkey") != std::string::npos) { hasColorkey = true; }
-            if (eff.name.find("audio") != std::string::npos) { hasAudioEffect = true; }
-            for (const auto& mat : eff.materials) {
-                if (mat.shader.find("colorkey") != std::string::npos) { hasColorkey = true; }
-                if (mat.shader.find("audio") != std::string::npos) { hasAudioEffect = true; }
-            }
-        }
-        // Preserve effects for layers that need their effect chain to render:
-        // - Colorkey: chroma key removal for video overlays
-        // - Flare/lens: need additive blend from effect chain
-        // Strip heavy cosmetic effects (lightshafts, audio bars, waterwaves).
-        // Detect audio/lightshaft effects — these are heavy and non-essential
-        bool hasHeavyEffect = false;
-        for (const auto& eff : effectObjects) {
-            std::string shader;
-            if (! eff.materials.empty()) shader = eff.materials[0].shader;
-            if (eff.name.find("audio") != std::string::npos ||
-                eff.name.find("lightshaft") != std::string::npos ||
-                shader.find("audio") != std::string::npos ||
-                shader.find("Audio") != std::string::npos ||
-                shader.find("lightshaft") != std::string::npos) {
-                hasHeavyEffect = true;
-            }
-        }
-        const bool isEssentialEffect = hasColorkey ||
-            (! hasHeavyEffect && (
-                wpimgobj.name.find("flare") != std::string::npos ||
-                wpimgobj.name.find("lense") != std::string::npos ||
-                wpimgobj.name.find("lens") != std::string::npos ||
-                wpimgobj.colorBlendMode != 0));
-        // The offscreen effect rendering path breaks alpha compositing,
-        // causing transparent regions to become opaque (hiding layers behind).
-        // Strip effects from all regular layers until the offscreen alpha path
-        // is fixed. Composelayer and flare/lens layers keep their effects.
-        if (! isEssentialEffect) {
-            LOG_INFO("stripping %d effects from layer (alpha fix): name=%s",
-                     count_eff, wpimgobj.name.c_str());
-            count_eff = 0;
-            hasEffect = false;
-            effectObjects.clear();
-            if (isCompose || wpimgobj.fullscreen) return;
-            // Utility layers only exist as effect carriers — hide them entirely
-            // when their effects are stripped, since they render as garbage without.
-            const bool isUtilityLayer =
-                wpimgobj.image.find("solidlayer") != std::string::npos ||
-                wpimgobj.image.find("projectlayer") != std::string::npos ||
-                wpimgobj.image.find("fullscreenlayer") != std::string::npos;
-            if (isUtilityLayer) return;
-        } else if (true) {
-            // Keep effects for composelayer and flare/lens
-        } else {
-            // Strip effects to prevent washed-out output from unknown effect types
-            const bool isHashElement =
-                wpimgobj.name.size() >= 16 &&
-                wpimgobj.name.find_first_not_of("0123456789abcdef") == std::string::npos;
-            if (! isEssentialEffect && ! isHashElement && ! isCompose) {
-                count_eff = 0;
-                hasEffect = false;
-                effectObjects.clear();
-            }
-        }
-        if (isEssentialEffect && wpimgobj.alpha == 0.0f) {
-            wpimgobj.alpha = 1.0f;
-        }
+    const auto puppetEffectDecision = wallpaper::policy::decideLayerEffects(buildEffectInput());
+    if (puppetEffectDecision.reason == "puppet-alpha-strip") {
+        LOG_INFO("stripping %d effects from layer (alpha fix): name=%s",
+                 count_eff, wpimgobj.name.c_str());
+        count_eff = 0;
+        hasEffect = false;
+        effectObjects.clear();
+        if (! puppetEffectDecision.keepLayer) return;
+    } else if (puppetEffectDecision.reason == "essential-effect" &&
+               puppetEffectDecision.forceAlphaOne) {
+        wpimgobj.alpha = 1.0f;
     }
+
     bool                  usePuppetChannelMapPrepass { false };
     bool                  routePuppetPrepassThroughAuthoredEffects { false };
     bool                  useStandalonePuppetFinalDisplay { false };
@@ -3411,13 +3374,22 @@ bool LoadModelFallbackMaterial(fs::VFS& vfs, const std::string& matJsonFile,
         return false;
     }
 
+    const bool wantsLightmap = MaterialComboEnabled(sourceMaterial, "lightmap");
+    const bool wantsNormalmap = MaterialComboEnabled(sourceMaterial, "normalmap");
+    const bool wantsReflection = MaterialComboEnabled(sourceMaterial, "reflection");
+    const auto fallbackDecision = wallpaper::policy::decideModelMaterialFallback({
+        .sourceShader = sourceMaterial.shader,
+        .sourceBlending = sourceMaterial.blending,
+        .hasDiffuseTexture = !sourceMaterial.textures.empty() && !sourceMaterial.textures[0].empty(),
+        .wantsLightmap = wantsLightmap,
+        .wantsNormalmap = wantsNormalmap,
+        .wantsReflection = wantsReflection,
+    });
+
     useStaticGenericMaterial = false;
-    if (sourceMaterial.shader == "generic") {
-        const bool wantsLightmap = MaterialComboEnabled(sourceMaterial, "lightmap");
-        const bool wantsNormalmap = MaterialComboEnabled(sourceMaterial, "normalmap");
-        const bool wantsReflection = MaterialComboEnabled(sourceMaterial, "reflection");
+    if (fallbackDecision.useAuthoredGenericMaterial) {
         material = sourceMaterial;
-        if (material.blending.empty()) material.blending = "disabled";
+        if (material.blending.empty()) material.blending = fallbackDecision.outputBlending;
         useStaticGenericMaterial = true;
         LOG_INFO("model fallback using authored generic material: %s lightmap=%d normalmap=%d reflection=%d",
                  matJsonFile.c_str(),
@@ -3430,11 +3402,11 @@ bool LoadModelFallbackMaterial(fs::VFS& vfs, const std::string& matJsonFile,
     // Static diffuse fallback only carries the albedo texture. Many WE diffuse maps store
     // non-opacity data in alpha, so preserving the material default translucent blend would
     // silently fade the whole model toward black.
-    material.blending   = "disabled";
+    material.blending   = fallbackDecision.outputBlending;
     material.cullmode   = sourceMaterial.cullmode;
     material.depthtest  = sourceMaterial.depthtest;
     material.depthwrite = sourceMaterial.depthwrite;
-    material.shader     = "genericimage";
+    material.shader     = fallbackDecision.outputShader;
     material.textures   = { ResolveStaticFallbackDiffuseTexture(vfs, sourceMaterial.textures[0]) };
     LOG_INFO("model fallback forcing opaque blend for diffuse-only path: %s shader=%s sourceBlend=%s",
              matJsonFile.c_str(),

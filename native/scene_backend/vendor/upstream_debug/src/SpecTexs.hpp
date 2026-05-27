@@ -31,6 +31,7 @@ constexpr std::string_view WE_REFLECTION_BUFFER { "_rt_Reflection" };
 constexpr std::string_view WE_EFFECT_PPONG_PREFIX { "_rt_effect_pingpong_" };
 constexpr std::string_view WE_EFFECT_PPONG_PREFIX_A { "_rt_effect_pingpong_a_" };
 constexpr std::string_view WE_EFFECT_PPONG_PREFIX_B { "_rt_effect_pingpong_b_" };
+constexpr std::string_view WE_DEBUG_EFFECT_FINAL_OUTPUT_PREFIX { "_rt_debug_effect_final_output_" };
 
 constexpr std::string_view WE_IN_POSITION { "a_Position" };
 constexpr std::string_view WE_IN_NORMAL { "a_Normal" };

@@ -1,7 +1,12 @@
+#include "Debug/EffectCaptureDebug.hpp"
 #include "Policy/EffectPolicy.hpp"
 #include "Policy/ModelFallbackPolicy.hpp"
 #include "Policy/SceneScriptRuntimePolicy.hpp"
 #include "Policy/VideoTexturePolicy.hpp"
+#include "Scene/SceneImageEffectLayer.h"
+#include "Scene/SceneMesh.h"
+#include "Scene/SceneNode.h"
+#include "SpecTexs.hpp"
 
 #include <cstdlib>
 #include <iostream>
@@ -34,6 +39,52 @@ wallpaper::policy::LayerEffectInput baseEffectInput()
         .materialShaders = {"effects/waterwaves"},
     }};
     return input;
+}
+
+std::shared_ptr<wallpaper::SceneNode> effectNode()
+{
+    auto node = std::make_shared<wallpaper::SceneNode>();
+    auto mesh = std::make_shared<wallpaper::SceneMesh>();
+    mesh->AddMaterial(wallpaper::SceneMaterial {});
+    node->AddMesh(mesh);
+    return node;
+}
+
+void testEffectFinalOutputDebugPlaceholder()
+{
+    const std::string pingpongA = "_rt_effect_pingpong_a_test";
+    const std::string pingpongB = "_rt_effect_pingpong_b_test";
+    const std::string debugFinalPlaceholder =
+        std::string(wallpaper::WE_DEBUG_EFFECT_FINAL_OUTPUT_PREFIX) + "test";
+
+    wallpaper::SceneNode worldNode;
+    wallpaper::SceneImageEffectLayer layer(&worldNode, 100.0f, 100.0f, pingpongA, pingpongB);
+    layer.SetPublishFinalOutput(false);
+
+    auto first = std::make_shared<wallpaper::SceneImageEffect>();
+    first->nodes.push_back({ std::string(wallpaper::WE_EFFECT_PPONG_PREFIX_B), effectNode(), false });
+    layer.AddEffect(first);
+
+    auto second = std::make_shared<wallpaper::SceneImageEffect>();
+    second->commands.push_back({ .cmd = wallpaper::SceneImageEffect::CmdType::Copy,
+                                 .dst = "_rt_debug_effect_output_test",
+                                 .src = debugFinalPlaceholder,
+                                 .afterpos = 1 });
+    second->commands.push_back({ .cmd = wallpaper::SceneImageEffect::CmdType::Copy,
+                                 .dst = "_rt_debug_effect_input_test",
+                                 .src = std::string(wallpaper::WE_EFFECT_PPONG_PREFIX_A) + "_test",
+                                 .afterpos = 0 });
+    second->nodes.push_back({ std::string(wallpaper::WE_EFFECT_PPONG_PREFIX_B), effectNode(), false });
+    layer.AddEffect(second);
+
+    wallpaper::SceneMesh defaultMesh;
+    layer.ResolveEffect(defaultMesh, "effect");
+    layer.ResolveEffect(defaultMesh, "effect");
+
+    check(layer.GetEffect(1)->commands[0].src == pingpongA,
+          "debug final-output placeholder resolves to final ping-pong target on even chains");
+    check(layer.GetEffect(1)->commands[1].src == pingpongB,
+          "previous-input placeholder still resolves to current ping-pong input");
 }
 
 void testEffectPolicy()
@@ -122,6 +173,31 @@ void testEffectPolicy()
         }};
         const auto decision = wallpaper::policy::decideLayerEffects(input);
         check(decision.keepEffects, "heavy detection preserves current first-material-only behavior");
+    }
+}
+
+void testEffectCaptureDebug()
+{
+    check(wallpaper::debug::sanitizeCapturePathSegment("ARONA/CROP: SHEET") == "ARONA_CROP_SHEET",
+          "capture path segments replace separators and whitespace");
+    check(wallpaper::debug::sanitizeCapturePathSegment("  flare layer  ") == "flare_layer",
+          "capture path segments trim outer whitespace");
+    check(wallpaper::debug::sanitizeCapturePathSegment("") == "unnamed",
+          "empty capture path segments use unnamed");
+
+    {
+        const wallpaper::debug::EffectCaptureConfig config;
+        check(!config.enabled(), "empty effect capture config disables captures");
+    }
+
+    {
+        const wallpaper::debug::EffectCaptureConfig config {
+            .outputDir = "/tmp/yakkai-effect-debug",
+            .commandLine = "yakkai_scene_harness --debug-effect-captures /tmp/yakkai-effect-debug",
+        };
+        check(config.enabled(), "effect capture config with output directory enables captures");
+        check(config.manifestPath().string() == "/tmp/yakkai-effect-debug/manifest.json",
+              "effect capture manifest path is under the output directory");
     }
 }
 
@@ -316,6 +392,8 @@ void testSceneScriptRuntimePolicy()
 
 int main()
 {
+    testEffectCaptureDebug();
+    testEffectFinalOutputDebugPlaceholder();
     testEffectPolicy();
     testVideoTexturePolicy();
     testModelFallbackPolicy();

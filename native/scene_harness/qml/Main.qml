@@ -18,6 +18,8 @@ Window {
     property bool showInfoOverlay: sceneHarnessShowInfoOverlay
     property string backendName: sceneHarnessBackend
     property string backendQmlFile: sceneHarnessBackendQmlFile
+    property string debugEffectCapturesPath: sceneHarnessDebugEffectCapturesPath
+    property string debugEffectCaptureCommand: sceneHarnessDebugEffectCaptureCommand
 
     Component.onCompleted: {
         console.log("[Harness] window completed backend=" + backendName
@@ -60,6 +62,12 @@ Window {
 
         onLoaded: {
             console.log("[Harness] loader loaded backend item")
+            item.debugEffectCapturesPath = Qt.binding(function() {
+                return root.debugEffectCapturesPath
+            })
+            item.debugEffectCaptureCommand = Qt.binding(function() {
+                return root.debugEffectCaptureCommand
+            })
             item.sceneSource = Qt.binding(function() {
                 return root.sceneSource
             })

@@ -83,6 +83,21 @@ Use the dev flag when working on the renderer or smoke-test harness:
 
 Add `--capture /tmp/output.png --capture-delay-ms 10000` for automated testing.
 
+For effect-chain debugging, the paper backend can write intermediate render-target captures and a manifest:
+
+```bash
+./build/native/scene_harness/yakkai_scene_harness \
+  --backend paper \
+  --source /path/to/scene.pkg \
+  --assets /path/to/wallpaper_engine/assets \
+  --hide-info-overlay \
+  --capture /tmp/yakkai-effect-debug/final.png \
+  --capture-delay-ms 8000 \
+  --debug-effect-captures /tmp/yakkai-effect-debug
+```
+
+`--debug-effect-captures` is harness-only and off by default. It writes `manifest.json` plus `effect-input`, `effect-output`, and `final-publish` TGA captures for effect-chain layers. These captures are run artifacts for investigation; PNG smoke baselines remain the committed source of truth.
+
 ### Manual Build
 
 The normal build target for installable packages is `yakkai_stage_wallyakkai_scene_import`:

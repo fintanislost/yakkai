@@ -21,3 +21,7 @@ target_compile_definitions(yakkai_scene_harness
 if(TARGET yakkai_scene_backend)
     add_dependencies(yakkai_scene_harness yakkai_scene_backend)
 endif()
+
+if(TARGET yakkai_scene_backendplugin)
+    add_dependencies(yakkai_scene_harness yakkai_scene_backendplugin)
+endif()

@@ -345,6 +345,36 @@ QString YakkaiSceneViewer::backendStatus() const
     return m_backendStatus;
 }
 
+QString YakkaiSceneViewer::debugEffectCapturesPath() const
+{
+    return m_debugEffectCapturesPath;
+}
+
+void YakkaiSceneViewer::setDebugEffectCapturesPath(const QString& value)
+{
+    if (m_debugEffectCapturesPath == value) {
+        return;
+    }
+
+    m_debugEffectCapturesPath = value;
+    emit debugEffectCapturesPathChanged();
+}
+
+QString YakkaiSceneViewer::debugEffectCaptureCommand() const
+{
+    return m_debugEffectCaptureCommand;
+}
+
+void YakkaiSceneViewer::setDebugEffectCaptureCommand(const QString& value)
+{
+    if (m_debugEffectCaptureCommand == value) {
+        return;
+    }
+
+    m_debugEffectCaptureCommand = value;
+    emit debugEffectCaptureCommandChanged();
+}
+
 void YakkaiSceneViewer::requestGraphvizDump()
 {
     setBackendStatus(QStringLiteral("Scene backend scaffold only. Graphviz dump requested but no native renderer is wired yet."));

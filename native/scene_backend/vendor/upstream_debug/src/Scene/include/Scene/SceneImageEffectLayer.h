@@ -29,6 +29,8 @@ struct SceneImageEffect {
         std::string dst;
         std::string src;
         i32         afterpos { 0 }; // start at 1, 0 for begin at all
+        bool        srcFinalEffectOutput { false };
+        bool        dstFinalEffectOutput { false };
     };
     std::vector<Command>            commands;
     std::list<SceneImageEffectNode> nodes;

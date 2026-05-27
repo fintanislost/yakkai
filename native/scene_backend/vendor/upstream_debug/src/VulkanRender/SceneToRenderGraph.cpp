@@ -125,16 +125,20 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
             auto  cmdItor = eff->commands.begin();
             auto  cmdEnd  = eff->commands.end();
             int   nodePos = 0;
-            for (auto& n : eff->nodes) {
-                if (cmdItor != cmdEnd && nodePos == cmdItor->afterpos) {
+            auto addCopyCommandsAtPosition = [&]() {
+                while (cmdItor != cmdEnd && nodePos == cmdItor->afterpos) {
                     rg::addCopyPass(
                         rgraph, rg::createTexDesc(cmdItor->src), rg::createTexDesc(cmdItor->dst));
                     cmdItor++;
                 }
+            };
+            for (auto& n : eff->nodes) {
+                addCopyCommandsAtPosition();
                 auto& name = n.output;
                 ToGraphPass(n.sceneNode.get(), name, node->ID(), extra);
                 nodePos++;
             }
+            addCopyCommandsAtPosition();
         }
     };
 

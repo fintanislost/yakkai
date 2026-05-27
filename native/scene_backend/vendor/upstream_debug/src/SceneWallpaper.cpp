@@ -166,6 +166,8 @@ private:
     std::string m_source;
     std::string m_cache_path;
     std::string m_scene_properties_json;
+    std::string m_debug_effect_captures;
+    std::string m_debug_effect_capture_command;
     bool        m_gen_graphviz { false };
 
     WPSceneParser                        m_scene_parser;
@@ -426,6 +428,10 @@ MHANDLER_CMD_IMPL(MainHandler, SET_PROPERTY) {
             m_cache_path = path;
         } else if (property == PROPERTY_SCENE_PROPERTIES_JSON) {
             msg->findString("value", &m_scene_properties_json);
+        } else if (property == PROPERTY_DEBUG_EFFECT_CAPTURES) {
+            msg->findString("value", &m_debug_effect_captures);
+        } else if (property == PROPERTY_DEBUG_EFFECT_CAPTURE_COMMAND) {
+            msg->findString("value", &m_debug_effect_capture_command);
         } else if (property == PROPERTY_FIRST_FRAME_CALLBACK) {
             std::shared_ptr<FirstFrameCallback> cb;
             msg->findObject("value", &cb);
@@ -522,6 +528,10 @@ void MainHandler::loadScene() {
             LOG_ERROR("Not supported scene type");
             return;
         }
+        m_scene_parser.SetDebugEffectCaptureConfig({
+            .outputDir = m_debug_effect_captures,
+            .commandLine = m_debug_effect_capture_command,
+        });
         m_scene_parser.SetScenePropertiesJson(
             ResolveScenePropertiesJson(m_scene_properties_json, pkgDir));
         try {

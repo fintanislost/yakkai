@@ -40,6 +40,12 @@ Item {
         }
     }
 
+    function prepareForCaptureExit() {
+        if (typeof viewer.pause === "function") {
+            viewer.pause()
+        }
+    }
+
     Rectangle {
         anchors.fill: parent
         color: "#11161d"

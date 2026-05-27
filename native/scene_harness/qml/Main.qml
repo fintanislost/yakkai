@@ -4,8 +4,8 @@ import QtQuick.Window
 Window {
     id: root
 
-    width: 1600
-    height: 900
+    width: sceneHarnessWindowWidth
+    height: sceneHarnessWindowHeight
     visible: true
     color: "#0b1016"
     title: "Paper Scene Harness"
@@ -15,6 +15,7 @@ Window {
     property int fillModeValue: sceneHarnessFillModeValue
     property bool mouseInputEnabled: sceneHarnessMouseInput
     property bool muted: sceneHarnessMuted
+    property bool showInfoOverlay: sceneHarnessShowInfoOverlay
     property string backendName: sceneHarnessBackend
     property string backendQmlFile: sceneHarnessBackendQmlFile
 
@@ -34,6 +35,14 @@ Window {
         case 0:
         default:
             return "crop"
+        }
+    }
+
+    function prepareForCaptureExit() {
+        console.log("[Harness] preparing capture exit")
+        if (backendLoader.item
+                && typeof backendLoader.item.prepareForCaptureExit === "function") {
+            backendLoader.item.prepareForCaptureExit()
         }
     }
 
@@ -79,6 +88,7 @@ Window {
     }
 
     Rectangle {
+        visible: root.showInfoOverlay
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.margins: 16
@@ -92,6 +102,7 @@ Window {
 
     Text {
         id: infoText
+        visible: root.showInfoOverlay
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.margins: 28

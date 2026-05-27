@@ -117,6 +117,21 @@ On distro packages, look for the Qt Quick/QML development packages, Qt Multimedi
 
 The package check verifies required Plasma files, verifies the generated native QML import files are staged, runs `qmllint` when available, and performs a throwaway `kpackagetool6` install. Use `--skip-kpackage` when only the file and QML checks are needed.
 
+### Render Regression Checks
+
+Use the local smoke-test harness before renderer-risk changes and before releases:
+
+```bash
+./smoke-tests/run.sh --suite quick
+./smoke-tests/run.sh --suite deep
+./smoke-tests/run.sh --suite release --strict --require-assets
+```
+
+The quick suite is for normal development loops. The deep suite is required for changes affecting pixels, scene loading, animation timing, video textures, shader preprocessing, effect policy, blend/composition, model/material/light behavior, SceneScript, QML render plumbing, harness capture behavior, or validator behavior.
+The release suite contains the currently baselined required scenes. Add optional deep candidates only after reviewing the local asset and promoting baselines.
+
+The harness compares deterministic PNG captures against versioned baselines and writes review artifacts to `/tmp/yakkai-smoke`. Smoke-test captures hide the local harness info overlay; generated review videos are for human inspection only, and PNG frames remain the source of truth.
+
 ## Release Packaging
 
 Release assets are built from tags by `.github/workflows/release.yml`. To create a release, push a tag such as `v0.1.0`; the workflow builds an Arch Linux x86_64 prebuilt package, builds a source fallback tarball, writes `SHA256SUMS`, and creates or updates the matching GitHub release.
@@ -191,10 +206,11 @@ The native backend supports:
 - **Particles**: Conditional visibility, parent container hiding
 
 ### Known limitations
-- Per-layer effect chains break alpha compositing (workaround: effects stripped in puppet scenes)
-- Video textures use static first frame for small overlays (continuous decode for main wallpaper videos)
-- Full material/lighting fidelity incomplete
-- SceneScript support is partial (stubs, not full runtime)
+- Regular per-layer offscreen effect chains in puppet scenes can break alpha compositing. Yakkai selectively strips regular/heavy effects in puppet scenes while preserving composelayers, colorkey, flare/lens, and other essential effect paths.
+- Small embedded video textures are decoded as static first frames to keep CPU use bounded. Continuous decode is enabled only for large/main videos when FFmpeg is available at build time.
+- Static model scenes use an experimental fallback for basis correction, camera framing, and material selection.
+- Material/lighting fidelity is partial: generic materials and point lights are supported, but full Wallpaper Engine PBR, shadow, and reflection parity is not.
+- SceneScript support is partial: Yakkai evaluates simple layer bindings (origin/color/alpha/visible) with API stubs, not the full Wallpaper Engine runtime.
 
 ## Remove
 

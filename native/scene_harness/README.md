@@ -26,8 +26,19 @@ Useful flags:
 - `--source /absolute/path/to/scene.json`
 - `--assets /absolute/path/to/wallpaper_engine/assets`
 - `--fill crop|fit|stretch`
+- `--window-size WIDTHxHEIGHT` (defaults to `1600x900`; smoke tests set this from `scenes.json`)
+- `--hide-info-overlay` hides the local debug overlay so captured PNGs contain only scene pixels.
 - `--mouse`
 - `--unmuted`
+
+Capture flags:
+- `--capture path --capture-delay-ms ms` keeps the original single-capture behavior.
+- `--capture-dir path --capture-times-ms 1000,3000,8000` captures fixed timestamps in one harness process and writes `frame-00001000ms.png`, `frame-00003000ms.png`, and `frame-00008000ms.png`.
+- `--capture-dir path --capture-sequence 5000:60:33` captures a sequence starting at 5000ms with 60 frames spaced 33ms apart and writes `frame-0000.png`, `frame-0001.png`, and so on.
+
+Use multi-capture with `--hide-info-overlay` for render regression tests so timing and scene setup stay inside one process and baselines are not tied to local absolute paths. Capture sequences are limited to 3600 frames.
+Invalid multi-capture schedules are rejected, including empty fixed-time elements, duplicate fixed timestamps, negative values, overflow, and sequences over 3600 frames.
+After the final capture, the harness asks the loaded backend to pause and waits briefly before exiting. This gives the render thread time to drain before Qt tears down the window and graphics context.
 
 The harness is expected to evolve faster than the Plasma package. Keep backend experiments here first, then move stable behavior back into `Wallpaper Engine Scene Native`.
 

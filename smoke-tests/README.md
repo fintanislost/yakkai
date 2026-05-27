@@ -1,59 +1,42 @@
-# Smoke Test Reference Screenshots
+# Smoke Tests
 
-Captured from the scene harness at known-good master state for regression comparison.
+The smoke-test harness is the local visual regression gate for Wallpaper Engine scene rendering.
 
-## 3228578419 — Sleeping Arona (Blue Archive)
+`quick`, `deep`, and `release` currently contain the same baselined required scenes. Add optional candidates only after reviewing the local asset and promoting baselines.
 
-**File:** `3228578419-sleeping-arona.png`
-**Type:** Puppet scene (14-bone skinned crop-sheet puppet)
-**Workshop:** `steamapps/workshop/content/431960/3228578419/scene.pkg`
-**Key features:**
-- Puppet mesh character (ARONA_CROP_SHEET) with direct rendering (effects stripped)
-- Rainbow lens flare arc (workshop/2188505192 flare layers with full effect chain)
-- Sparkle particles, Z sleep letters, halo glow
-- Background layers (desk, wall, chair) with pulse effects
-- Capture delay: 8000ms, fill: crop
-
-## 3327063360 — Shiroko Night of Stars (Blue Archive)
-
-**File:** `3327063360-shiroko-video.png`
-**Type:** Video texture scene (embedded MP4, 3840x2160, 60fps)
-**Workshop:** `steamapps/workshop/content/431960/3327063360/scene.pkg`
-**Key features:**
-- Animated MP4 video background decoded via FFmpeg
-- Full effect chain with HLSL screen-space UV fix
-- Particle effects (green glow dots)
-- Solidlayer overlays rendering through effect pipeline
-- Capture delay: 20000ms (video needs longer to load), fill: crop
-
-## How to recapture
+## Commands
 
 ```bash
-# Arona
-build/native/scene_harness/yakkai_scene_harness --backend paper \
-  --source ~/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/workshop/content/431960/3228578419/scene.pkg \
-  --assets ~/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/wallpaper_engine/assets \
-  --fill crop --capture smoke-tests/3228578419-sleeping-arona.png --capture-delay-ms 8000
-
-# Shiroko
-build/native/scene_harness/yakkai_scene_harness --backend paper \
-  --source ~/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/workshop/content/431960/3327063360/scene.pkg \
-  --assets ~/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/wallpaper_engine/assets \
-  --fill crop --capture smoke-tests/3327063360-shiroko-video.png --capture-delay-ms 20000
+./smoke-tests/run.sh --suite quick
+./smoke-tests/run.sh --suite deep
+./smoke-tests/run.sh --suite release --strict --require-assets
+./smoke-tests/run.sh --suite deep --write-candidates
+./smoke-tests/run.sh --promote /tmp/yakkai-smoke/<run-id>
+./smoke-tests/run.sh --list
 ```
 
-## Scene types
+## Result States
 
-The renderer detects scene type during object scan and uses different pipelines:
+- `pass`: structural checks and visual metrics are within thresholds.
+- `review`: visual drift exceeded the warning threshold but not the hard-fail threshold. The command exits zero unless `--strict` is set.
+- `fail`: blank frames, missing expected motion, structural errors, shader/material errors, required dependency failures, missing expected frames, capture size mismatches, or large visual drift.
+- `skip`: local Workshop assets are missing. Skips exit zero unless `--require-assets` is set for required scenes.
 
-| Type | Detection | Pipeline | Example |
-|------|-----------|----------|---------|
-| Puppet | Image object with `.puppet` field | Effects stripped (except flares), direct puppet mesh | Sleeping Arona |
-| Video | Embedded MP4 in .tex container | Full effects + FFmpeg decode | Shiroko Night |
-| Standard | Neither | Full effect pipeline | Zero Two |
+## Baselines
 
-See `ARONA_SITREP.md` for detailed puppet scene constraints.
+PNG frames under `smoke-tests/baselines/` are the versioned comparison source of truth. Generated MP4/WebM clips, diffs, logs, and summaries are artifacts and stay out of git.
+Smoke-test captures hide the harness info overlay so baselines contain scene content instead of local machine paths.
+Animated and video-heavy sequences can opt into a small `temporalToleranceFrames` window in `scenes.json`; the runner still compares PNGs, but it uses the closest nearby baseline frame to absorb animation or decoder timing jitter. Video-texture fixtures should prefer sequence baselines over standalone still captures when the decoder phase is not stable across harness invocations.
 
-## Git state
+Baseline updates are two-step:
 
-Updated at branch `fix-arona-shader-regression` (2026-03-28).
+```bash
+./smoke-tests/run.sh --suite deep --write-candidates
+./smoke-tests/run.sh --promote /tmp/yakkai-smoke/<run-id>
+```
+
+Review the artifact bundle before promotion. Check camera angle, visible elements, character position, color balance, composition, effect intensity, and motion.
+
+## Assets
+
+See `smoke-tests/ASSETS.md` for Workshop links and scene purpose.

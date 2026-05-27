@@ -46,6 +46,12 @@ Item {
         viewer.setAcceptHover(mouseInputEnabled)
     }
 
+    function prepareForCaptureExit() {
+        if (typeof viewer.pause === "function") {
+            viewer.pause()
+        }
+    }
+
     onMouseInputEnabledChanged: applyMouseInput()
 
     Rectangle {

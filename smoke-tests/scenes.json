@@ -1,0 +1,88 @@
+{
+  "version": 1,
+  "defaults": {
+    "backend": "paper",
+    "fill": "crop",
+    "captureSize": {
+      "width": 1280,
+      "height": 720
+    },
+    "thresholds": {
+      "rmseReview": 0.015,
+      "rmseFail": 0.08,
+      "minGrayStddev": 0.01,
+      "minUniqueColors": 50,
+      "minMotionRmse": 0.002,
+      "maxStaticMotionRmse": 0.01
+    }
+  },
+  "paths": {
+    "harness": "build/native/scene_harness/yakkai_scene_harness",
+    "assets": "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/wallpaper_engine/assets",
+    "workshop": "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/workshop/content/431960",
+    "baselines": "smoke-tests/baselines"
+  },
+  "scenes": [
+    {
+      "id": "3228578419",
+      "name": "Sleeping Arona",
+      "workshopUrl": "https://steamcommunity.com/sharedfiles/filedetails/?id=3228578419",
+      "source": "${workshop}/3228578419/scene.pkg",
+      "gates": ["quick", "deep", "release"],
+      "required": true,
+      "features": ["puppet", "flare", "particles", "alpha-sensitive-effects"],
+      "captures": [
+        {
+          "name": "still-8000",
+          "timeMs": 8000,
+          "baseline": "3228578419/stills/still-8000.png"
+        }
+      ],
+      "sequences": [
+        {
+          "name": "motion-8000",
+          "startMs": 8000,
+          "frames": 30,
+          "intervalMs": 33,
+          "baselineDir": "3228578419/sequences/motion-8000",
+          "temporalToleranceFrames": 2
+        }
+      ],
+      "thresholds": {
+        "rmseReview": 0.035
+      },
+      "expectations": {
+        "motion": true,
+        "manualReview": ["camera angle", "visible desk/background/character", "lens flare intensity", "halo glow", "sleep particles"]
+      }
+    },
+    {
+      "id": "3327063360",
+      "name": "Shiroko Night Video",
+      "workshopUrl": "https://steamcommunity.com/sharedfiles/filedetails/?id=3327063360",
+      "source": "${workshop}/3327063360/scene.pkg",
+      "gates": ["quick", "deep", "release"],
+      "required": true,
+      "features": ["video-texture", "particles", "effect-chain"],
+      "sequences": [
+        {
+          "name": "video-20000",
+          "startMs": 20000,
+          "frames": 60,
+          "intervalMs": 33,
+          "baselineDir": "3327063360/sequences/video-20000",
+          "temporalToleranceFrames": 6
+        }
+      ],
+      "thresholds": {
+        "rmseReview": 0.075,
+        "rmseFail": 0.12,
+        "minMotionRmse": 0.004
+      },
+      "expectations": {
+        "motion": true,
+        "manualReview": ["video progression", "green particles", "background composition", "color balance"]
+      }
+    }
+  ]
+}

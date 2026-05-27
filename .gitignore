@@ -14,6 +14,10 @@ wallpapers/logs.txt
 *.dev.md
 *.todo.md
 /smoke-tests/*.png
+/smoke-tests/artifacts/
+/smoke-tests/candidates/
+/smoke-tests/*.mp4
+/smoke-tests/*.webm
 /references/
 /md-fixes/
 /AGENTS.md

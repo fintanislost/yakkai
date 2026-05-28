@@ -3,13 +3,17 @@
 #include "Policy/ModelFallbackPolicy.hpp"
 #include "Policy/SceneScriptRuntimePolicy.hpp"
 #include "Policy/VideoTexturePolicy.hpp"
+#include "Scene/Scene.h"
 #include "Scene/SceneImageEffectLayer.h"
 #include "Scene/SceneMesh.h"
 #include "Scene/SceneNode.h"
 #include "SpecTexs.hpp"
 
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <string>
 
 namespace {
@@ -48,6 +52,13 @@ std::shared_ptr<wallpaper::SceneNode> effectNode()
     mesh->AddMaterial(wallpaper::SceneMaterial {});
     node->AddMesh(mesh);
     return node;
+}
+
+std::string readTextFile(const std::filesystem::path& path)
+{
+    std::ifstream in(path);
+    return std::string(std::istreambuf_iterator<char>(in),
+                       std::istreambuf_iterator<char>());
 }
 
 void testEffectFinalOutputDebugPlaceholder()
@@ -198,6 +209,67 @@ void testEffectCaptureDebug()
         check(config.enabled(), "effect capture config with output directory enables captures");
         check(config.manifestPath().string() == "/tmp/yakkai-effect-debug/manifest.json",
               "effect capture manifest path is under the output directory");
+    }
+
+    {
+        wallpaper::Scene scene;
+        wallpaper::debug::EffectCaptureLayerInfo layer;
+        layer.sceneId = "unit-scene";
+        layer.layerName = "disabled candidate";
+
+        wallpaper::debug::recordStrippedEffectCandidate(scene, layer);
+
+        check(scene.debugEffectStrippedCandidates.empty(),
+              "disabled effect capture config ignores stripped candidates");
+    }
+
+    {
+        const auto outDir =
+            std::filesystem::temp_directory_path() / "yakkai-stripped-candidate-policy-test";
+        std::filesystem::remove_all(outDir);
+
+        wallpaper::Scene scene;
+        scene.scene_id = "unit-scene";
+        scene.debugEffectCaptures = {
+            .outputDir = outDir.string(),
+            .commandLine = "unit --debug-effect-captures " + outDir.string(),
+        };
+
+        wallpaper::debug::EffectCaptureLayerInfo layer;
+        layer.sceneId = "unit-scene";
+        layer.sceneType = "Puppet";
+        layer.layerName = "Water background";
+        layer.layerImage = "materials/water.png";
+        layer.layerId = 42;
+        layer.visibleEffectCount = 2;
+        layer.alpha = 0.75f;
+        layer.keepLayer = true;
+        layer.keepEffects = false;
+        layer.strippedEffects = true;
+        layer.policyReason = "puppet-alpha-strip";
+        layer.effectNames = {"waterwaves", "opacity"};
+        layer.materialShaders = {"effects/waterwaves", "effects/opacity"};
+
+        wallpaper::debug::recordStrippedEffectCandidate(scene, layer);
+
+        check(scene.debugEffectStrippedCandidates.size() == 1,
+              "stripped candidate is stored separately from capture records");
+        check(scene.debugEffectCaptureRecords.empty(),
+              "stripped candidate does not create dump capture records");
+        check(wallpaper::debug::writeEffectCaptureManifest(scene),
+              "manifest writes stripped candidates");
+
+        const std::string manifest = readTextFile(scene.debugEffectCaptures.manifestPath());
+        check(manifest.find("\"status\": \"ok\"") != std::string::npos,
+              "stripped candidates do not fail manifest status");
+        check(manifest.find("\"strippedCandidates\"") != std::string::npos,
+              "manifest includes strippedCandidates array");
+        check(manifest.find("\"layerName\": \"Water background\"") != std::string::npos,
+              "manifest includes stripped candidate layer name");
+        check(manifest.find("\"reason\": \"puppet-alpha-strip\"") != std::string::npos,
+              "manifest includes stripped candidate policy reason");
+
+        std::filesystem::remove_all(outDir);
     }
 }
 

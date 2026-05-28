@@ -2526,6 +2526,9 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         }
     }
     if (puppetEffectDecision.reason == "puppet-alpha-strip") {
+        if (context.scene && context.scene->debugEffectCaptures.enabled()) {
+            wallpaper::debug::recordStrippedEffectCandidate(*context.scene, effectCaptureInfo);
+        }
         LOG_INFO("stripping %d effects from layer (alpha fix): name=%s",
                  count_eff, wpimgobj.name.c_str());
         count_eff = 0;

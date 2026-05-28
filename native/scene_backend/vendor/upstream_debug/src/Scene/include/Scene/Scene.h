@@ -46,6 +46,7 @@ public:
     wallpaper::debug::EffectCaptureConfig              debugEffectCaptures;
     std::vector<wallpaper::debug::EffectCaptureRecord> debugEffectCaptureRecords;
     std::vector<wallpaper::debug::EffectPassState>     debugEffectPassStates;
+    std::vector<wallpaper::debug::EffectCaptureLayerInfo> debugEffectStrippedCandidates;
 
     SceneMesh default_effect_mesh;
 

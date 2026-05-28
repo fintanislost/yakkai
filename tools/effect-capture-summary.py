@@ -18,6 +18,14 @@ def capture_layer(record):
     return layer if isinstance(layer, dict) else {}
 
 
+def candidate_layer(record):
+    if not isinstance(record, dict):
+        return {}
+
+    layer = record.get("layer")
+    return layer if isinstance(layer, dict) else record
+
+
 def capture_key(record):
     layer = capture_layer(record)
     layer_id = layer.get("layerId")
@@ -84,6 +92,13 @@ def decision_for_layer(layer):
     return decision, str(policy.get("reason", "unknown"))
 
 
+def candidate_reason(candidate):
+    policy = candidate_layer(candidate).get("policy")
+    if isinstance(policy, dict):
+        return str(policy.get("reason", "unknown"))
+    return "unknown"
+
+
 def main():
     if len(sys.argv) != 2:
         print("usage: tools/effect-capture-summary.py /path/to/manifest.json", file=sys.stderr)
@@ -95,6 +110,7 @@ def main():
 
     captures = as_list(manifest.get("captures"))
     pass_states = as_list(manifest.get("passStates"))
+    stripped_candidates = as_list(manifest.get("strippedCandidates"))
     layers = unique_layers(as_list(manifest.get("layers")), captures)
     failures = capture_failures(as_list(manifest.get("failures")), captures)
 
@@ -107,7 +123,7 @@ def main():
     print(f"scene={manifest.get('sceneId', 'unknown')}")
     print(f"wallpaper={manifest.get('wallpaperPath', 'unknown')}")
     print(f"captures={len(captures)} stages={dict(sorted(stage_counts.items()))}")
-    print(f"layers={len(layers)} passStates={len(pass_states)} failures={len(failures)}")
+    print(f"layers={len(layers)} passStates={len(pass_states)} failures={len(failures)} strippedCandidates={len(stripped_candidates)}")
 
     if failures:
         print("failures:")
@@ -122,6 +138,25 @@ def main():
         print("decisions:")
         for (decision, reason), count in sorted(decisions.items()):
             print(f"  - {decision} reason={reason} count={count}")
+
+    if stripped_candidates:
+        reasons = Counter(candidate_reason(candidate) for candidate in stripped_candidates)
+        print("stripped-candidate-reasons:")
+        for reason, count in sorted(reasons.items()):
+            print(f"  - {reason}: {count}")
+
+        print("stripped-candidate-layers:")
+        for candidate in stripped_candidates[:10]:
+            layer = candidate_layer(candidate)
+            policy = layer.get("policy") if isinstance(layer.get("policy"), dict) else {}
+            layer_id = layer.get("layerId", "unknown")
+            layer_name = layer.get("layerName") or "unnamed"
+            reason = str(policy.get("reason", "unknown"))
+            effects = len(as_list(layer.get("effectNames")))
+            shaders = len(as_list(layer.get("materialShaders")))
+            print(f"  - {layer_id}:{layer_name} reason={reason} effects={effects} shaders={shaders}")
+        if len(stripped_candidates) > 10:
+            print(f"  ... {len(stripped_candidates) - 10} more")
 
     if layer_stage_counts:
         print("layer-stage-counts:")

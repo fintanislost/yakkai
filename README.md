@@ -96,7 +96,7 @@ For effect-chain debugging, the paper backend can write intermediate render-targ
   --debug-effect-captures /tmp/yakkai-effect-debug
 ```
 
-`--debug-effect-captures` is harness-only and off by default. It writes `manifest.json` plus `effect-input`, `effect-output`, and `final-publish` TGA captures for effect-chain layers. These captures are run artifacts for investigation; PNG smoke baselines remain the committed source of truth.
+`--debug-effect-captures` is harness-only and off by default. It writes `manifest.json` plus `effect-input`, `effect-output`, and `final-publish` TGA captures for preserved effect-chain layers. The manifest also includes a top-level `strippedCandidates` array for effect chains that policy removed before render graph construction; these entries are metadata only and do not represent failed dumps. These captures are run artifacts for investigation; PNG smoke baselines remain the committed source of truth.
 
 Summarize a capture manifest before comparing images:
 

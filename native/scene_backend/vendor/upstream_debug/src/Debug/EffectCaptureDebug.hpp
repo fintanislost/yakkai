@@ -74,6 +74,8 @@ void registerEffectCapture(Scene& scene,
 
 void recordEffectPassState(Scene& scene, const EffectPassState& state);
 
+void recordStrippedEffectCandidate(Scene& scene, const EffectCaptureLayerInfo& layer);
+
 bool writeEffectCaptureManifest(const Scene& scene);
 
 } // namespace wallpaper::debug

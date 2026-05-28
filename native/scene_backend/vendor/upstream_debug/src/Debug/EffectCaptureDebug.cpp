@@ -131,6 +131,14 @@ void recordEffectPassState(Scene& scene, const EffectPassState& state)
     scene.debugEffectPassStates.push_back(state);
 }
 
+void recordStrippedEffectCandidate(Scene& scene, const EffectCaptureLayerInfo& layer)
+{
+    if (!scene.debugEffectCaptures.enabled()) {
+        return;
+    }
+    scene.debugEffectStrippedCandidates.push_back(layer);
+}
+
 bool writeEffectCaptureManifest(const Scene& scene)
 {
     if (!scene.debugEffectCaptures.enabled()) {
@@ -172,6 +180,11 @@ bool writeEffectCaptureManifest(const Scene& scene)
         });
     }
 
+    nlohmann::json strippedCandidates = nlohmann::json::array();
+    for (const auto& candidate : scene.debugEffectStrippedCandidates) {
+        strippedCandidates.push_back(layerToJson(candidate));
+    }
+
     nlohmann::json manifest = {
         {"status", failed ? "failed" : "ok"},
         {"sceneId", scene.scene_id},
@@ -179,6 +192,7 @@ bool writeEffectCaptureManifest(const Scene& scene)
         {"captureCount", scene.debugEffectCaptureRecords.size()},
         {"captures", captures},
         {"passStates", passStates},
+        {"strippedCandidates", strippedCandidates},
     };
 
     const auto manifestPath = scene.debugEffectCaptures.manifestPath();

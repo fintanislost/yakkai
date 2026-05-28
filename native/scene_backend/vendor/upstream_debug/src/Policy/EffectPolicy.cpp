@@ -245,6 +245,9 @@ CandidateClassification classifyStrippedEffectCandidate(const LayerEffectInput& 
     } else if (classification.candidateChecks.isProtectedPuppetPath) {
         classification.candidateRisk = "protected-puppet-path";
         classification.candidateBlockedReason = "protected-puppet-path";
+    } else if (classification.candidateChecks.isPuppetLayer) {
+        classification.candidateRisk = "puppet-layer";
+        classification.candidateBlockedReason = "puppet-layer";
     } else if (classification.candidateChecks.isComposelayer) {
         classification.candidateRisk = "composelayer-carrier";
         classification.candidateBlockedReason = "composelayer-carrier";
@@ -311,6 +314,12 @@ LayerEffectDecision decideLayerEffects(const LayerEffectInput& input)
         (!hasHeavyEffect && (isFlareOrLensLayer(input.layerName) || input.colorBlendMode != 0));
 
     if (!isEssentialEffect) {
+        const auto candidateClassification = classifyStrippedEffectCandidate(input);
+        if (candidateClassification.candidateRisk == "simple-water") {
+            decision.reason = "simple-water-effect";
+            return decision;
+        }
+
         decision.keepEffects = false;
         decision.strippedEffects = true;
         decision.reason = "puppet-alpha-strip";

@@ -144,6 +144,75 @@ class EffectCaptureSummaryTests(unittest.TestCase):
         self.assertIn("  - 124:Window Water reason=puppet-alpha-strip risk=simple-water families=waterflow effects=1 shaders=1", completed.stdout)
         self.assertIn("  - 405:ARONA_CROP_SHEET reason=puppet-alpha-strip risk=protected-puppet-path families=waterwaves effects=2 shaders=2", completed.stdout)
 
+    def test_reports_allowed_simple_water_rendered_layers(self):
+        manifest = {
+            "sceneId": "3476236738",
+            "captures": [
+                {
+                    "stage": "effect-input",
+                    "layer": {
+                        "layerId": 124,
+                        "layerName": "Window Water",
+                        "policy": {
+                            "keepLayer": True,
+                            "keepEffects": True,
+                            "strippedEffects": False,
+                            "forceAlphaOne": False,
+                            "reason": "simple-water-effect",
+                        },
+                        "effectNames": ["waterflow"],
+                        "materialShaders": ["effects/waterflow"],
+                        "candidateFamilies": ["waterflow"],
+                        "candidateRisk": "simple-water",
+                        "candidateBlockedReason": "water-effect-candidate",
+                    },
+                },
+                {
+                    "stage": "effect-output",
+                    "layer": {
+                        "layerId": 124,
+                        "layerName": "Window Water",
+                        "policy": {
+                            "keepLayer": True,
+                            "keepEffects": True,
+                            "strippedEffects": False,
+                            "forceAlphaOne": False,
+                            "reason": "simple-water-effect",
+                        },
+                        "effectNames": ["waterflow"],
+                        "materialShaders": ["effects/waterflow"],
+                        "candidateFamilies": ["waterflow"],
+                        "candidateRisk": "simple-water",
+                        "candidateBlockedReason": "water-effect-candidate",
+                    },
+                },
+            ],
+            "passStates": [],
+            "strippedCandidates": [
+                {
+                    "layerId": 168,
+                    "layerName": "Mixed Water",
+                    "policy": {"reason": "puppet-alpha-strip"},
+                    "effectNames": ["waterwaves", "opacity"],
+                    "materialShaders": ["effects/waterwaves", "effects/opacity"],
+                    "candidateFamilies": ["waterwaves"],
+                    "candidateRisk": "mixed-chain",
+                    "candidateBlockedReason": "water-effect-mixed-chain",
+                },
+            ],
+        }
+
+        completed = self.run_summary(manifest)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("allowed-simple-water-candidates=1", completed.stdout)
+        self.assertIn("allowed-simple-water-families:", completed.stdout)
+        self.assertIn("  - waterflow: 1", completed.stdout)
+        self.assertIn("allowed-simple-water-layers:", completed.stdout)
+        self.assertIn("  - 124:Window Water reason=simple-water-effect families=waterflow effects=1 shaders=1", completed.stdout)
+        self.assertIn("strippedCandidates=1", completed.stdout)
+        self.assertIn("  - mixed-chain: 1", completed.stdout)
+
     def test_old_manifest_without_stripped_candidates_reports_zero(self):
         completed = self.run_summary({
             "sceneId": "3476236738",

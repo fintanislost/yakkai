@@ -20,6 +20,7 @@ Automated validator that checks both structural rendering state and pixel output
 - Scene property tint resolution
 - QuickJS script evaluation
 - Material loading failures
+- Effect capture manifest gates for known renderer-risk fixtures (`3476236738` must allow at least one simple-water candidate; `3228578419` must allow none)
 
 **Pixel analysis:**
 - Capture file size (blank detection)

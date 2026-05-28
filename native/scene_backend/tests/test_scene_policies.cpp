@@ -83,6 +83,41 @@ void checkDecisionStableAfterClassification(const wallpaper::policy::LayerEffect
     check(!classification.candidateRisk.empty(), label + " classification has risk");
 }
 
+void checkSimpleWaterPreserved(wallpaper::policy::LayerEffectInput input,
+                               const std::string& label)
+{
+    const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
+    const auto decision = wallpaper::policy::decideLayerEffects(input);
+
+    check(classification.candidateRisk == "simple-water",
+          label + " is classified as simple-water");
+    check(decision.keepLayer,
+          label + " keeps the layer");
+    check(decision.keepEffects,
+          label + " keeps effects");
+    check(!decision.strippedEffects,
+          label + " is not marked stripped");
+    check(decision.reason == "simple-water-effect",
+          label + " uses the simple-water policy reason");
+}
+
+void checkPuppetAlphaStripped(wallpaper::policy::LayerEffectInput input,
+                              const std::string& expectedRisk,
+                              const std::string& label)
+{
+    const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
+    const auto decision = wallpaper::policy::decideLayerEffects(input);
+
+    check(classification.candidateRisk == expectedRisk,
+          label + " has expected classifier risk");
+    check(!decision.keepEffects,
+          label + " strips effects");
+    check(decision.strippedEffects,
+          label + " is marked stripped");
+    check(decision.reason == "puppet-alpha-strip",
+          label + " keeps puppet-alpha-strip reason");
+}
+
 void testEffectFinalOutputDebugPlaceholder()
 {
     const std::string pingpongA = "_rt_effect_pingpong_a_test";
@@ -301,6 +336,22 @@ void testEffectCandidateClassification()
     {
         auto input = baseEffectInput();
         input.isPuppetLayer = true;
+        input.layerName = "Character water layer";
+        const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
+        check(classification.candidateRisk == "puppet-layer",
+              "generic puppet water layer is blocked before simple-water");
+        check(classification.candidateBlockedReason == "puppet-layer",
+              "generic puppet water layer records puppet-layer reason");
+        check(classification.candidateChecks.isPuppetLayer,
+              "generic puppet water layer records puppet-layer check");
+        check(classification.candidateChecks.waterOnly,
+              "generic puppet water layer can still be water-only");
+        checkDecisionStableAfterClassification(input, "generic-puppet-water-layer");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.isPuppetLayer = true;
         input.layerName = "ARONA_CROP_SHEET";
         input.effects.push_back({
             .name = "pulse",
@@ -389,6 +440,64 @@ void testEffectPolicy()
         check(decision.keepLayer, "YAKKAI_NO_EFFECTS keeps non-composelayers");
         check(!decision.keepEffects, "YAKKAI_NO_EFFECTS strips non-composelayer effects");
         check(decision.reason == "debug-no-effects", "debug strip reason is parser-visible");
+    }
+
+    {
+        auto input = baseEffectInput();
+        checkSimpleWaterPreserved(input, "simple waterwaves");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.effects = {{
+            .name = "waterflow",
+            .visible = true,
+            .firstMaterialShader = "effects/waterflow",
+            .materialShaders = {"effects/waterflow"},
+        }};
+        checkSimpleWaterPreserved(input, "simple waterflow");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.effects = {{
+            .name = "waterripple",
+            .visible = true,
+            .firstMaterialShader = "effects/waterripple",
+            .materialShaders = {"effects/waterripple"},
+        }};
+        checkSimpleWaterPreserved(input, "simple waterripple");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.effects.push_back({
+            .name = "opacity",
+            .visible = true,
+            .firstMaterialShader = "effects/opacity",
+            .materialShaders = {"effects/opacity"},
+        });
+        checkPuppetAlphaStripped(input, "mixed-chain", "water plus opacity");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.isPuppetLayer = true;
+        input.layerName = "Character water layer";
+        checkPuppetAlphaStripped(input, "puppet-layer", "generic puppet water layer");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.isPuppetLayer = true;
+        input.layerName = "ARONA_CROP_SHEET";
+        input.effects.push_back({
+            .name = "pulse",
+            .visible = true,
+            .firstMaterialShader = "effects/pulse",
+            .materialShaders = {"effects/pulse"},
+        });
+        checkPuppetAlphaStripped(input, "protected-puppet-path", "protected crop-sheet water layer");
     }
 
     {

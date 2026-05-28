@@ -109,6 +109,17 @@ def candidate_families(candidate):
     return [str(family) for family in as_list(families)]
 
 
+def is_allowed_simple_water_layer(layer):
+    if not isinstance(layer, dict):
+        return False
+    if layer.get("candidateRisk") != "simple-water":
+        return False
+    policy = layer.get("policy")
+    if not isinstance(policy, dict):
+        return False
+    return policy.get("keepEffects") is True and policy.get("strippedEffects") is not True
+
+
 def main():
     if len(sys.argv) != 2:
         print("usage: tools/effect-capture-summary.py /path/to/manifest.json", file=sys.stderr)
@@ -148,6 +159,35 @@ def main():
         print("decisions:")
         for (decision, reason), count in sorted(decisions.items()):
             print(f"  - {decision} reason={reason} count={count}")
+
+    allowed_simple_water_layers = [
+        layer for layer in layers
+        if is_allowed_simple_water_layer(layer)
+    ]
+    if allowed_simple_water_layers:
+        print(f"allowed-simple-water-candidates={len(allowed_simple_water_layers)}")
+
+        family_counts = Counter()
+        for layer in allowed_simple_water_layers:
+            for family in candidate_families(layer):
+                family_counts[family] += 1
+        if family_counts:
+            print("allowed-simple-water-families:")
+            for family, count in sorted(family_counts.items()):
+                print(f"  - {family}: {count}")
+
+        print("allowed-simple-water-layers:")
+        for layer in allowed_simple_water_layers[:10]:
+            policy = layer.get("policy") if isinstance(layer.get("policy"), dict) else {}
+            layer_id = layer.get("layerId", "unknown")
+            layer_name = layer.get("layerName") or "unnamed"
+            reason = str(policy.get("reason", "unknown"))
+            families = ",".join(candidate_families(layer)) or "none"
+            effects = len(as_list(layer.get("effectNames")))
+            shaders = len(as_list(layer.get("materialShaders")))
+            print(f"  - {layer_id}:{layer_name} reason={reason} families={families} effects={effects} shaders={shaders}")
+        if len(allowed_simple_water_layers) > 10:
+            print(f"  ... {len(allowed_simple_water_layers) - 10} more")
 
     if stripped_candidates:
         reasons = Counter(candidate_reason(candidate) for candidate in stripped_candidates)

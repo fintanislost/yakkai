@@ -96,13 +96,15 @@ For effect-chain debugging, the paper backend can write intermediate render-targ
   --debug-effect-captures /tmp/yakkai-effect-debug
 ```
 
-`--debug-effect-captures` is harness-only and off by default. It writes `manifest.json` plus `effect-input`, `effect-output`, and `final-publish` TGA captures for preserved effect-chain layers. The manifest also includes a top-level `strippedCandidates` array for effect chains that policy removed before render graph construction; these entries are metadata only and do not represent failed dumps. Stripped candidates include diagnostic classification fields such as `candidateFamilies`, `candidateRisk`, `candidateBlockedReason`, and `candidateChecks` so blocked water-effect candidates can be reviewed without changing renderer behavior. These captures are run artifacts for investigation; PNG smoke baselines remain the committed source of truth.
+`--debug-effect-captures` is harness-only and off by default. It writes `manifest.json` plus `effect-input`, `effect-output`, and `final-publish` TGA captures for preserved effect-chain layers. Rendered effect entries include diagnostic classification fields such as `candidateFamilies`, `candidateRisk`, `candidateBlockedReason`, and `candidateChecks` when the policy can classify the layer. The manifest also includes a top-level `strippedCandidates` array for effect chains that policy removed before render graph construction; these entries are metadata only and do not represent failed dumps. Simple isolated water candidates (`waterflow`, `waterripple`, and isolated `waterwaves`) can be preserved, while mixed chains and protected paths remain in stripped diagnostics. These captures are run artifacts for investigation; PNG smoke baselines remain the committed source of truth.
 
 Summarize a capture manifest before comparing images:
 
 ```bash
 tools/effect-capture-summary.py /tmp/yakkai-effect-debug/manifest.json
 ```
+
+`tools/validate-scene.sh` also writes a debug effect manifest during validation. For the renderer-risk fixtures, it fails if `3476236738` has no allowed simple-water candidates, if any simple-water candidate remains stripped there, or if `3228578419` gains any allowed simple-water candidates.
 
 ### Manual Build
 

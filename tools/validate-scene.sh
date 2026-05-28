@@ -28,6 +28,8 @@ EXPECT_FILE="${3:-}"
 SCENE_PKG="$WORKSHOP/$SCENE_ID/scene.pkg"
 CAPTURE="$OUTDIR/validate-$SCENE_ID.png"
 LOG="$OUTDIR/validate-$SCENE_ID.log"
+EFFECT_DEBUG_DIR="$OUTDIR/effect-captures-$SCENE_ID"
+EFFECT_MANIFEST="$EFFECT_DEBUG_DIR/manifest.json"
 
 mkdir -p "$OUTDIR"
 
@@ -50,13 +52,16 @@ echo ""
 
 # Run the harness and capture output
 rm -f "$CAPTURE" "$LOG"
+rm -rf "$EFFECT_DEBUG_DIR"
+HARNESS_STATUS=0
 "$HARNESS" --backend paper \
     --source "$SCENE_PKG" \
     --assets "$ASSETS" \
     --fill crop \
     --capture "$CAPTURE" \
     --capture-delay-ms "$CAPTURE_DELAY" \
-    > "$LOG" 2>&1 || true
+    --debug-effect-captures "$EFFECT_DEBUG_DIR" \
+    > "$LOG" 2>&1 || HARNESS_STATUS=$?
 
 PASS=0
 FAIL=0
@@ -78,6 +83,12 @@ check() {
 
 # === Structural checks (from log) ===
 echo "--- Structural ---"
+
+if [ "$HARNESS_STATUS" -eq 0 ]; then
+    check "Harness execution" "PASS" "exit=0"
+else
+    check "Harness execution" "FAIL" "exit=$HARNESS_STATUS"
+fi
 
 # Scene type detection
 SCENE_TYPE=$(grep -aoP "scene type: \K\w+" "$LOG" | head -1)
@@ -174,6 +185,114 @@ if [ "$MATERIAL_FAILS" -eq 0 ]; then
 else
     FAIL_NAMES=$(grep -aoP "(load imageobj|effect) '?\K[^']*(?=')" "$LOG" | sort -u | head -3 | tr '\n' ',' | sed 's/,$//')
     check "Material loading" "WARN" "$MATERIAL_FAILS failures: $FAIL_NAMES"
+fi
+
+# Effect capture manifest checks
+if [ -f "$EFFECT_MANIFEST" ]; then
+    if WATER_COUNTS=$(python3 - "$EFFECT_MANIFEST" <<'PY'
+import json
+import sys
+
+manifest_path = sys.argv[1]
+with open(manifest_path, "r", encoding="utf-8") as handle:
+    manifest = json.load(handle)
+
+if manifest.get("status") != "ok":
+    raise SystemExit(f"manifest status is {manifest.get('status')!r}")
+
+def required_list(name):
+    value = manifest.get(name)
+    if not isinstance(value, list):
+        raise SystemExit(f"manifest field {name!r} is not a list")
+    return value
+
+captures = required_list("captures")
+stripped_candidates = required_list("strippedCandidates")
+
+failures = manifest.get("failures", [])
+if not isinstance(failures, list):
+    raise SystemExit("manifest field 'failures' is not a list")
+if failures:
+    raise SystemExit(f"manifest has {len(failures)} top-level failures")
+
+for record in captures:
+    if not isinstance(record, dict):
+        raise SystemExit("manifest capture entry is not an object")
+    if record.get("failed") is True or record.get("completed") is False:
+        label = record.get("label") or record.get("stage") or "unknown"
+        reason = record.get("failureReason") or "unknown"
+        raise SystemExit(f"manifest capture failed: {label}: {reason}")
+
+def capture_layer(record):
+    layer = record.get("layer") if isinstance(record, dict) else None
+    return layer if isinstance(layer, dict) else {}
+
+def candidate_layer(record):
+    if not isinstance(record, dict):
+        return {}
+    layer = record.get("layer")
+    return layer if isinstance(layer, dict) else record
+
+def layer_key(layer):
+    return str(layer.get("layerId", "unknown")) + ":" + str(layer.get("layerName") or "unnamed")
+
+allowed = {}
+for record in captures:
+    layer = capture_layer(record)
+    policy = layer.get("policy") if isinstance(layer.get("policy"), dict) else {}
+    if layer.get("candidateRisk") == "simple-water" and policy.get("keepEffects") is True and policy.get("strippedEffects") is not True:
+        allowed[layer_key(layer)] = layer
+
+stripped_simple = 0
+stripped_mixed = 0
+for candidate in stripped_candidates:
+    layer = candidate_layer(candidate)
+    if layer.get("candidateRisk") == "simple-water":
+        stripped_simple += 1
+    if layer.get("candidateRisk") == "mixed-chain":
+        stripped_mixed += 1
+
+print(f"allowed_simple_water={len(allowed)}")
+print(f"stripped_simple_water={stripped_simple}")
+print(f"stripped_mixed_chain={stripped_mixed}")
+PY
+); then
+        check "Effect capture manifest" "PASS" "$EFFECT_MANIFEST"
+        ALLOWED_SIMPLE_WATER=$(printf '%s\n' "$WATER_COUNTS" | awk -F= '/^allowed_simple_water=/{print $2}')
+        STRIPPED_SIMPLE_WATER=$(printf '%s\n' "$WATER_COUNTS" | awk -F= '/^stripped_simple_water=/{print $2}')
+        STRIPPED_MIXED_CHAIN=$(printf '%s\n' "$WATER_COUNTS" | awk -F= '/^stripped_mixed_chain=/{print $2}')
+        : "${ALLOWED_SIMPLE_WATER:=0}"
+        : "${STRIPPED_SIMPLE_WATER:=0}"
+        : "${STRIPPED_MIXED_CHAIN:=0}"
+
+        if [ "$SCENE_ID" = "3476236738" ]; then
+            if [ "$ALLOWED_SIMPLE_WATER" -gt 0 ]; then
+                check "Allowed simple-water candidates" "PASS" "$ALLOWED_SIMPLE_WATER allowed"
+            else
+                check "Allowed simple-water candidates" "FAIL" "expected at least one allowed simple-water candidate"
+            fi
+            if [ "$STRIPPED_SIMPLE_WATER" -eq 0 ]; then
+                check "Simple-water no longer stripped" "PASS" "0 stripped"
+            else
+                check "Simple-water no longer stripped" "FAIL" "$STRIPPED_SIMPLE_WATER stripped"
+            fi
+            if [ "$STRIPPED_MIXED_CHAIN" -gt 0 ]; then
+                check "Mixed water chains remain stripped" "PASS" "$STRIPPED_MIXED_CHAIN stripped"
+            else
+                check "Mixed water chains remain stripped" "WARN" "no mixed-chain stripped candidates found"
+            fi
+        elif [ "$SCENE_ID" = "3228578419" ]; then
+            if [ "$ALLOWED_SIMPLE_WATER" -eq 0 ]; then
+                check "Protected scene simple-water block" "PASS" "0 allowed"
+            else
+                check "Protected scene simple-water block" "FAIL" "$ALLOWED_SIMPLE_WATER allowed"
+            fi
+        fi
+    else
+        check "Effect capture manifest" "FAIL" "could not parse or validate $EFFECT_MANIFEST"
+    fi
+else
+    check "Effect capture manifest" "FAIL" "missing $EFFECT_MANIFEST"
 fi
 
 # === Pixel checks (from capture) ===

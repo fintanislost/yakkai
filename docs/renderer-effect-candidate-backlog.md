@@ -13,9 +13,10 @@ Those artifacts are generated diagnostics and are not committed baselines. If
 they are missing, regenerate them with `--debug-effect-captures` before changing
 policy.
 
-Phase 3.5 adds diagnostic classification for stripped candidates. Classification
-fields are metadata only; they do not re-enable any effect family or change
-render graph behavior.
+Phase 3.5 added diagnostic classification for stripped candidates. Phase 3.6
+uses that classification to preserve only `simple-water` candidates while
+leaving mixed chains, puppet layers, crop-sheet paths, and carrier layers
+blocked.
 
 ## Rules For Candidate Slices
 
@@ -37,8 +38,8 @@ rm -rf ~/.cache/wescene-renderer/*/spvs01/
 
 | Family | Current status | Evidence | Blocker | Required next slice |
 | --- | --- | --- | --- | --- |
-| `waterflow` / `waterripple` | Candidate, blocked | `3476236738` layer `124` (`窗户`) uses `effects/waterflow`; `3228578419` layer `239` is a utility composelayer with `effects/waterripple` and `effects/waterflow` | The Arona evidence is a dropped utility composelayer, so a broad family allowlist would cross an explicitly blocked class | Use Phase 3.5 classification output to confirm non-utility, non-puppet `simple-water` candidates before any later allowlist design |
-| `waterwaves` | Candidate, blocked | `3476236738` layers `322`, `446`, `438`, `442`, `133`, `145` are simple `effects/waterwaves`; layers `168` and `22` mix `waterwaves` with opacity/shine/iris; `3228578419` layer `405` mixes waterwaves on `ARONA_CROP_SHEET` with LUT, pulse, and shake | The family appears both in safe-looking simple layers and in dangerous Arona puppet/character paths | Use Phase 3.5 classification output to separate `simple-water` layers from `mixed-chain` and protected crop-sheet paths before any later allowlist design |
+| `waterflow` / `waterripple` | Partially enabled for `simple-water` | `3476236738` layer `124` (`窗户`) uses `effects/waterflow`; `3228578419` layer `239` is a utility composelayer with `effects/waterripple` and `effects/waterflow` | Utility composelayer evidence remains blocked; generic puppet/carrier paths are not part of the allow path | Keep the simple-water allow path narrow and validate `3476236738` plus `3228578419` before any broader effect work |
+| `waterwaves` | Partially enabled for isolated `simple-water` | `3476236738` layers `322`, `446`, `438`, `442`, `133`, `145` are simple `effects/waterwaves`; layers `168` and `22` mix `waterwaves` with opacity/shine/iris; `3228578419` layer `405` mixes waterwaves on `ARONA_CROP_SHEET` with LUT, pulse, and shake | Mixed chains and protected crop-sheet paths remain blocked | Defer mixed-chain preservation until opacity/shine/iris diagnostics can isolate a safe predicate |
 | `opacity` | Blocked | `3476236738` layers `168`, `22`, `219`, and `277` include `effects/opacity` mixed with waterwaves, shine/iris, or audio bars | Opacity appears only in mixed chains in the current evidence, including audio utility carriers | Add a focused mixed-chain diagnostic before considering any policy allowlist |
 | `shine` / `iris` | Blocked | `3476236738` layer `22` includes `effects/shine_*` and `effects/iris` mixed with waterwaves and opacity | Single mixed layer, no isolated fixture, and no preserved render-target capture for comparison | Find or install an isolated shine/iris fixture before any renderer or policy change |
 | `blur` | High-risk blocked | `3476236738` layer `137` uses `effects/blur_precise_gaussian`; `3476236738` layer `365` mixes blur with color grading on a utility composelayer; `3228578419` layers `53` and `155` are fullscreen blur layers | Blur is a known Arona failure class and appears on fullscreen/utility carriers | Keep stripped until a blur-specific render-target slice can prove alpha/load/blend behavior against Arona |
@@ -60,13 +61,11 @@ narrow predicate and passes visual review.
 
 ## Recommended Follow-Up Order
 
-1. Water-effects investigation: diagnostic-only first, focused on
-   `waterflow`, `waterripple`, and simple non-puppet `waterwaves` layers.
-2. Mixed-chain diagnostics: understand opacity/shine/iris chains before
+1. Mixed-chain diagnostics: understand opacity/shine/iris chains before
    considering any partial chain preservation.
-3. Blur/LUT renderer parity: only after the harness can compare enough frames to
+2. Blur/LUT renderer parity: only after the harness can compare enough frames to
    detect washed-out output and alpha/load regressions.
-4. Audio-reactive utility layers: separate from effect-chain re-enable work.
+3. Audio-reactive utility layers: separate from effect-chain re-enable work.
 
 Each follow-up should include:
 

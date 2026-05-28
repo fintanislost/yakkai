@@ -2417,7 +2417,6 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     std::vector<wpscene::WPImageEffect> effectObjects = wpimgobj.effects;
 
     bool hasPuppet = ! wpimgobj.puppet.empty();
-    (void)hasPuppet;
 
     bool isCompose = (wpimgobj.image == "models/util/composelayer.json");
 
@@ -2427,6 +2426,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         effectInput.hasVisibleEffects = hasEffect;
         effectInput.noEffectsDebug = std::getenv("YAKKAI_NO_EFFECTS") != nullptr;
         effectInput.isComposelayer = isCompose;
+        effectInput.isPuppetLayer = hasPuppet;
         effectInput.fullscreen = wpimgobj.fullscreen;
         effectInput.visibleEffectCount = count_eff;
         effectInput.colorBlendMode = wpimgobj.colorBlendMode;
@@ -2436,6 +2436,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         for (const auto& eff : effectObjects) {
             wallpaper::policy::LayerEffectDescriptor effectDescriptor;
             effectDescriptor.name = eff.name;
+            effectDescriptor.visible = eff.visible;
             if (!eff.materials.empty()) {
                 effectDescriptor.firstMaterialShader = eff.materials[0].shader;
             }
@@ -2505,7 +2506,10 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     ShaderValueMap baseConstSvs = context.global_base_uniforms;
     WPShaderInfo   shaderInfo;
     wpscene::WPMaterial sourceMaterial = wpimgobj.material;
-    const auto puppetEffectDecision = wallpaper::policy::decideLayerEffects(buildEffectInput());
+    const auto layerEffectInput = buildEffectInput();
+    const auto puppetEffectDecision = wallpaper::policy::decideLayerEffects(layerEffectInput);
+    const auto candidateClassification =
+        wallpaper::policy::classifyStrippedEffectCandidate(layerEffectInput);
     wallpaper::debug::EffectCaptureLayerInfo effectCaptureInfo;
     effectCaptureInfo.sceneId = context.scene ? context.scene->scene_id : "unknown_scene";
     effectCaptureInfo.sceneType = SceneTypeText(context.scene_type);
@@ -2525,6 +2529,10 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             effectCaptureInfo.materialShaders.push_back(material.shader);
         }
     }
+    effectCaptureInfo.candidateFamilies = candidateClassification.candidateFamilies;
+    effectCaptureInfo.candidateRisk = candidateClassification.candidateRisk;
+    effectCaptureInfo.candidateBlockedReason = candidateClassification.candidateBlockedReason;
+    effectCaptureInfo.candidateChecks = candidateClassification.candidateChecks;
     if (puppetEffectDecision.reason == "puppet-alpha-strip") {
         if (context.scene && context.scene->debugEffectCaptures.enabled()) {
             wallpaper::debug::recordStrippedEffectCandidate(*context.scene, effectCaptureInfo);

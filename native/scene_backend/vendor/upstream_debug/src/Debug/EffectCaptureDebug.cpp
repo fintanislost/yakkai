@@ -43,6 +43,19 @@ std::string collapseUnderscores(std::string value)
     return out;
 }
 
+nlohmann::json candidateChecksToJson(const wallpaper::policy::CandidateChecks& checks)
+{
+    return {
+        {"hasWaterFamily", checks.hasWaterFamily},
+        {"waterOnly", checks.waterOnly},
+        {"isUtilityCarrier", checks.isUtilityCarrier},
+        {"isComposelayer", checks.isComposelayer},
+        {"isFullscreen", checks.isFullscreen},
+        {"isPuppetLayer", checks.isPuppetLayer},
+        {"isProtectedPuppetPath", checks.isProtectedPuppetPath},
+    };
+}
+
 nlohmann::json layerToJson(const EffectCaptureLayerInfo& layer)
 {
     return {
@@ -62,6 +75,10 @@ nlohmann::json layerToJson(const EffectCaptureLayerInfo& layer)
         }},
         {"effectNames", layer.effectNames},
         {"materialShaders", layer.materialShaders},
+        {"candidateFamilies", layer.candidateFamilies},
+        {"candidateRisk", layer.candidateRisk},
+        {"candidateBlockedReason", layer.candidateBlockedReason},
+        {"candidateChecks", candidateChecksToJson(layer.candidateChecks)},
     };
 }
 

@@ -1,6 +1,8 @@
 #include "Policy/EffectPolicy.hpp"
 
 #include <algorithm>
+#include <array>
+#include <cctype>
 
 namespace wallpaper::policy {
 namespace {
@@ -8,6 +10,161 @@ namespace {
 bool containsToken(const std::string& value, std::string_view token)
 {
     return value.find(token) != std::string::npos;
+}
+
+std::string asciiLower(std::string_view value)
+{
+    std::string out;
+    out.reserve(value.size());
+    for (unsigned char ch : value) {
+        out.push_back(static_cast<char>(std::tolower(ch)));
+    }
+    return out;
+}
+
+bool containsTokenInsensitive(std::string_view value, std::string_view token)
+{
+    return asciiLower(value).find(asciiLower(token)) != std::string::npos;
+}
+
+constexpr std::array<std::string_view, 3> kWaterFamilies {
+    "waterwaves",
+    "waterflow",
+    "waterripple",
+};
+
+constexpr std::array<std::string_view, 12> kKnownNonWaterTokens {
+    "opacity",
+    "shine",
+    "iris",
+    "pulse",
+    "shake",
+    "lut",
+    "color_grading",
+    "colorgrading",
+    "blur",
+    "audio",
+    "lightshaft",
+    "effectpassthrough",
+};
+
+bool containsAnyToken(std::string_view value, const auto& tokens)
+{
+    return std::any_of(tokens.begin(), tokens.end(), [value](std::string_view token) {
+        return containsTokenInsensitive(value, token);
+    });
+}
+
+bool equalsWaterFamily(std::string_view value)
+{
+    const std::string lowered = asciiLower(value);
+    return std::any_of(kWaterFamilies.begin(), kWaterFamilies.end(), [&lowered](std::string_view family) {
+        return lowered == family;
+    });
+}
+
+std::string_view editorEffectTitleWaterFamily(std::string_view value)
+{
+    const std::string lowered = asciiLower(value);
+    if (lowered == "ui_editor_effect_water_waves_title") {
+        return "waterwaves";
+    }
+    if (lowered == "ui_editor_effect_water_flow_title") {
+        return "waterflow";
+    }
+    if (lowered == "ui_editor_effect_water_ripple_title") {
+        return "waterripple";
+    }
+    return {};
+}
+
+bool pathEndsWithWaterFamily(std::string_view value)
+{
+    const std::string lowered = asciiLower(value);
+    return std::any_of(kWaterFamilies.begin(), kWaterFamilies.end(), [&lowered](std::string_view family) {
+        const std::string suffix = "/" + std::string(family);
+        return lowered.size() >= suffix.size() &&
+               lowered.compare(lowered.size() - suffix.size(), suffix.size(), suffix) == 0;
+    });
+}
+
+void appendUnique(std::vector<std::string>& values, std::string_view value)
+{
+    const std::string owned(value);
+    if (std::find(values.begin(), values.end(), owned) == values.end()) {
+        values.push_back(owned);
+    }
+}
+
+void collectFamiliesFromText(std::vector<std::string>& families, std::string_view value)
+{
+    if (const std::string_view family = editorEffectTitleWaterFamily(value); !family.empty()) {
+        appendUnique(families, family);
+    }
+    for (std::string_view family : kWaterFamilies) {
+        if (containsTokenInsensitive(value, family)) {
+            appendUnique(families, family);
+        }
+    }
+}
+
+std::vector<std::string> collectCandidateFamilies(const std::vector<LayerEffectDescriptor>& effects)
+{
+    std::vector<std::string> families;
+    for (const auto& effect : effects) {
+        if (!effect.visible) {
+            continue;
+        }
+        collectFamiliesFromText(families, effect.name);
+        collectFamiliesFromText(families, effect.firstMaterialShader);
+        for (const auto& shader : effect.materialShaders) {
+            collectFamiliesFromText(families, shader);
+        }
+    }
+    return families;
+}
+
+bool fieldIsStrictWater(std::string_view value)
+{
+    if (value.empty()) {
+        return true;
+    }
+    return (equalsWaterFamily(value) ||
+            !editorEffectTitleWaterFamily(value).empty() ||
+            pathEndsWithWaterFamily(value)) &&
+           !containsAnyToken(value, kKnownNonWaterTokens);
+}
+
+bool descriptorIsStrictWater(const LayerEffectDescriptor& effect)
+{
+    if (!effect.visible) {
+        return true;
+    }
+
+    bool hasWater = containsAnyToken(effect.name, kWaterFamilies) ||
+                    containsAnyToken(effect.firstMaterialShader, kWaterFamilies);
+    bool fieldsAreStrictWater = fieldIsStrictWater(effect.name) &&
+                                fieldIsStrictWater(effect.firstMaterialShader);
+    for (const auto& shader : effect.materialShaders) {
+        hasWater = hasWater || containsAnyToken(shader, kWaterFamilies);
+        fieldsAreStrictWater = fieldsAreStrictWater && fieldIsStrictWater(shader);
+    }
+    return hasWater && fieldsAreStrictWater;
+}
+
+bool visibleEffectsAreStrictWater(const std::vector<LayerEffectDescriptor>& effects)
+{
+    bool sawVisible = false;
+    for (const auto& effect : effects) {
+        if (!effect.visible) {
+            continue;
+        }
+        sawVisible = true;
+        if (!descriptorIsStrictWater(effect)) {
+            return false;
+        }
+    }
+    return sawVisible;
 }
 
 bool anyEffectNameContains(const std::vector<LayerEffectDescriptor>& effects, std::string_view token)
@@ -41,6 +198,24 @@ bool isUtilityLayer(std::string_view imagePath)
            imagePath.find("fullscreenlayer") != std::string_view::npos;
 }
 
+bool isComposelayerPath(std::string_view imagePath)
+{
+    return imagePath.find("composelayer") != std::string_view::npos;
+}
+
+bool isProtectedPuppetPath(const LayerEffectInput& input)
+{
+    if (!input.isPuppetLayer) {
+        return false;
+    }
+    return containsTokenInsensitive(input.layerName, "crop_sheet") ||
+           containsTokenInsensitive(input.layerName, "cropsheet") ||
+           containsTokenInsensitive(input.layerName, "crop-sheet") ||
+           containsTokenInsensitive(input.imagePath, "crop_sheet") ||
+           containsTokenInsensitive(input.imagePath, "cropsheet") ||
+           containsTokenInsensitive(input.imagePath, "crop-sheet");
+}
+
 bool isFlareOrLensLayer(std::string_view layerName)
 {
     return layerName.find("flare") != std::string_view::npos ||
@@ -49,6 +224,46 @@ bool isFlareOrLensLayer(std::string_view layerName)
 }
 
 } // namespace
+
+CandidateClassification classifyStrippedEffectCandidate(const LayerEffectInput& input)
+{
+    CandidateClassification classification;
+    classification.candidateFamilies = collectCandidateFamilies(input.effects);
+
+    classification.candidateChecks.hasWaterFamily = !classification.candidateFamilies.empty();
+    classification.candidateChecks.waterOnly =
+        classification.candidateChecks.hasWaterFamily && visibleEffectsAreStrictWater(input.effects);
+    classification.candidateChecks.isUtilityCarrier = isUtilityLayer(input.imagePath);
+    classification.candidateChecks.isComposelayer = input.isComposelayer || isComposelayerPath(input.imagePath);
+    classification.candidateChecks.isFullscreen = input.fullscreen;
+    classification.candidateChecks.isPuppetLayer = input.isPuppetLayer;
+    classification.candidateChecks.isProtectedPuppetPath = isProtectedPuppetPath(input);
+
+    if (!classification.candidateChecks.hasWaterFamily) {
+        classification.candidateRisk = "non-water";
+        classification.candidateBlockedReason = "no-water-effect-family";
+    } else if (classification.candidateChecks.isProtectedPuppetPath) {
+        classification.candidateRisk = "protected-puppet-path";
+        classification.candidateBlockedReason = "protected-puppet-path";
+    } else if (classification.candidateChecks.isComposelayer) {
+        classification.candidateRisk = "composelayer-carrier";
+        classification.candidateBlockedReason = "composelayer-carrier";
+    } else if (classification.candidateChecks.isUtilityCarrier) {
+        classification.candidateRisk = "utility-carrier";
+        classification.candidateBlockedReason = "utility-carrier";
+    } else if (classification.candidateChecks.isFullscreen) {
+        classification.candidateRisk = "fullscreen-carrier";
+        classification.candidateBlockedReason = "fullscreen-carrier";
+    } else if (!classification.candidateChecks.waterOnly) {
+        classification.candidateRisk = "mixed-chain";
+        classification.candidateBlockedReason = "water-effect-mixed-chain";
+    } else {
+        classification.candidateRisk = "simple-water";
+        classification.candidateBlockedReason = "water-effect-candidate";
+    }
+
+    return classification;
+}
 
 LayerEffectDecision decideLayerEffects(const LayerEffectInput& input)
 {

@@ -13,6 +13,10 @@ Those artifacts are generated diagnostics and are not committed baselines. If
 they are missing, regenerate them with `--debug-effect-captures` before changing
 policy.
 
+Phase 3.5 adds diagnostic classification for stripped candidates. Classification
+fields are metadata only; they do not re-enable any effect family or change
+render graph behavior.
+
 ## Rules For Candidate Slices
 
 - Do not remove the puppet-scene strip rule wholesale.
@@ -33,8 +37,8 @@ rm -rf ~/.cache/wescene-renderer/*/spvs01/
 
 | Family | Current status | Evidence | Blocker | Required next slice |
 | --- | --- | --- | --- | --- |
-| `waterflow` / `waterripple` | Candidate, blocked | `3476236738` layer `124` (`窗户`) uses `effects/waterflow`; `3228578419` layer `239` is a utility composelayer with `effects/waterripple` and `effects/waterflow` | The Arona evidence is a dropped utility composelayer, so a broad family allowlist would cross an explicitly blocked class | Build a water-effects investigation slice that isolates non-utility, non-puppet layers and proves Arona utility carriers remain stripped |
-| `waterwaves` | Candidate, blocked | `3476236738` layers `322`, `446`, `438`, `442`, `133`, `145` are simple `effects/waterwaves`; layers `168` and `22` mix `waterwaves` with opacity/shine/iris; `3228578419` layer `405` mixes waterwaves on `ARONA_CROP_SHEET` with LUT, pulse, and shake | The family appears both in safe-looking simple layers and in dangerous Arona puppet/character paths | Split simple non-puppet waterwaves from mixed puppet/character waterwaves and prove the predicate does not affect `ARONA_CROP_SHEET` |
+| `waterflow` / `waterripple` | Candidate, blocked | `3476236738` layer `124` (`窗户`) uses `effects/waterflow`; `3228578419` layer `239` is a utility composelayer with `effects/waterripple` and `effects/waterflow` | The Arona evidence is a dropped utility composelayer, so a broad family allowlist would cross an explicitly blocked class | Use Phase 3.5 classification output to confirm non-utility, non-puppet `simple-water` candidates before any later allowlist design |
+| `waterwaves` | Candidate, blocked | `3476236738` layers `322`, `446`, `438`, `442`, `133`, `145` are simple `effects/waterwaves`; layers `168` and `22` mix `waterwaves` with opacity/shine/iris; `3228578419` layer `405` mixes waterwaves on `ARONA_CROP_SHEET` with LUT, pulse, and shake | The family appears both in safe-looking simple layers and in dangerous Arona puppet/character paths | Use Phase 3.5 classification output to separate `simple-water` layers from `mixed-chain` and protected crop-sheet paths before any later allowlist design |
 | `opacity` | Blocked | `3476236738` layers `168`, `22`, `219`, and `277` include `effects/opacity` mixed with waterwaves, shine/iris, or audio bars | Opacity appears only in mixed chains in the current evidence, including audio utility carriers | Add a focused mixed-chain diagnostic before considering any policy allowlist |
 | `shine` / `iris` | Blocked | `3476236738` layer `22` includes `effects/shine_*` and `effects/iris` mixed with waterwaves and opacity | Single mixed layer, no isolated fixture, and no preserved render-target capture for comparison | Find or install an isolated shine/iris fixture before any renderer or policy change |
 | `blur` | High-risk blocked | `3476236738` layer `137` uses `effects/blur_precise_gaussian`; `3476236738` layer `365` mixes blur with color grading on a utility composelayer; `3228578419` layers `53` and `155` are fullscreen blur layers | Blur is a known Arona failure class and appears on fullscreen/utility carriers | Keep stripped until a blur-specific render-target slice can prove alpha/load/blend behavior against Arona |

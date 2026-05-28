@@ -9,12 +9,14 @@
 #include "Scene/SceneNode.h"
 #include "SpecTexs.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -61,6 +63,26 @@ std::string readTextFile(const std::filesystem::path& path)
                        std::istreambuf_iterator<char>());
 }
 
+bool containsString(const std::vector<std::string>& values, const std::string& expected)
+{
+    return std::find(values.begin(), values.end(), expected) != values.end();
+}
+
+void checkDecisionStableAfterClassification(const wallpaper::policy::LayerEffectInput& input,
+                                            const std::string& label)
+{
+    const auto before = wallpaper::policy::decideLayerEffects(input);
+    const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
+    const auto after = wallpaper::policy::decideLayerEffects(input);
+
+    check(before.keepLayer == after.keepLayer, label + " keepLayer is stable");
+    check(before.keepEffects == after.keepEffects, label + " keepEffects is stable");
+    check(before.forceAlphaOne == after.forceAlphaOne, label + " forceAlphaOne is stable");
+    check(before.strippedEffects == after.strippedEffects, label + " strippedEffects is stable");
+    check(before.reason == after.reason, label + " reason is stable");
+    check(!classification.candidateRisk.empty(), label + " classification has risk");
+}
+
 void testEffectFinalOutputDebugPlaceholder()
 {
     const std::string pingpongA = "_rt_effect_pingpong_a_test";
@@ -96,6 +118,237 @@ void testEffectFinalOutputDebugPlaceholder()
           "debug final-output placeholder resolves to final ping-pong target on even chains");
     check(layer.GetEffect(1)->commands[1].src == pingpongB,
           "previous-input placeholder still resolves to current ping-pong input");
+}
+
+void testEffectCandidateClassification()
+{
+    {
+        auto input = baseEffectInput();
+        const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
+        check(containsString(classification.candidateFamilies, "waterwaves"),
+              "simple waterwaves candidate records waterwaves family");
+        check(classification.candidateRisk == "simple-water",
+              "simple waterwaves candidate is simple-water");
+        check(classification.candidateBlockedReason == "water-effect-candidate",
+              "simple waterwaves candidate records candidate reason");
+        check(classification.candidateChecks.hasWaterFamily,
+              "simple waterwaves candidate has water family");
+        check(classification.candidateChecks.waterOnly,
+              "simple waterwaves candidate is water-only");
+        check(!classification.candidateChecks.isComposelayer,
+              "simple waterwaves candidate is not composelayer");
+        checkDecisionStableAfterClassification(input, "simple-water");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.effects.push_back({
+            .name = "opacity",
+            .visible = true,
+            .firstMaterialShader = "effects/opacity",
+            .materialShaders = {"effects/opacity"},
+        });
+        const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
+        check(classification.candidateRisk == "mixed-chain",
+              "water plus opacity is mixed-chain");
+        check(classification.candidateBlockedReason == "water-effect-mixed-chain",
+              "mixed-chain records mixed reason");
+        check(classification.candidateChecks.hasWaterFamily,
+              "mixed-chain keeps water-family signal");
+        check(!classification.candidateChecks.waterOnly,
+              "mixed-chain is not water-only");
+        checkDecisionStableAfterClassification(input, "mixed-chain");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.effects = {{
+            .name = "waterflow",
+            .visible = true,
+            .firstMaterialShader = "effects/waterflow",
+            .materialShaders = {"effects/waterflow"},
+        }};
+        const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
+        check(containsString(classification.candidateFamilies, "waterflow"),
+              "waterflow candidate records waterflow family");
+        check(classification.candidateRisk == "simple-water",
+              "waterflow candidate is simple-water");
+        checkDecisionStableAfterClassification(input, "waterflow");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.effects = {{
+            .name = "ui_editor_effect_water_flow_title",
+            .visible = true,
+            .firstMaterialShader = "effects/waterflow",
+            .materialShaders = {"effects/waterflow"},
+        }};
+        const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
+        check(classification.candidateRisk == "simple-water",
+              "WE editor water-flow effect title with waterflow shader is simple-water");
+        check(classification.candidateChecks.waterOnly,
+              "WE editor water-flow effect title is water-only");
+        checkDecisionStableAfterClassification(input, "we-editor-water-flow-title");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.effects = {{
+            .name = "ui_editor_effect_water_waves_title",
+            .visible = true,
+            .firstMaterialShader = "effects/waterwaves",
+            .materialShaders = {"effects/waterwaves"},
+        }};
+        const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
+        check(classification.candidateRisk == "simple-water",
+              "WE editor water-waves effect title with waterwaves shader is simple-water");
+        check(classification.candidateChecks.waterOnly,
+              "WE editor water-waves effect title is water-only");
+        checkDecisionStableAfterClassification(input, "we-editor-water-waves-title");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.effects = {{
+            .name = "waterwaves",
+            .visible = true,
+            .firstMaterialShader = "workshop/123/effects/waterwaves",
+            .materialShaders = {"workshop/123/effects/waterwaves"},
+        }};
+        const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
+        check(classification.candidateRisk == "simple-water",
+              "workshop waterwaves path ending in water family is simple-water");
+        check(classification.candidateChecks.waterOnly,
+              "workshop waterwaves path ending in water family is water-only");
+        checkDecisionStableAfterClassification(input, "workshop-waterwaves-path");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.effects = {{
+            .name = "waterwaves_custom",
+            .visible = true,
+            .firstMaterialShader = "effects/waterwaves_custom_unknown",
+            .materialShaders = {"effects/waterwaves_custom_unknown"},
+        }};
+        const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
+        check(classification.candidateRisk == "mixed-chain",
+              "custom waterwaves-like fields are mixed-chain");
+        check(!classification.candidateChecks.waterOnly,
+              "custom waterwaves-like fields are not water-only");
+        checkDecisionStableAfterClassification(input, "custom-waterwaves-like-fields");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.effects = {{
+            .name = "custom_waterwaves",
+            .visible = true,
+            .firstMaterialShader = "effects/custom_waterwaves",
+            .materialShaders = {"effects/custom_waterwaves"},
+        }};
+        const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
+        check(classification.candidateRisk == "mixed-chain",
+              "custom_waterwaves prefix fields are mixed-chain");
+        check(!classification.candidateChecks.waterOnly,
+              "custom_waterwaves prefix fields are not water-only");
+        checkDecisionStableAfterClassification(input, "custom-waterwaves-prefix");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.effects = {{
+            .name = "waterripple",
+            .visible = true,
+            .firstMaterialShader = "effects/waterripple",
+            .materialShaders = {"effects/waterripple"},
+        }};
+        input.isComposelayer = true;
+        input.imagePath = "models/util/composelayer.json";
+        const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
+        check(containsString(classification.candidateFamilies, "waterripple"),
+              "waterripple candidate records waterripple family");
+        check(classification.candidateRisk == "composelayer-carrier",
+              "composelayer carrier wins over utility-style path checks");
+        check(classification.candidateChecks.isComposelayer,
+              "composelayer check is true");
+        checkDecisionStableAfterClassification(input, "composelayer-carrier");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.imagePath = "models/util/solidlayer.json";
+        const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
+        check(classification.candidateRisk == "utility-carrier",
+              "solidlayer water candidate is utility-carrier");
+        check(classification.candidateChecks.isUtilityCarrier,
+              "utility carrier check is true");
+        checkDecisionStableAfterClassification(input, "utility-carrier");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.fullscreen = true;
+        const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
+        check(classification.candidateRisk == "fullscreen-carrier",
+              "fullscreen water candidate is fullscreen-carrier");
+        check(classification.candidateChecks.isFullscreen,
+              "fullscreen check is true");
+        checkDecisionStableAfterClassification(input, "fullscreen-carrier");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.isPuppetLayer = true;
+        input.layerName = "ARONA_CROP_SHEET";
+        input.effects.push_back({
+            .name = "pulse",
+            .visible = true,
+            .firstMaterialShader = "effects/pulse",
+            .materialShaders = {"effects/pulse"},
+        });
+        const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
+        check(classification.candidateRisk == "protected-puppet-path",
+              "crop-sheet puppet candidate is protected");
+        check(classification.candidateChecks.isProtectedPuppetPath,
+              "protected puppet path check is true");
+        checkDecisionStableAfterClassification(input, "protected-puppet-path");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.effects = {{
+            .name = "blur",
+            .visible = true,
+            .firstMaterialShader = "effects/blur_precise_gaussian",
+            .materialShaders = {"effects/blur_precise_gaussian"},
+        }};
+        const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
+        check(classification.candidateFamilies.empty(),
+              "non-water candidate has no water families");
+        check(classification.candidateRisk == "non-water",
+              "non-water candidate risk is non-water");
+        check(classification.candidateBlockedReason == "no-water-effect-family",
+              "non-water candidate records no-water reason");
+        checkDecisionStableAfterClassification(input, "non-water");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.effects = {{
+            .name = "waterwaves",
+            .visible = true,
+            .firstMaterialShader = "effects/waterwaves",
+            .materialShaders = {"effects/waterwaves", "effects/custom_unknown"},
+        }};
+        const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
+        check(classification.candidateRisk == "mixed-chain",
+              "unknown shader mixed with water blocks simple-water");
+        check(!classification.candidateChecks.waterOnly,
+              "unknown shader mixed with water is not water-only");
+        checkDecisionStableAfterClassification(input, "unknown-water-mix");
+    }
 }
 
 void testEffectPolicy()
@@ -249,6 +502,16 @@ void testEffectCaptureDebug()
         layer.policyReason = "puppet-alpha-strip";
         layer.effectNames = {"waterwaves", "opacity"};
         layer.materialShaders = {"effects/waterwaves", "effects/opacity"};
+        layer.candidateFamilies = {"waterwaves"};
+        layer.candidateRisk = "mixed-chain";
+        layer.candidateBlockedReason = "water-effect-mixed-chain";
+        layer.candidateChecks.hasWaterFamily = true;
+        layer.candidateChecks.waterOnly = false;
+        layer.candidateChecks.isUtilityCarrier = false;
+        layer.candidateChecks.isComposelayer = false;
+        layer.candidateChecks.isFullscreen = false;
+        layer.candidateChecks.isPuppetLayer = false;
+        layer.candidateChecks.isProtectedPuppetPath = false;
 
         wallpaper::debug::recordStrippedEffectCandidate(scene, layer);
 
@@ -268,6 +531,28 @@ void testEffectCaptureDebug()
               "manifest includes stripped candidate layer name");
         check(manifest.find("\"reason\": \"puppet-alpha-strip\"") != std::string::npos,
               "manifest includes stripped candidate policy reason");
+        check(manifest.find("\"candidateFamilies\"") != std::string::npos,
+              "manifest includes stripped candidate families");
+        check(manifest.find("\"candidateRisk\": \"mixed-chain\"") != std::string::npos,
+              "manifest includes stripped candidate risk");
+        check(manifest.find("\"candidateBlockedReason\": \"water-effect-mixed-chain\"") != std::string::npos,
+              "manifest includes stripped candidate blocked reason");
+        check(manifest.find("\"candidateChecks\"") != std::string::npos,
+              "manifest includes stripped candidate checks");
+        check(manifest.find("\"hasWaterFamily\": true") != std::string::npos,
+              "manifest includes stripped candidate water-family check");
+        check(manifest.find("\"waterOnly\": false") != std::string::npos,
+              "manifest includes stripped candidate water-only check");
+        check(manifest.find("\"isUtilityCarrier\": false") != std::string::npos,
+              "manifest includes stripped candidate utility-carrier check");
+        check(manifest.find("\"isComposelayer\": false") != std::string::npos,
+              "manifest includes stripped candidate composelayer check");
+        check(manifest.find("\"isFullscreen\": false") != std::string::npos,
+              "manifest includes stripped candidate fullscreen check");
+        check(manifest.find("\"isPuppetLayer\": false") != std::string::npos,
+              "manifest includes stripped candidate puppet-layer check");
+        check(manifest.find("\"isProtectedPuppetPath\": false") != std::string::npos,
+              "manifest includes stripped candidate protected-puppet-path check");
 
         std::filesystem::remove_all(outDir);
     }
@@ -466,6 +751,7 @@ int main()
 {
     testEffectCaptureDebug();
     testEffectFinalOutputDebugPlaceholder();
+    testEffectCandidateClassification();
     testEffectPolicy();
     testVideoTexturePolicy();
     testModelFallbackPolicy();

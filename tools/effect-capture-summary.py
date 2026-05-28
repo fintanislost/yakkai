@@ -99,6 +99,16 @@ def candidate_reason(candidate):
     return "unknown"
 
 
+def candidate_risk(candidate):
+    risk = candidate_layer(candidate).get("candidateRisk")
+    return str(risk) if risk else "unknown"
+
+
+def candidate_families(candidate):
+    families = candidate_layer(candidate).get("candidateFamilies")
+    return [str(family) for family in as_list(families)]
+
+
 def main():
     if len(sys.argv) != 2:
         print("usage: tools/effect-capture-summary.py /path/to/manifest.json", file=sys.stderr)
@@ -145,6 +155,20 @@ def main():
         for reason, count in sorted(reasons.items()):
             print(f"  - {reason}: {count}")
 
+        risks = Counter(candidate_risk(candidate) for candidate in stripped_candidates)
+        print("stripped-candidate-risks:")
+        for risk, count in sorted(risks.items()):
+            print(f"  - {risk}: {count}")
+
+        family_counts = Counter()
+        for candidate in stripped_candidates:
+            for family in candidate_families(candidate):
+                family_counts[family] += 1
+        if family_counts:
+            print("stripped-candidate-families:")
+            for family, count in sorted(family_counts.items()):
+                print(f"  - {family}: {count}")
+
         print("stripped-candidate-layers:")
         for candidate in stripped_candidates[:10]:
             layer = candidate_layer(candidate)
@@ -152,9 +176,11 @@ def main():
             layer_id = layer.get("layerId", "unknown")
             layer_name = layer.get("layerName") or "unnamed"
             reason = str(policy.get("reason", "unknown"))
+            risk = candidate_risk(candidate)
+            families = ",".join(candidate_families(candidate)) or "none"
             effects = len(as_list(layer.get("effectNames")))
             shaders = len(as_list(layer.get("materialShaders")))
-            print(f"  - {layer_id}:{layer_name} reason={reason} effects={effects} shaders={shaders}")
+            print(f"  - {layer_id}:{layer_name} reason={reason} risk={risk} families={families} effects={effects} shaders={shaders}")
         if len(stripped_candidates) > 10:
             print(f"  ... {len(stripped_candidates) - 10} more")
 

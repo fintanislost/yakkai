@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Policy/EffectPolicy.hpp"
+
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -34,6 +36,10 @@ struct EffectCaptureLayerInfo {
     std::string              policyReason;
     std::vector<std::string> effectNames;
     std::vector<std::string> materialShaders;
+    std::vector<std::string> candidateFamilies;
+    std::string              candidateRisk;
+    std::string              candidateBlockedReason;
+    wallpaper::policy::CandidateChecks candidateChecks;
 };
 
 struct EffectCaptureRecord {

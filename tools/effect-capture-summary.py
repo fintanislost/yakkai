@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+import json
+import sys
+from collections import Counter, defaultdict
+from pathlib import Path
+
+
+def as_list(value):
+    return value if isinstance(value, list) else []
+
+
+def get_stage(record):
+    return str(record.get("stage", "unknown"))
+
+
+def capture_layer(record):
+    layer = record.get("layer")
+    return layer if isinstance(layer, dict) else {}
+
+
+def capture_key(record):
+    layer = capture_layer(record)
+    layer_id = layer.get("layerId")
+    layer_name = layer.get("layerName")
+    if layer_id is not None or layer_name:
+        return f"{layer_id if layer_id is not None else 'unknown'}:{layer_name or 'unnamed'}"
+
+    if record.get("layerKey"):
+        return str(record["layerKey"])
+    if record.get("key"):
+        return str(record["key"])
+    if record.get("label"):
+        return str(record["label"])
+
+    return "unknown"
+
+
+def unique_layers(manifest_layers, captures):
+    if manifest_layers:
+        return manifest_layers
+
+    layers = {}
+    for record in captures:
+        layer = capture_layer(record)
+        if not layer:
+            continue
+        layers.setdefault(capture_key(record), layer)
+    return list(layers.values())
+
+
+def capture_failures(top_level_failures, captures):
+    failures = list(top_level_failures)
+    for record in captures:
+        if record.get("failed") or record.get("completed") is False:
+            failures.append({
+                "stage": get_stage(record),
+                "path": record.get("path", "unknown"),
+                "reason": record.get("failureReason") or record.get("reason", "unknown"),
+            })
+    return failures
+
+
+def decision_for_layer(layer):
+    if layer.get("effectDecision") or layer.get("decision"):
+        decision = str(layer.get("effectDecision", layer.get("decision", "unknown")))
+        reason = str(layer.get("effectDecisionReason", layer.get("reason", "unknown")))
+        return decision, reason
+
+    policy = layer.get("policy")
+    if not isinstance(policy, dict):
+        return "unknown", "unknown"
+
+    if policy.get("keepLayer") is False:
+        decision = "skip-layer"
+    elif policy.get("strippedEffects"):
+        decision = "strip-effects"
+    elif policy.get("keepEffects") is True:
+        decision = "keep-effects"
+    elif policy.get("keepEffects") is False:
+        decision = "drop-effects"
+    else:
+        decision = "unknown"
+
+    return decision, str(policy.get("reason", "unknown"))
+
+
+def main():
+    if len(sys.argv) != 2:
+        print("usage: tools/effect-capture-summary.py /path/to/manifest.json", file=sys.stderr)
+        return 2
+
+    manifest_path = Path(sys.argv[1])
+    with manifest_path.open("r", encoding="utf-8") as handle:
+        manifest = json.load(handle)
+
+    captures = as_list(manifest.get("captures"))
+    pass_states = as_list(manifest.get("passStates"))
+    layers = unique_layers(as_list(manifest.get("layers")), captures)
+    failures = capture_failures(as_list(manifest.get("failures")), captures)
+
+    stage_counts = Counter(get_stage(record) for record in captures)
+    layer_stage_counts = defaultdict(Counter)
+    for record in captures:
+        layer_stage_counts[capture_key(record)][get_stage(record)] += 1
+
+    print(f"manifest={manifest_path}")
+    print(f"scene={manifest.get('sceneId', 'unknown')}")
+    print(f"wallpaper={manifest.get('wallpaperPath', 'unknown')}")
+    print(f"captures={len(captures)} stages={dict(sorted(stage_counts.items()))}")
+    print(f"layers={len(layers)} passStates={len(pass_states)} failures={len(failures)}")
+
+    if failures:
+        print("failures:")
+        for failure in failures:
+            print(f"  - stage={failure.get('stage', 'unknown')} path={failure.get('path', 'unknown')} reason={failure.get('reason', 'unknown')}")
+
+    decisions = Counter()
+    for layer in layers:
+        decisions[decision_for_layer(layer)] += 1
+
+    if decisions:
+        print("decisions:")
+        for (decision, reason), count in sorted(decisions.items()):
+            print(f"  - {decision} reason={reason} count={count}")
+
+    if layer_stage_counts:
+        print("layer-stage-counts:")
+        for key, counts in sorted(layer_stage_counts.items()):
+            print(f"  - {key}: {dict(sorted(counts.items()))}")
+
+    if pass_states:
+        print("pass-states:")
+        for state in pass_states:
+            name = state.get("passName", state.get("name", state.get("output", "unknown")))
+            src = state.get("sourceTexture", state.get("src", "unknown"))
+            dst = state.get("targetTexture", state.get("dst", state.get("output", "unknown")))
+            load = state.get("colorLoadOp", state.get("loadOp", "unknown"))
+            blend = state.get("blendMode", "unknown")
+            preserve = state.get("preserveOutput", state.get("preserve", "unknown"))
+            color_mask = state.get("colorMask", "unknown")
+            depth_load = state.get("depthLoadOp", "unknown")
+            blend_enabled = state.get("blendEnabled", "unknown")
+            uses_depth = state.get("usesDepth", "unknown")
+            print(f"  - name={name} src={src} dst={dst} load={load} blend={blend} preserve={preserve} colorMask={color_mask} depthLoad={depth_load} blendEnabled={blend_enabled} usesDepth={uses_depth}")
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

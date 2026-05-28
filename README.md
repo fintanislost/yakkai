@@ -241,6 +241,7 @@ The native backend supports:
 
 ### Known limitations
 - Regular per-layer offscreen effect chains in puppet scenes can break alpha compositing. Yakkai selectively strips regular/heavy effects in puppet scenes while preserving composelayers, colorkey, flare/lens, and other essential effect paths.
+- The current stripped-effect family backlog, including candidate scenes and blocked follow-up slices, is tracked in `docs/renderer-effect-candidate-backlog.md`.
 - Small embedded video textures are decoded as static first frames to keep CPU use bounded. Continuous decode is enabled only for large/main videos when FFmpeg is available at build time.
 - Static model scenes use an experimental fallback for basis correction, camera framing, and material selection.
 - Material/lighting fidelity is partial: generic materials and point lights are supported, but full Wallpaper Engine PBR, shadow, and reflection parity is not.

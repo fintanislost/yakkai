@@ -6,6 +6,10 @@ This file summarizes which Wallpaper Engine renderer limitations have active bas
 ./smoke-tests/run.sh --coverage
 ```
 
+Detailed stripped-effect family blockers from Phase 3.3 are tracked in
+`docs/renderer-effect-candidate-backlog.md`; keep this file focused on fixture
+coverage status.
+
 | Bucket | Name | Required | Best | Satisfied | Scenes |
 | --- | --- | --- | --- | --- | --- |
 | puppet-effects-alpha | Puppet Effects And Alpha | active | active | yes | 3228578419 |

@@ -154,3 +154,5 @@ Manual visual comparison is required for `3228578419` and any scene affected by 
 Slice 3.3 landed manifest-only stripped effect diagnostics. The debug manifest now exposes top-level `strippedCandidates` for effect chains removed by policy before render graph construction. Generated artifacts stayed in `/tmp` and were not promoted to baselines.
 
 No effect family was re-enabled in this slice. The `3476236738` diagnostics exposed multiple stripped families, including waterflow, waterwaves, opacity, shine, iris, blur, audio, and color grading paths. The `3228578419` Arona guardrail also exposed stripped LUT, blur/fullscreen, character, and background paths. That set did not meet the strict low-risk threshold for a single narrow allowlist, so re-enable work remains deferred to a candidate-specific follow-up plan.
+
+Phase 3.4 records those blocked families in `docs/renderer-effect-candidate-backlog.md`.

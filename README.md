@@ -98,6 +98,12 @@ For effect-chain debugging, the paper backend can write intermediate render-targ
 
 `--debug-effect-captures` is harness-only and off by default. It writes `manifest.json` plus `effect-input`, `effect-output`, and `final-publish` TGA captures for effect-chain layers. These captures are run artifacts for investigation; PNG smoke baselines remain the committed source of truth.
 
+Summarize a capture manifest before comparing images:
+
+```bash
+tools/effect-capture-summary.py /tmp/yakkai-effect-debug/manifest.json
+```
+
 ### Manual Build
 
 The normal build target for installable packages is `yakkai_stage_wallyakkai_scene_import`:
@@ -197,6 +203,7 @@ QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner \
 │           └── ui/          # QML UI components
 ├── tools/                   # Development utilities
 │   ├── color-lab/           # Interactive color debugging web tool
+│   ├── effect-capture-summary.py # Summarize harness effect-capture manifests
 │   ├── tst_config_persistence.qml # QML regression test for settings persistence
 │   └── validate-scene.sh    # Automated render validator
 ├── scripts/                 # Local install and package validation helpers

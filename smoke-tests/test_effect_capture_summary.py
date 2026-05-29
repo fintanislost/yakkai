@@ -76,8 +76,8 @@ class EffectCaptureSummaryTests(unittest.TestCase):
         self.assertIn("stripped-candidate-reasons:", completed.stdout)
         self.assertIn("  - puppet-alpha-strip: 2", completed.stdout)
         self.assertIn("stripped-candidate-layers:", completed.stdout)
-        self.assertIn("  - 101:Water BG reason=puppet-alpha-strip risk=unknown families=none effects=2 shaders=2", completed.stdout)
-        self.assertIn("  - 102:Utility reason=puppet-alpha-strip risk=unknown families=none effects=1 shaders=1", completed.stdout)
+        self.assertIn("  - 101:Water BG reason=puppet-alpha-strip risk=unknown shape=unknown families=none mix=none effects=2 shaders=2", completed.stdout)
+        self.assertIn("  - 102:Utility reason=puppet-alpha-strip risk=unknown shape=unknown families=none mix=none effects=1 shaders=1", completed.stdout)
 
     def test_reports_candidate_classification_buckets(self):
         manifest = {
@@ -141,8 +141,56 @@ class EffectCaptureSummaryTests(unittest.TestCase):
         self.assertIn("stripped-candidate-families:", completed.stdout)
         self.assertIn("  - waterflow: 1", completed.stdout)
         self.assertIn("  - waterwaves: 1", completed.stdout)
-        self.assertIn("  - 124:Window Water reason=puppet-alpha-strip risk=simple-water families=waterflow effects=1 shaders=1", completed.stdout)
-        self.assertIn("  - 405:ARONA_CROP_SHEET reason=puppet-alpha-strip risk=protected-puppet-path families=waterwaves effects=2 shaders=2", completed.stdout)
+        self.assertIn("  - 124:Window Water reason=puppet-alpha-strip risk=simple-water shape=unknown families=waterflow mix=none effects=1 shaders=1", completed.stdout)
+        self.assertIn("  - 405:ARONA_CROP_SHEET reason=puppet-alpha-strip risk=protected-puppet-path shape=unknown families=waterwaves mix=none effects=2 shaders=2", completed.stdout)
+
+    def test_reports_candidate_chain_shapes_and_mix_families(self):
+        manifest = {
+            "sceneId": "3476236738",
+            "captures": [],
+            "passStates": [],
+            "strippedCandidates": [
+                {
+                    "layerId": 168,
+                    "layerName": "Mixed Water",
+                    "policy": {"reason": "puppet-alpha-strip"},
+                    "effectNames": ["waterwaves", "opacity"],
+                    "materialShaders": ["effects/waterwaves", "effects/opacity"],
+                    "candidateFamilies": ["waterwaves"],
+                    "candidateMixFamilies": ["opacity"],
+                    "candidateRisk": "mixed-chain",
+                    "candidateChainShape": "water+opacity",
+                    "candidateBlockedReason": "water-effect-mixed-chain",
+                },
+                {
+                    "layerId": 277,
+                    "layerName": "Audio Bars",
+                    "policy": {"reason": "puppet-alpha-strip"},
+                    "effectNames": ["waterwaves", "audio"],
+                    "materialShaders": ["effects/waterwaves", "effects/audio"],
+                    "candidateFamilies": ["waterwaves"],
+                    "candidateMixFamilies": ["audio"],
+                    "candidateRisk": "utility-carrier",
+                    "candidateChainShape": "audio-utility",
+                    "candidateBlockedReason": "utility-carrier",
+                },
+            ],
+        }
+
+        completed = self.run_summary(manifest)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("stripped-candidate-chain-shapes:", completed.stdout)
+        self.assertIn("  - audio-utility: 1", completed.stdout)
+        self.assertIn("  - water+opacity: 1", completed.stdout)
+        self.assertIn("stripped-candidate-mix-families:", completed.stdout)
+        self.assertIn("  - audio: 1", completed.stdout)
+        self.assertIn("  - opacity: 1", completed.stdout)
+        self.assertIn(
+            "  - 168:Mixed Water reason=puppet-alpha-strip risk=mixed-chain "
+            "shape=water+opacity families=waterwaves mix=opacity effects=2 shaders=2",
+            completed.stdout,
+        )
 
     def test_reports_allowed_simple_water_rendered_layers(self):
         manifest = {
@@ -245,7 +293,7 @@ class EffectCaptureSummaryTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("strippedCandidates=1", completed.stdout)
         self.assertIn("  - nested-reason: 1", completed.stdout)
-        self.assertIn("  - 201:Nested reason=nested-reason risk=unknown families=none effects=1 shaders=2", completed.stdout)
+        self.assertIn("  - 201:Nested reason=nested-reason risk=unknown shape=unknown families=none mix=none effects=1 shaders=2", completed.stdout)
 
     def test_malformed_stripped_candidate_entries_report_unknowns(self):
         completed = self.run_summary({
@@ -258,7 +306,7 @@ class EffectCaptureSummaryTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("strippedCandidates=2", completed.stdout)
         self.assertIn("  - unknown: 2", completed.stdout)
-        self.assertIn("  - unknown:unnamed reason=unknown risk=unknown families=none effects=0 shaders=0", completed.stdout)
+        self.assertIn("  - unknown:unnamed reason=unknown risk=unknown shape=unknown families=none mix=none effects=0 shaders=0", completed.stdout)
 
 
 if __name__ == "__main__":

@@ -37,6 +37,8 @@ struct EffectCaptureLayerInfo {
     std::vector<std::string> effectNames;
     std::vector<std::string> materialShaders;
     std::vector<std::string> candidateFamilies;
+    std::vector<std::string> candidateMixFamilies;
+    std::string              candidateChainShape;
     std::string              candidateRisk;
     std::string              candidateBlockedReason;
     wallpaper::policy::CandidateChecks candidateChecks;

@@ -68,6 +68,11 @@ bool containsString(const std::vector<std::string>& values, const std::string& e
     return std::find(values.begin(), values.end(), expected) != values.end();
 }
 
+bool equalsStrings(const std::vector<std::string>& actual, const std::vector<std::string>& expected)
+{
+    return actual == expected;
+}
+
 void checkDecisionStableAfterClassification(const wallpaper::policy::LayerEffectInput& input,
                                             const std::string& label)
 {
@@ -166,6 +171,10 @@ void testEffectCandidateClassification()
               "simple waterwaves candidate is simple-water");
         check(classification.candidateBlockedReason == "water-effect-candidate",
               "simple waterwaves candidate records candidate reason");
+        check(classification.candidateMixFamilies.empty(),
+              "simple waterwaves candidate has no mix families");
+        check(classification.candidateChainShape == "simple-water",
+              "simple waterwaves candidate reports simple-water chain shape");
         check(classification.candidateChecks.hasWaterFamily,
               "simple waterwaves candidate has water family");
         check(classification.candidateChecks.waterOnly,
@@ -188,11 +197,81 @@ void testEffectCandidateClassification()
               "water plus opacity is mixed-chain");
         check(classification.candidateBlockedReason == "water-effect-mixed-chain",
               "mixed-chain records mixed reason");
+        check(containsString(classification.candidateMixFamilies, "opacity"),
+              "water plus opacity records opacity mix family");
+        check(classification.candidateChainShape == "water+opacity",
+              "water plus opacity reports water+opacity chain shape");
         check(classification.candidateChecks.hasWaterFamily,
               "mixed-chain keeps water-family signal");
         check(!classification.candidateChecks.waterOnly,
               "mixed-chain is not water-only");
         checkDecisionStableAfterClassification(input, "mixed-chain");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.effects.push_back({
+            .name = "shine",
+            .visible = true,
+            .firstMaterialShader = "effects/shine",
+            .materialShaders = {"effects/shine"},
+        });
+        const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
+        check(containsString(classification.candidateMixFamilies, "shine"),
+              "water plus shine records shine mix family");
+        check(classification.candidateChainShape == "water+shine",
+              "water plus shine reports water+shine chain shape");
+        check(classification.candidateRisk == "mixed-chain",
+              "water plus shine remains mixed-chain risk");
+        checkDecisionStableAfterClassification(input, "water-plus-shine");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.effects.push_back({
+            .name = "iris",
+            .visible = true,
+            .firstMaterialShader = "effects/iris",
+            .materialShaders = {"effects/iris"},
+        });
+        const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
+        check(containsString(classification.candidateMixFamilies, "iris"),
+              "water plus iris records iris mix family");
+        check(classification.candidateChainShape == "water+iris",
+              "water plus iris reports water+iris chain shape");
+        check(classification.candidateRisk == "mixed-chain",
+              "water plus iris remains mixed-chain risk");
+        checkDecisionStableAfterClassification(input, "water-plus-iris");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.effects.push_back({
+            .name = "opacity",
+            .visible = true,
+            .firstMaterialShader = "effects/opacity",
+            .materialShaders = {"effects/opacity"},
+        });
+        input.effects.push_back({
+            .name = "shine",
+            .visible = true,
+            .firstMaterialShader = "effects/shine",
+            .materialShaders = {"effects/shine"},
+        });
+        input.effects.push_back({
+            .name = "iris",
+            .visible = true,
+            .firstMaterialShader = "effects/iris",
+            .materialShaders = {"effects/iris"},
+        });
+        const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
+        check(equalsStrings(classification.candidateMixFamilies, {"opacity", "shine", "iris"}),
+              "water plus opacity shine iris records deterministic mix families");
+        check(classification.candidateChainShape == "water+opacity+shine+iris",
+              "water plus opacity shine iris reports combined chain shape");
+        check(classification.candidateRisk == "mixed-chain",
+              "water plus opacity shine iris remains mixed-chain risk");
+        checkDecisionStableAfterClassification(input, "water-plus-opacity-shine-iris");
     }
 
     {
@@ -317,9 +396,55 @@ void testEffectCandidateClassification()
         const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
         check(classification.candidateRisk == "utility-carrier",
               "solidlayer water candidate is utility-carrier");
+        check(classification.candidateChainShape == "carrier-mixed",
+              "solidlayer water candidate reports carrier-mixed chain shape");
         check(classification.candidateChecks.isUtilityCarrier,
               "utility carrier check is true");
         checkDecisionStableAfterClassification(input, "utility-carrier");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.imagePath = "models/util/solidlayer.json";
+        input.effects.push_back({
+            .name = "audio",
+            .visible = true,
+            .firstMaterialShader = "effects/audio",
+            .materialShaders = {"effects/audio"},
+        });
+        const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
+        check(classification.candidateRisk == "utility-carrier",
+              "audio utility keeps utility-carrier risk");
+        check(containsString(classification.candidateMixFamilies, "audio"),
+              "audio utility records audio mix family");
+        check(classification.candidateChainShape == "audio-utility",
+              "audio utility reports audio-utility chain shape");
+        checkDecisionStableAfterClassification(input, "audio-utility");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.imagePath = "models/util/solidlayer.json";
+        input.effects.push_back({
+            .name = "blur",
+            .visible = true,
+            .firstMaterialShader = "effects/blur",
+            .materialShaders = {"effects/blur"},
+        });
+        input.effects.push_back({
+            .name = "lut",
+            .visible = true,
+            .firstMaterialShader = "effects/lut",
+            .materialShaders = {"effects/lut"},
+        });
+        const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
+        check(classification.candidateRisk == "utility-carrier",
+              "blur LUT utility keeps utility-carrier risk");
+        check(equalsStrings(classification.candidateMixFamilies, {"blur", "lut"}),
+              "blur LUT utility records deterministic mix families");
+        check(classification.candidateChainShape == "blur-lut-utility",
+              "blur LUT utility reports blur-lut-utility chain shape");
+        checkDecisionStableAfterClassification(input, "blur-lut-utility");
     }
 
     {
@@ -342,6 +467,8 @@ void testEffectCandidateClassification()
               "generic puppet water layer is blocked before simple-water");
         check(classification.candidateBlockedReason == "puppet-layer",
               "generic puppet water layer records puppet-layer reason");
+        check(classification.candidateChainShape == "puppet-mixed",
+              "generic puppet water layer reports puppet-mixed chain shape");
         check(classification.candidateChecks.isPuppetLayer,
               "generic puppet water layer records puppet-layer check");
         check(classification.candidateChecks.waterOnly,
@@ -362,6 +489,10 @@ void testEffectCandidateClassification()
         const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
         check(classification.candidateRisk == "protected-puppet-path",
               "crop-sheet puppet candidate is protected");
+        check(containsString(classification.candidateMixFamilies, "pulse"),
+              "crop-sheet puppet candidate records pulse mix family");
+        check(classification.candidateChainShape == "protected-puppet-mixed",
+              "crop-sheet puppet candidate reports protected-puppet-mixed chain shape");
         check(classification.candidateChecks.isProtectedPuppetPath,
               "protected puppet path check is true");
         checkDecisionStableAfterClassification(input, "protected-puppet-path");
@@ -382,6 +513,10 @@ void testEffectCandidateClassification()
               "non-water candidate risk is non-water");
         check(classification.candidateBlockedReason == "no-water-effect-family",
               "non-water candidate records no-water reason");
+        check(containsString(classification.candidateMixFamilies, "blur"),
+              "non-water candidate records known non-water mix family");
+        check(classification.candidateChainShape == "unknown-mixed",
+              "non-water candidate with known family reports unknown-mixed chain shape");
         checkDecisionStableAfterClassification(input, "non-water");
     }
 
@@ -396,6 +531,8 @@ void testEffectCandidateClassification()
         const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
         check(classification.candidateRisk == "mixed-chain",
               "unknown shader mixed with water blocks simple-water");
+        check(classification.candidateChainShape == "unknown-mixed",
+              "unknown shader mixed with water reports unknown-mixed chain shape");
         check(!classification.candidateChecks.waterOnly,
               "unknown shader mixed with water is not water-only");
         checkDecisionStableAfterClassification(input, "unknown-water-mix");
@@ -612,6 +749,8 @@ void testEffectCaptureDebug()
         layer.effectNames = {"waterwaves", "opacity"};
         layer.materialShaders = {"effects/waterwaves", "effects/opacity"};
         layer.candidateFamilies = {"waterwaves"};
+        layer.candidateMixFamilies = {"opacity"};
+        layer.candidateChainShape = "water+opacity";
         layer.candidateRisk = "mixed-chain";
         layer.candidateBlockedReason = "water-effect-mixed-chain";
         layer.candidateChecks.hasWaterFamily = true;
@@ -642,6 +781,10 @@ void testEffectCaptureDebug()
               "manifest includes stripped candidate policy reason");
         check(manifest.find("\"candidateFamilies\"") != std::string::npos,
               "manifest includes stripped candidate families");
+        check(manifest.find("\"candidateMixFamilies\"") != std::string::npos,
+              "manifest includes stripped candidate mix families");
+        check(manifest.find("\"candidateChainShape\": \"water+opacity\"") != std::string::npos,
+              "manifest includes stripped candidate chain shape");
         check(manifest.find("\"candidateRisk\": \"mixed-chain\"") != std::string::npos,
               "manifest includes stripped candidate risk");
         check(manifest.find("\"candidateBlockedReason\": \"water-effect-mixed-chain\"") != std::string::npos,

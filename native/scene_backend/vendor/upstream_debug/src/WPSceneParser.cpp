@@ -2530,6 +2530,8 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         }
     }
     effectCaptureInfo.candidateFamilies = candidateClassification.candidateFamilies;
+    effectCaptureInfo.candidateMixFamilies = candidateClassification.candidateMixFamilies;
+    effectCaptureInfo.candidateChainShape = candidateClassification.candidateChainShape;
     effectCaptureInfo.candidateRisk = candidateClassification.candidateRisk;
     effectCaptureInfo.candidateBlockedReason = candidateClassification.candidateBlockedReason;
     effectCaptureInfo.candidateChecks = candidateClassification.candidateChecks;

@@ -76,6 +76,8 @@ nlohmann::json layerToJson(const EffectCaptureLayerInfo& layer)
         {"effectNames", layer.effectNames},
         {"materialShaders", layer.materialShaders},
         {"candidateFamilies", layer.candidateFamilies},
+        {"candidateMixFamilies", layer.candidateMixFamilies},
+        {"candidateChainShape", layer.candidateChainShape},
         {"candidateRisk", layer.candidateRisk},
         {"candidateBlockedReason", layer.candidateBlockedReason},
         {"candidateChecks", candidateChecksToJson(layer.candidateChecks)},

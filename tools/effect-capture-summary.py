@@ -109,6 +109,16 @@ def candidate_families(candidate):
     return [str(family) for family in as_list(families)]
 
 
+def candidate_mix_families(candidate):
+    families = candidate_layer(candidate).get("candidateMixFamilies")
+    return [str(family) for family in as_list(families)]
+
+
+def candidate_chain_shape(candidate):
+    shape = candidate_layer(candidate).get("candidateChainShape")
+    return str(shape) if shape else "unknown"
+
+
 def is_allowed_simple_water_layer(layer):
     if not isinstance(layer, dict):
         return False
@@ -200,6 +210,11 @@ def main():
         for risk, count in sorted(risks.items()):
             print(f"  - {risk}: {count}")
 
+        shapes = Counter(candidate_chain_shape(candidate) for candidate in stripped_candidates)
+        print("stripped-candidate-chain-shapes:")
+        for shape, count in sorted(shapes.items()):
+            print(f"  - {shape}: {count}")
+
         family_counts = Counter()
         for candidate in stripped_candidates:
             for family in candidate_families(candidate):
@@ -207,6 +222,15 @@ def main():
         if family_counts:
             print("stripped-candidate-families:")
             for family, count in sorted(family_counts.items()):
+                print(f"  - {family}: {count}")
+
+        mix_counts = Counter()
+        for candidate in stripped_candidates:
+            for family in candidate_mix_families(candidate):
+                mix_counts[family] += 1
+        if mix_counts:
+            print("stripped-candidate-mix-families:")
+            for family, count in sorted(mix_counts.items()):
                 print(f"  - {family}: {count}")
 
         print("stripped-candidate-layers:")
@@ -217,10 +241,12 @@ def main():
             layer_name = layer.get("layerName") or "unnamed"
             reason = str(policy.get("reason", "unknown"))
             risk = candidate_risk(candidate)
+            shape = candidate_chain_shape(candidate)
             families = ",".join(candidate_families(candidate)) or "none"
+            mix = ",".join(candidate_mix_families(candidate)) or "none"
             effects = len(as_list(layer.get("effectNames")))
             shaders = len(as_list(layer.get("materialShaders")))
-            print(f"  - {layer_id}:{layer_name} reason={reason} risk={risk} families={families} effects={effects} shaders={shaders}")
+            print(f"  - {layer_id}:{layer_name} reason={reason} risk={risk} shape={shape} families={families} mix={mix} effects={effects} shaders={shaders}")
         if len(stripped_candidates) > 10:
             print(f"  ... {len(stripped_candidates) - 10} more")
 

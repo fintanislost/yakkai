@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <utility>
 
 namespace wallpaper::policy {
 namespace {
@@ -46,6 +47,18 @@ constexpr std::array<std::string_view, 12> kKnownNonWaterTokens {
     "audio",
     "lightshaft",
     "effectpassthrough",
+};
+
+constexpr std::array<std::string_view, 9> kDiagnosticMixFamilies {
+    "opacity",
+    "shine",
+    "iris",
+    "audio",
+    "blur",
+    "lut",
+    "pulse",
+    "shake",
+    "lightshaft",
 };
 
 bool containsAnyToken(std::string_view value, const auto& tokens)
@@ -122,6 +135,110 @@ std::vector<std::string> collectCandidateFamilies(const std::vector<LayerEffectD
         }
     }
     return families;
+}
+
+void collectMixFamiliesFromText(std::vector<std::string>& families, std::string_view value)
+{
+    std::vector<std::pair<std::size_t, std::string_view>> matches;
+    const std::string lowered = asciiLower(value);
+    for (std::string_view family : kDiagnosticMixFamilies) {
+        const std::size_t pos = lowered.find(family);
+        if (pos != std::string::npos) {
+            matches.push_back({pos, family});
+        }
+    }
+    std::sort(matches.begin(), matches.end(), [](const auto& lhs, const auto& rhs) {
+        if (lhs.first != rhs.first) {
+            return lhs.first < rhs.first;
+        }
+        return lhs.second < rhs.second;
+    });
+    for (const auto& match : matches) {
+        appendUnique(families, match.second);
+    }
+}
+
+std::vector<std::string> collectCandidateMixFamilies(const std::vector<LayerEffectDescriptor>& effects)
+{
+    std::vector<std::string> families;
+    for (const auto& effect : effects) {
+        if (!effect.visible) {
+            continue;
+        }
+        collectMixFamiliesFromText(families, effect.name);
+        collectMixFamiliesFromText(families, effect.firstMaterialShader);
+        for (const auto& shader : effect.materialShaders) {
+            collectMixFamiliesFromText(families, shader);
+        }
+    }
+    return families;
+}
+
+bool hasFamily(const std::vector<std::string>& families, std::string_view family)
+{
+    return std::find(families.begin(), families.end(), std::string(family)) != families.end();
+}
+
+std::string waterMixShape(const std::vector<std::string>& families)
+{
+    const bool opacity = hasFamily(families, "opacity");
+    const bool shine = hasFamily(families, "shine");
+    const bool iris = hasFamily(families, "iris");
+    if (opacity && shine && iris) {
+        return "water+opacity+shine+iris";
+    }
+    if (opacity && shine) {
+        return "water+opacity+shine";
+    }
+    if (opacity && iris) {
+        return "water+opacity+iris";
+    }
+    if (opacity) {
+        return "water+opacity";
+    }
+    if (shine) {
+        return "water+shine";
+    }
+    if (iris) {
+        return "water+iris";
+    }
+    return {};
+}
+
+std::string diagnosticChainShape(const CandidateClassification& classification)
+{
+    if (!classification.candidateChecks.hasWaterFamily) {
+        return classification.candidateMixFamilies.empty() ? "non-water" : "unknown-mixed";
+    }
+    if (classification.candidateChecks.isProtectedPuppetPath) {
+        return "protected-puppet-mixed";
+    }
+    if (classification.candidateChecks.isPuppetLayer) {
+        return "puppet-mixed";
+    }
+    if (classification.candidateChecks.isComposelayer) {
+        return "carrier-mixed";
+    }
+    if (classification.candidateChecks.isUtilityCarrier) {
+        if (hasFamily(classification.candidateMixFamilies, "audio")) {
+            return "audio-utility";
+        }
+        if (hasFamily(classification.candidateMixFamilies, "blur") ||
+            hasFamily(classification.candidateMixFamilies, "lut")) {
+            return "blur-lut-utility";
+        }
+        return "carrier-mixed";
+    }
+    if (classification.candidateChecks.isFullscreen) {
+        return "carrier-mixed";
+    }
+    if (!classification.candidateChecks.waterOnly) {
+        if (const std::string shape = waterMixShape(classification.candidateMixFamilies); !shape.empty()) {
+            return shape;
+        }
+        return "unknown-mixed";
+    }
+    return "simple-water";
 }
 
 bool fieldIsStrictWater(std::string_view value)
@@ -229,6 +346,7 @@ CandidateClassification classifyStrippedEffectCandidate(const LayerEffectInput& 
 {
     CandidateClassification classification;
     classification.candidateFamilies = collectCandidateFamilies(input.effects);
+    classification.candidateMixFamilies = collectCandidateMixFamilies(input.effects);
 
     classification.candidateChecks.hasWaterFamily = !classification.candidateFamilies.empty();
     classification.candidateChecks.waterOnly =
@@ -264,6 +382,8 @@ CandidateClassification classifyStrippedEffectCandidate(const LayerEffectInput& 
         classification.candidateRisk = "simple-water";
         classification.candidateBlockedReason = "water-effect-candidate";
     }
+
+    classification.candidateChainShape = diagnosticChainShape(classification);
 
     return classification;
 }

@@ -48,6 +48,8 @@ struct CandidateChecks {
 
 struct CandidateClassification {
     std::vector<std::string> candidateFamilies;
+    std::vector<std::string> candidateMixFamilies;
+    std::string candidateChainShape { "non-water" };
     std::string candidateRisk { "non-water" };
     std::string candidateBlockedReason { "no-water-effect-family" };
     CandidateChecks candidateChecks;

@@ -49,17 +49,24 @@ constexpr std::array<std::string_view, 12> kKnownNonWaterTokens {
     "effectpassthrough",
 };
 
-constexpr std::array<std::string_view, 9> kDiagnosticMixFamilies {
-    "opacity",
-    "shine",
-    "iris",
-    "audio",
-    "blur",
-    "lut",
-    "pulse",
-    "shake",
-    "lightshaft",
-};
+constexpr std::array<std::pair<std::string_view, std::string_view>, 16> kDiagnosticMixFamilyAliases {{
+    {"opacity", "opacity"},
+    {"shine", "shine"},
+    {"iris", "iris"},
+    {"audio", "audio"},
+    {"blur", "blur"},
+    {"lut_loader", "lut"},
+    {"lut", "lut"},
+    {"color_grading", "color-grade"},
+    {"color grading", "color-grade"},
+    {"colorgrading", "color-grade"},
+    {"colorgrade", "color-grade"},
+    {"colorcorrection", "color-grade"},
+    {"pulse", "pulse"},
+    {"shake", "shake"},
+    {"lightshaft", "lightshaft"},
+    {"effectpassthrough", "effectpassthrough"},
+}};
 
 bool containsAnyToken(std::string_view value, const auto& tokens)
 {
@@ -141,8 +148,8 @@ void collectMixFamiliesFromText(std::vector<std::string>& families, std::string_
 {
     std::vector<std::pair<std::size_t, std::string_view>> matches;
     const std::string lowered = asciiLower(value);
-    for (std::string_view family : kDiagnosticMixFamilies) {
-        const std::size_t pos = lowered.find(family);
+    for (const auto& [alias, family] : kDiagnosticMixFamilyAliases) {
+        const std::size_t pos = lowered.find(alias);
         if (pos != std::string::npos) {
             matches.push_back({pos, family});
         }
@@ -205,9 +212,79 @@ std::string waterMixShape(const std::vector<std::string>& families)
     return {};
 }
 
+std::string joinShapeParts(const std::vector<std::string_view>& parts)
+{
+    std::string shape;
+    for (std::string_view part : parts) {
+        if (!shape.empty()) {
+            shape += "-";
+        }
+        shape += part;
+    }
+    return shape;
+}
+
+std::string highRiskShape(const CandidateClassification& classification)
+{
+    std::vector<std::string_view> parts;
+    if (classification.candidateChecks.hasBlurFamily) {
+        parts.push_back("blur");
+    }
+    if (classification.candidateChecks.hasLutFamily) {
+        parts.push_back("lut");
+    }
+    if (classification.candidateChecks.hasColorGradingFamily) {
+        parts.push_back("color-grade");
+    }
+    return joinShapeParts(parts);
+}
+
+std::string carrierShape(std::string_view base, std::string_view carrier)
+{
+    if (base.empty()) {
+        return {};
+    }
+    std::string shape(base);
+    shape += "-";
+    shape += carrier;
+    return shape;
+}
+
 std::string diagnosticChainShape(const CandidateClassification& classification)
 {
+    const std::string riskyShape = highRiskShape(classification);
+
     if (!classification.candidateChecks.hasWaterFamily) {
+        if (classification.candidateChecks.isProtectedPuppetPath) {
+            return "protected-puppet-mixed";
+        }
+        if (classification.candidateChecks.isPuppetLayer) {
+            return "puppet-mixed";
+        }
+        if (classification.candidateChecks.isComposelayer) {
+            if (const std::string shape = carrierShape(riskyShape, "composelayer"); !shape.empty()) {
+                return shape;
+            }
+            return classification.candidateMixFamilies.empty() ? "non-water" : "carrier-mixed";
+        }
+        if (classification.candidateChecks.isUtilityCarrier) {
+            if (hasFamily(classification.candidateMixFamilies, "audio")) {
+                return "audio-utility";
+            }
+            if (const std::string shape = carrierShape(riskyShape, "utility"); !shape.empty()) {
+                return shape;
+            }
+            return classification.candidateMixFamilies.empty() ? "non-water" : "carrier-mixed";
+        }
+        if (classification.candidateChecks.isFullscreen) {
+            if (const std::string shape = carrierShape(riskyShape, "fullscreen"); !shape.empty()) {
+                return shape;
+            }
+            return classification.candidateMixFamilies.empty() ? "non-water" : "carrier-mixed";
+        }
+        if (!riskyShape.empty()) {
+            return riskyShape + "-only";
+        }
         return classification.candidateMixFamilies.empty() ? "non-water" : "unknown-mixed";
     }
     if (classification.candidateChecks.isProtectedPuppetPath) {
@@ -217,19 +294,24 @@ std::string diagnosticChainShape(const CandidateClassification& classification)
         return "puppet-mixed";
     }
     if (classification.candidateChecks.isComposelayer) {
+        if (const std::string shape = carrierShape(riskyShape, "composelayer"); !shape.empty()) {
+            return shape;
+        }
         return "carrier-mixed";
     }
     if (classification.candidateChecks.isUtilityCarrier) {
         if (hasFamily(classification.candidateMixFamilies, "audio")) {
             return "audio-utility";
         }
-        if (hasFamily(classification.candidateMixFamilies, "blur") ||
-            hasFamily(classification.candidateMixFamilies, "lut")) {
-            return "blur-lut-utility";
+        if (const std::string shape = carrierShape(riskyShape, "utility"); !shape.empty()) {
+            return shape;
         }
         return "carrier-mixed";
     }
     if (classification.candidateChecks.isFullscreen) {
+        if (const std::string shape = carrierShape(riskyShape, "fullscreen"); !shape.empty()) {
+            return shape;
+        }
         return "carrier-mixed";
     }
     if (!classification.candidateChecks.waterOnly) {
@@ -349,6 +431,12 @@ CandidateClassification classifyStrippedEffectCandidate(const LayerEffectInput& 
     classification.candidateMixFamilies = collectCandidateMixFamilies(input.effects);
 
     classification.candidateChecks.hasWaterFamily = !classification.candidateFamilies.empty();
+    classification.candidateChecks.hasBlurFamily =
+        hasFamily(classification.candidateMixFamilies, "blur");
+    classification.candidateChecks.hasLutFamily =
+        hasFamily(classification.candidateMixFamilies, "lut");
+    classification.candidateChecks.hasColorGradingFamily =
+        hasFamily(classification.candidateMixFamilies, "color-grade");
     classification.candidateChecks.waterOnly =
         classification.candidateChecks.hasWaterFamily && visibleEffectsAreStrictWater(input.effects);
     classification.candidateChecks.isUtilityCarrier = isUtilityLayer(input.imagePath);

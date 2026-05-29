@@ -59,6 +59,9 @@ nlohmann::json candidateChecksToJson(const wallpaper::policy::CandidateChecks& c
 {
     return {
         {"hasWaterFamily", checks.hasWaterFamily},
+        {"hasBlurFamily", checks.hasBlurFamily},
+        {"hasLutFamily", checks.hasLutFamily},
+        {"hasColorGradingFamily", checks.hasColorGradingFamily},
         {"waterOnly", checks.waterOnly},
         {"isUtilityCarrier", checks.isUtilityCarrier},
         {"isComposelayer", checks.isComposelayer},

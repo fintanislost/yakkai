@@ -192,6 +192,70 @@ class EffectCaptureSummaryTests(unittest.TestCase):
             completed.stdout,
         )
 
+    def test_reports_high_risk_blur_lut_color_grade_candidates(self):
+        manifest = {
+            "sceneId": "3228578419",
+            "captures": [],
+            "passStates": [],
+            "strippedCandidates": [
+                {
+                    "layerId": 53,
+                    "layerName": "Background Blur",
+                    "policy": {"reason": "puppet-alpha-strip"},
+                    "effectNames": ["blur"],
+                    "materialShaders": ["effects/blur_precise_gaussian"],
+                    "candidateMixFamilies": ["blur"],
+                    "candidateRisk": "non-water",
+                    "candidateChainShape": "blur-fullscreen",
+                },
+                {
+                    "layerId": 174,
+                    "layerName": "Background LUT",
+                    "policy": {"reason": "puppet-alpha-strip"},
+                    "effectNames": ["lut_loader"],
+                    "materialShaders": ["workshop/3165346237/effects/lut_loader"],
+                    "candidateMixFamilies": ["lut"],
+                    "candidateRisk": "non-water",
+                    "candidateChainShape": "lut-only",
+                },
+                {
+                    "layerId": 365,
+                    "layerName": "Color Grade Composelayer",
+                    "policy": {"reason": "puppet-alpha-strip"},
+                    "effectNames": ["color grading"],
+                    "materialShaders": ["workshop/2795521260/effects/color_grading"],
+                    "candidateMixFamilies": ["color-grade"],
+                    "candidateRisk": "non-water",
+                    "candidateChainShape": "color-grade-composelayer",
+                },
+            ],
+        }
+
+        completed = self.run_summary(manifest)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("stripped-high-risk-candidates=3", completed.stdout)
+        self.assertIn("stripped-high-risk-families:", completed.stdout)
+        self.assertIn("  - blur: 1", completed.stdout)
+        self.assertIn("  - color-grade: 1", completed.stdout)
+        self.assertIn("  - lut: 1", completed.stdout)
+        self.assertIn("stripped-high-risk-layers:", completed.stdout)
+        self.assertIn(
+            "  - 53:Background Blur risk=non-water shape=blur-fullscreen "
+            "families=blur effects=1 shaders=1",
+            completed.stdout,
+        )
+        self.assertIn(
+            "  - 174:Background LUT risk=non-water shape=lut-only "
+            "families=lut effects=1 shaders=1",
+            completed.stdout,
+        )
+        self.assertIn(
+            "  - 365:Color Grade Composelayer risk=non-water "
+            "shape=color-grade-composelayer families=color-grade effects=1 shaders=1",
+            completed.stdout,
+        )
+
     def test_reports_allowed_simple_water_rendered_layers(self):
         manifest = {
             "sceneId": "3476236738",

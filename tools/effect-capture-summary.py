@@ -5,6 +5,18 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 
+HIGH_RISK_ALIASES = (
+    ("blur", "blur"),
+    ("lut_loader", "lut"),
+    ("lut", "lut"),
+    ("color_grading", "color-grade"),
+    ("color grading", "color-grade"),
+    ("colorgrading", "color-grade"),
+    ("colorgrade", "color-grade"),
+    ("colorcorrection", "color-grade"),
+)
+
+
 def as_list(value):
     return value if isinstance(value, list) else []
 
@@ -117,6 +129,45 @@ def candidate_mix_families(candidate):
 def candidate_chain_shape(candidate):
     shape = candidate_layer(candidate).get("candidateChainShape")
     return str(shape) if shape else "unknown"
+
+
+def append_unique(values, value):
+    if value not in values:
+        values.append(value)
+
+
+def high_risk_family_from_text(value):
+    lowered = str(value).lower()
+    for alias, family in HIGH_RISK_ALIASES:
+        if alias in lowered:
+            return family
+    return None
+
+
+def canonical_high_risk_family(value):
+    text = str(value).lower()
+    if text in {"blur", "lut", "color-grade"}:
+        return text
+    return high_risk_family_from_text(text)
+
+
+def candidate_high_risk_families(candidate):
+    families = []
+    for family in candidate_mix_families(candidate):
+        canonical = canonical_high_risk_family(family)
+        if canonical:
+            append_unique(families, canonical)
+
+    if families:
+        return families
+
+    layer = candidate_layer(candidate)
+    for field in ("effectNames", "materialShaders"):
+        for value in as_list(layer.get(field)):
+            family = high_risk_family_from_text(value)
+            if family:
+                append_unique(families, family)
+    return families
 
 
 def is_allowed_simple_water_layer(layer):
@@ -232,6 +283,39 @@ def main():
             print("stripped-candidate-mix-families:")
             for family, count in sorted(mix_counts.items()):
                 print(f"  - {family}: {count}")
+
+        high_risk_candidates = [
+            (candidate, candidate_high_risk_families(candidate))
+            for candidate in stripped_candidates
+        ]
+        high_risk_candidates = [
+            (candidate, families)
+            for candidate, families in high_risk_candidates
+            if families
+        ]
+        if high_risk_candidates:
+            print(f"stripped-high-risk-candidates={len(high_risk_candidates)}")
+            high_risk_counts = Counter()
+            for _, families in high_risk_candidates:
+                for family in families:
+                    high_risk_counts[family] += 1
+            print("stripped-high-risk-families:")
+            for family, count in sorted(high_risk_counts.items()):
+                print(f"  - {family}: {count}")
+
+            print("stripped-high-risk-layers:")
+            for candidate, families in high_risk_candidates[:10]:
+                layer = candidate_layer(candidate)
+                layer_id = layer.get("layerId", "unknown")
+                layer_name = layer.get("layerName") or "unnamed"
+                risk = candidate_risk(candidate)
+                shape = candidate_chain_shape(candidate)
+                effects = len(as_list(layer.get("effectNames")))
+                shaders = len(as_list(layer.get("materialShaders")))
+                joined = ",".join(families) or "none"
+                print(f"  - {layer_id}:{layer_name} risk={risk} shape={shape} families={joined} effects={effects} shaders={shaders}")
+            if len(high_risk_candidates) > 10:
+                print(f"  ... {len(high_risk_candidates) - 10} more")
 
         print("stripped-candidate-layers:")
         for candidate in stripped_candidates[:10]:

@@ -38,6 +38,9 @@ struct LayerEffectDecision {
 
 struct CandidateChecks {
     bool hasWaterFamily { false };
+    bool hasBlurFamily { false };
+    bool hasLutFamily { false };
+    bool hasColorGradingFamily { false };
     bool waterOnly { false };
     bool isUtilityCarrier { false };
     bool isComposelayer { false };

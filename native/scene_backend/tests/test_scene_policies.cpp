@@ -520,9 +520,101 @@ void testEffectCandidateClassification()
               "non-water candidate records no-water reason");
         check(containsString(classification.candidateMixFamilies, "blur"),
               "non-water candidate records known non-water mix family");
-        check(classification.candidateChainShape == "unknown-mixed",
-              "non-water candidate with known family reports unknown-mixed chain shape");
+        check(classification.candidateChainShape == "blur-only",
+              "non-water blur candidate reports blur-only chain shape");
+        check(classification.candidateChecks.hasBlurFamily,
+              "non-water blur candidate records blur-family check");
+        check(!classification.candidateChecks.hasLutFamily,
+              "non-water blur candidate does not record LUT-family check");
+        check(!classification.candidateChecks.hasColorGradingFamily,
+              "non-water blur candidate does not record color-grade-family check");
         checkDecisionStableAfterClassification(input, "non-water");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.effects = {{
+            .name = "lut loader",
+            .visible = true,
+            .firstMaterialShader = "workshop/3165346237/effects/lut_loader",
+            .materialShaders = {"workshop/3165346237/effects/lut_loader"},
+        }};
+        const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
+        check(classification.candidateRisk == "non-water",
+              "non-water LUT candidate risk is non-water");
+        check(equalsStrings(classification.candidateMixFamilies, {"lut"}),
+              "non-water LUT candidate records canonical LUT mix family");
+        check(classification.candidateChainShape == "lut-only",
+              "non-water LUT candidate reports lut-only chain shape");
+        check(classification.candidateChecks.hasLutFamily,
+              "non-water LUT candidate records LUT-family check");
+        checkDecisionStableAfterClassification(input, "non-water-lut");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.effects = {{
+            .name = "color grading",
+            .visible = true,
+            .firstMaterialShader = "workshop/2795521260/effects/color_grading",
+            .materialShaders = {"workshop/2795521260/effects/color_grading"},
+        }};
+        const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
+        check(classification.candidateRisk == "non-water",
+              "non-water color-grade candidate risk is non-water");
+        check(equalsStrings(classification.candidateMixFamilies, {"color-grade"}),
+              "non-water color-grade candidate records canonical color-grade mix family");
+        check(classification.candidateChainShape == "color-grade-only",
+              "non-water color-grade candidate reports color-grade-only chain shape");
+        check(classification.candidateChecks.hasColorGradingFamily,
+              "non-water color-grade candidate records color-grade-family check");
+        checkDecisionStableAfterClassification(input, "non-water-color-grade");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.fullscreen = true;
+        input.effects = {{
+            .name = "blur",
+            .visible = true,
+            .firstMaterialShader = "effects/blur_precise_gaussian",
+            .materialShaders = {"effects/blur_precise_gaussian"},
+        }};
+        const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
+        check(classification.candidateRisk == "non-water",
+              "non-water fullscreen blur keeps current risk");
+        check(classification.candidateChecks.isFullscreen,
+              "non-water fullscreen blur records fullscreen check");
+        check(classification.candidateChainShape == "blur-fullscreen",
+              "non-water fullscreen blur reports carrier-aware chain shape");
+        checkDecisionStableAfterClassification(input, "non-water-fullscreen-blur");
+    }
+
+    {
+        auto input = baseEffectInput();
+        input.isComposelayer = true;
+        input.imagePath = "models/util/composelayer.json";
+        input.effects = {{
+            .name = "blur",
+            .visible = true,
+            .firstMaterialShader = "effects/blur_precise_gaussian",
+            .materialShaders = {"effects/blur_precise_gaussian"},
+        }, {
+            .name = "color grading",
+            .visible = true,
+            .firstMaterialShader = "workshop/2795521260/effects/color_grading",
+            .materialShaders = {"workshop/2795521260/effects/color_grading"},
+        }};
+        const auto classification = wallpaper::policy::classifyStrippedEffectCandidate(input);
+        check(classification.candidateRisk == "non-water",
+              "non-water composelayer blur color-grade keeps current risk");
+        check(equalsStrings(classification.candidateMixFamilies, {"blur", "color-grade"}),
+              "non-water composelayer records blur and color-grade families");
+        check(classification.candidateChecks.isComposelayer,
+              "non-water composelayer records composelayer check");
+        check(classification.candidateChainShape == "blur-color-grade-composelayer",
+              "non-water composelayer reports blur color-grade carrier-aware shape");
+        checkDecisionStableAfterClassification(input, "non-water-blur-color-grade-composelayer");
     }
 
     {
@@ -866,6 +958,12 @@ void testEffectCaptureDebug()
               "manifest includes stripped candidate checks");
         check(manifest.find("\"hasWaterFamily\": true") != std::string::npos,
               "manifest includes stripped candidate water-family check");
+        check(manifest.find("\"hasBlurFamily\": false") != std::string::npos,
+              "manifest includes stripped candidate blur-family check");
+        check(manifest.find("\"hasLutFamily\": false") != std::string::npos,
+              "manifest includes stripped candidate LUT-family check");
+        check(manifest.find("\"hasColorGradingFamily\": false") != std::string::npos,
+              "manifest includes stripped candidate color-grade-family check");
         check(manifest.find("\"waterOnly\": false") != std::string::npos,
               "manifest includes stripped candidate water-only check");
         check(manifest.find("\"isUtilityCarrier\": false") != std::string::npos,

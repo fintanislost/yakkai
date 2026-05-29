@@ -2535,16 +2535,35 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     effectCaptureInfo.candidateRisk = candidateClassification.candidateRisk;
     effectCaptureInfo.candidateBlockedReason = candidateClassification.candidateBlockedReason;
     effectCaptureInfo.candidateChecks = candidateClassification.candidateChecks;
+    if (context.scene) {
+        effectCaptureInfo.debugProbeRequested =
+            context.scene->debugEffectCaptures.shouldProbeLayer(wpimgobj.id);
+    }
+    const bool debugProbeStrippedLayer =
+        context.scene &&
+        wallpaper::debug::shouldProbeStrippedEffectLayer(context.scene->debugEffectCaptures,
+                                                         effectCaptureInfo);
+    if (effectCaptureInfo.debugProbeRequested) {
+        effectCaptureInfo.debugProbeOverrodePolicy = debugProbeStrippedLayer;
+        effectCaptureInfo.debugProbeReason =
+            debugProbeStrippedLayer ? "layer-id-probe" : "not-eligible";
+    }
     if (puppetEffectDecision.reason == "puppet-alpha-strip") {
         if (context.scene && context.scene->debugEffectCaptures.enabled()) {
             wallpaper::debug::recordStrippedEffectCandidate(*context.scene, effectCaptureInfo);
         }
-        LOG_INFO("stripping %d effects from layer (alpha fix): name=%s",
-                 count_eff, wpimgobj.name.c_str());
-        count_eff = 0;
-        hasEffect = false;
-        effectObjects.clear();
-        if (! puppetEffectDecision.keepLayer) return;
+        if (debugProbeStrippedLayer) {
+            LOG_INFO("debug probing stripped puppet mixed effect layer: id=%d name=%s",
+                     wpimgobj.id,
+                     wpimgobj.name.c_str());
+        } else {
+            LOG_INFO("stripping %d effects from layer (alpha fix): name=%s",
+                     count_eff, wpimgobj.name.c_str());
+            count_eff = 0;
+            hasEffect = false;
+            effectObjects.clear();
+            if (! puppetEffectDecision.keepLayer) return;
+        }
     } else if (puppetEffectDecision.reason == "essential-effect" &&
                puppetEffectDecision.forceAlphaOne) {
         wpimgobj.alpha = 1.0f;

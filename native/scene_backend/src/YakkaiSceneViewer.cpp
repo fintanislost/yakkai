@@ -375,6 +375,21 @@ void YakkaiSceneViewer::setDebugEffectCaptureCommand(const QString& value)
     emit debugEffectCaptureCommandChanged();
 }
 
+QString YakkaiSceneViewer::debugEffectProbeLayers() const
+{
+    return m_debugEffectProbeLayers;
+}
+
+void YakkaiSceneViewer::setDebugEffectProbeLayers(const QString& value)
+{
+    if (m_debugEffectProbeLayers == value) {
+        return;
+    }
+
+    m_debugEffectProbeLayers = value;
+    emit debugEffectProbeLayersChanged();
+}
+
 void YakkaiSceneViewer::requestGraphvizDump()
 {
     setBackendStatus(QStringLiteral("Scene backend scaffold only. Graphviz dump requested but no native renderer is wired yet."));

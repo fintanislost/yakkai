@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <fstream>
 #include <system_error>
 #include <utility>
@@ -41,6 +42,17 @@ std::string collapseUnderscores(std::string value)
         lastWasUnderscore = false;
     }
     return out;
+}
+
+std::string_view trimAsciiWhitespace(std::string_view value)
+{
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front()))) {
+        value.remove_prefix(1);
+    }
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back()))) {
+        value.remove_suffix(1);
+    }
+    return value;
 }
 
 nlohmann::json candidateChecksToJson(const wallpaper::policy::CandidateChecks& checks)
@@ -81,6 +93,11 @@ nlohmann::json layerToJson(const EffectCaptureLayerInfo& layer)
         {"candidateRisk", layer.candidateRisk},
         {"candidateBlockedReason", layer.candidateBlockedReason},
         {"candidateChecks", candidateChecksToJson(layer.candidateChecks)},
+        {"debugProbe", {
+            {"requested", layer.debugProbeRequested},
+            {"overrodePolicy", layer.debugProbeOverrodePolicy},
+            {"reason", layer.debugProbeReason},
+        }},
     };
 }
 
@@ -89,6 +106,24 @@ nlohmann::json layerToJson(const EffectCaptureLayerInfo& layer)
 std::filesystem::path EffectCaptureConfig::manifestPath() const
 {
     return std::filesystem::path(outputDir) / "manifest.json";
+}
+
+bool EffectCaptureConfig::shouldProbeLayer(int layerId) const
+{
+    return std::find(probeLayerIds.begin(), probeLayerIds.end(), layerId) != probeLayerIds.end();
+}
+
+bool shouldProbeStrippedEffectLayer(const EffectCaptureConfig& config,
+                                    const EffectCaptureLayerInfo& layer)
+{
+    if (!config.enabled() || !config.shouldProbeLayer(layer.layerId)) {
+        return false;
+    }
+    if (layer.policyReason != "puppet-alpha-strip") {
+        return false;
+    }
+    return layer.candidateChainShape == "puppet-mixed" ||
+           layer.candidateChainShape == "protected-puppet-mixed";
 }
 
 std::string sanitizeCapturePathSegment(std::string_view value)
@@ -107,6 +142,39 @@ std::string sanitizeCapturePathSegment(std::string_view value)
         return "unnamed";
     }
     return safe;
+}
+
+std::vector<int> parseProbeLayerIdList(std::string_view value)
+{
+    std::vector<int> ids;
+    value = trimAsciiWhitespace(value);
+    if (value.empty()) {
+        return ids;
+    }
+
+    while (true) {
+        const std::size_t comma = value.find(',');
+        std::string_view token = trimAsciiWhitespace(value.substr(0, comma));
+        if (token.empty()) {
+            return {};
+        }
+
+        int parsed = 0;
+        const char* first = token.data();
+        const char* last = token.data() + token.size();
+        const auto [ptr, ec] = std::from_chars(first, last, parsed);
+        if (ec != std::errc() || ptr != last || parsed <= 0) {
+            return {};
+        }
+        if (std::find(ids.begin(), ids.end(), parsed) == ids.end()) {
+            ids.push_back(parsed);
+        }
+
+        if (comma == std::string_view::npos) {
+            return ids;
+        }
+        value.remove_prefix(comma + 1);
+    }
 }
 
 std::filesystem::path capturePath(const EffectCaptureConfig& config,
@@ -208,6 +276,7 @@ bool writeEffectCaptureManifest(const Scene& scene)
         {"status", failed ? "failed" : "ok"},
         {"sceneId", scene.scene_id},
         {"commandLine", scene.debugEffectCaptures.commandLine},
+        {"probeLayerIds", scene.debugEffectCaptures.probeLayerIds},
         {"captureCount", scene.debugEffectCaptureRecords.size()},
         {"captures", captures},
         {"passStates", passStates},

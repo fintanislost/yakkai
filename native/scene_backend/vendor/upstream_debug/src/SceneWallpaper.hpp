@@ -23,6 +23,7 @@ constexpr std::string_view PROPERTY_FIRST_FRAME_CALLBACK = "first_frame_callback
 constexpr std::string_view PROPERTY_SCENE_PROPERTIES_JSON = "scene_properties_json";
 constexpr std::string_view PROPERTY_DEBUG_EFFECT_CAPTURES = "debug_effect_captures";
 constexpr std::string_view PROPERTY_DEBUG_EFFECT_CAPTURE_COMMAND = "debug_effect_capture_command";
+constexpr std::string_view PROPERTY_DEBUG_EFFECT_PROBE_LAYERS = "debug_effect_probe_layers";
 
 #include "Core/NoCopyMove.hpp"
 class MainHandler;

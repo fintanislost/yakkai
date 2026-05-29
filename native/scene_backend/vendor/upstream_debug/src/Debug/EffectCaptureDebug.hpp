@@ -16,8 +16,10 @@ namespace wallpaper::debug {
 struct EffectCaptureConfig {
     std::string outputDir;
     std::string commandLine;
+    std::vector<int> probeLayerIds;
 
     bool enabled() const { return !outputDir.empty(); }
+    bool shouldProbeLayer(int layerId) const;
     std::filesystem::path manifestPath() const;
 };
 
@@ -42,6 +44,9 @@ struct EffectCaptureLayerInfo {
     std::string              candidateRisk;
     std::string              candidateBlockedReason;
     wallpaper::policy::CandidateChecks candidateChecks;
+    bool                     debugProbeRequested { false };
+    bool                     debugProbeOverrodePolicy { false };
+    std::string              debugProbeReason;
 };
 
 struct EffectCaptureRecord {
@@ -71,6 +76,8 @@ struct EffectPassState {
 
 std::string sanitizeCapturePathSegment(std::string_view value);
 
+std::vector<int> parseProbeLayerIdList(std::string_view value);
+
 std::filesystem::path capturePath(const EffectCaptureConfig& config,
                                   const EffectCaptureLayerInfo& layer,
                                   std::string_view stage);
@@ -83,6 +90,9 @@ void registerEffectCapture(Scene& scene,
 void recordEffectPassState(Scene& scene, const EffectPassState& state);
 
 void recordStrippedEffectCandidate(Scene& scene, const EffectCaptureLayerInfo& layer);
+
+bool shouldProbeStrippedEffectLayer(const EffectCaptureConfig& config,
+                                    const EffectCaptureLayerInfo& layer);
 
 bool writeEffectCaptureManifest(const Scene& scene);
 

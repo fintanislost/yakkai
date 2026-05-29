@@ -98,6 +98,8 @@ For effect-chain debugging, the paper backend can write intermediate render-targ
 
 `--debug-effect-captures` is harness-only and off by default. It writes `manifest.json` plus `effect-input`, `effect-output`, and `final-publish` TGA captures for preserved effect-chain layers. Rendered effect entries include diagnostic classification fields such as `candidateFamilies`, `candidateMixFamilies`, `candidateRisk`, `candidateChainShape`, `candidateBlockedReason`, and `candidateChecks` when the policy can classify the layer. These fields are diagnostic metadata only and do not imply that an effect chain is safe to render. The manifest also includes a top-level `strippedCandidates` array for effect chains that policy removed before render graph construction; these entries are metadata only and do not represent failed dumps. Simple isolated water candidates (`waterflow`, `waterripple`, and isolated `waterwaves`) can be preserved, while mixed chains and protected paths remain in stripped diagnostics. These captures are run artifacts for investigation; PNG smoke baselines remain the committed source of truth.
 
+For investigation only, combine `--debug-effect-captures` with `--debug-effect-probe-layers 168,22` to render specific stripped puppet mixed-chain layers and dump their usual effect captures. This probe is rejected without `--debug-effect-captures`, is available only through the harness, and does not change normal Plasma wallpaper behavior. The manifest records the configured `probeLayerIds` and per-layer `debugProbe` metadata so probe artifacts are visibly distinct from default policy output.
+
 Summarize a capture manifest before comparing images:
 
 ```bash

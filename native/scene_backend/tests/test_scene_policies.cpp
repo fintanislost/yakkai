@@ -73,6 +73,11 @@ bool equalsStrings(const std::vector<std::string>& actual, const std::vector<std
     return actual == expected;
 }
 
+bool equalsInts(const std::vector<int>& actual, const std::vector<int>& expected)
+{
+    return actual == expected;
+}
+
 void checkDecisionStableAfterClassification(const wallpaper::policy::LayerEffectInput& input,
                                             const std::string& label)
 {
@@ -701,13 +706,26 @@ void testEffectCaptureDebug()
     }
 
     {
+        check(equalsInts(wallpaper::debug::parseProbeLayerIdList("22,168"), {22, 168}),
+              "probe layer id parser preserves normalized id order");
+        check(equalsInts(wallpaper::debug::parseProbeLayerIdList(" 22, 168,22 "), {22, 168}),
+              "probe layer id parser trims whitespace and removes duplicates");
+        check(wallpaper::debug::parseProbeLayerIdList("abc,22,-1,0").empty(),
+              "probe layer id parser rejects invalid lists");
+    }
+
+    {
         const wallpaper::debug::EffectCaptureConfig config {
             .outputDir = "/tmp/yakkai-effect-debug",
             .commandLine = "yakkai_scene_harness --debug-effect-captures /tmp/yakkai-effect-debug",
+            .probeLayerIds = {22, 168},
         };
         check(config.enabled(), "effect capture config with output directory enables captures");
         check(config.manifestPath().string() == "/tmp/yakkai-effect-debug/manifest.json",
               "effect capture manifest path is under the output directory");
+        check(config.shouldProbeLayer(22), "effect capture config probes listed layer ids");
+        check(config.shouldProbeLayer(168), "effect capture config probes every listed layer id");
+        check(!config.shouldProbeLayer(42), "effect capture config does not probe unlisted layer ids");
     }
 
     {
@@ -723,6 +741,45 @@ void testEffectCaptureDebug()
     }
 
     {
+        wallpaper::debug::EffectCaptureConfig config {
+            .outputDir = "/tmp/yakkai-effect-debug",
+            .commandLine = "unit",
+            .probeLayerIds = {22},
+        };
+
+        wallpaper::debug::EffectCaptureLayerInfo layer;
+        layer.layerId = 22;
+        layer.policyReason = "puppet-alpha-strip";
+        layer.candidateChainShape = "puppet-mixed";
+
+        check(wallpaper::debug::shouldProbeStrippedEffectLayer(config, layer),
+              "listed puppet-mixed stripped layer is eligible for debug probe");
+
+        layer.candidateChainShape = "protected-puppet-mixed";
+        check(wallpaper::debug::shouldProbeStrippedEffectLayer(config, layer),
+              "listed protected-puppet-mixed stripped layer is eligible for debug probe");
+
+        layer.candidateChainShape = "unknown-mixed";
+        check(!wallpaper::debug::shouldProbeStrippedEffectLayer(config, layer),
+              "listed unknown-mixed stripped layer is not eligible for puppet debug probe");
+
+        layer.candidateChainShape = "puppet-mixed";
+        layer.layerId = 23;
+        check(!wallpaper::debug::shouldProbeStrippedEffectLayer(config, layer),
+              "unlisted puppet-mixed stripped layer is not eligible for debug probe");
+
+        layer.layerId = 22;
+        layer.policyReason = "simple-water-effect";
+        check(!wallpaper::debug::shouldProbeStrippedEffectLayer(config, layer),
+              "non-stripped layer is not eligible for stripped-layer debug probe");
+
+        config.outputDir.clear();
+        layer.policyReason = "puppet-alpha-strip";
+        check(!wallpaper::debug::shouldProbeStrippedEffectLayer(config, layer),
+              "disabled effect capture config cannot probe stripped layers");
+    }
+
+    {
         const auto outDir =
             std::filesystem::temp_directory_path() / "yakkai-stripped-candidate-policy-test";
         std::filesystem::remove_all(outDir);
@@ -732,6 +789,7 @@ void testEffectCaptureDebug()
         scene.debugEffectCaptures = {
             .outputDir = outDir.string(),
             .commandLine = "unit --debug-effect-captures " + outDir.string(),
+            .probeLayerIds = {42},
         };
 
         wallpaper::debug::EffectCaptureLayerInfo layer;
@@ -760,6 +818,9 @@ void testEffectCaptureDebug()
         layer.candidateChecks.isFullscreen = false;
         layer.candidateChecks.isPuppetLayer = false;
         layer.candidateChecks.isProtectedPuppetPath = false;
+        layer.debugProbeRequested = true;
+        layer.debugProbeOverrodePolicy = true;
+        layer.debugProbeReason = "layer-id-probe";
 
         wallpaper::debug::recordStrippedEffectCandidate(scene, layer);
 
@@ -775,6 +836,18 @@ void testEffectCaptureDebug()
               "stripped candidates do not fail manifest status");
         check(manifest.find("\"strippedCandidates\"") != std::string::npos,
               "manifest includes strippedCandidates array");
+        check(manifest.find("\"probeLayerIds\"") != std::string::npos,
+              "manifest includes configured probe layer ids");
+        check(manifest.find("42") != std::string::npos,
+              "manifest includes configured probe layer id value");
+        check(manifest.find("\"debugProbe\"") != std::string::npos,
+              "manifest includes stripped candidate debug probe metadata");
+        check(manifest.find("\"requested\": true") != std::string::npos,
+              "manifest includes stripped candidate probe request state");
+        check(manifest.find("\"overrodePolicy\": true") != std::string::npos,
+              "manifest includes stripped candidate probe override state");
+        check(manifest.find("\"reason\": \"layer-id-probe\"") != std::string::npos,
+              "manifest includes stripped candidate probe reason");
         check(manifest.find("\"layerName\": \"Water background\"") != std::string::npos,
               "manifest includes stripped candidate layer name");
         check(manifest.find("\"reason\": \"puppet-alpha-strip\"") != std::string::npos,

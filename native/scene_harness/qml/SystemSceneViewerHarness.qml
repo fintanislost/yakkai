@@ -12,6 +12,7 @@ Item {
     property string backendStatus: "System SceneViewer backend"
     property string debugEffectCapturesPath: ""
     property string debugEffectCaptureCommand: ""
+    property string debugEffectProbeLayers: ""
 
     function assetsUrl(path) {
         const asText = String(path ?? "")

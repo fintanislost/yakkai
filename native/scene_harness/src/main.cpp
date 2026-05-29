@@ -123,6 +123,34 @@ std::optional<QSize> parseWindowSize(const QString& value)
     return QSize(*width, *height);
 }
 
+std::optional<QString> parsePositiveIdList(const QString& value)
+{
+    std::vector<int> ids;
+    const QStringList parts = value.split(',', Qt::KeepEmptyParts);
+    for (const QString& rawPart : parts) {
+        const QString trimmed = rawPart.trimmed();
+        if (trimmed.isEmpty()) {
+            return std::nullopt;
+        }
+        const std::optional<int> parsed = parseNonNegativeInt(trimmed);
+        if (!parsed || *parsed == 0) {
+            return std::nullopt;
+        }
+        if (std::find(ids.begin(), ids.end(), *parsed) == ids.end()) {
+            ids.push_back(*parsed);
+        }
+    }
+    if (ids.empty()) {
+        return std::nullopt;
+    }
+
+    QStringList normalized;
+    for (int id : ids) {
+        normalized.push_back(QString::number(id));
+    }
+    return normalized.join(QLatin1Char(','));
+}
+
 CaptureStatus saveWindowCapture(QQuickWindow* window, const QString& absolutePath)
 {
     const QImage image = window->grabWindow();
@@ -262,6 +290,11 @@ int main(int argc, char* argv[])
         QStringLiteral("Write effect input/output/final-publish debug captures and manifest into the given directory. Only supported by --backend paper."),
         QStringLiteral("path")
     );
+    QCommandLineOption debugEffectProbeLayersOption(
+        QStringList{QStringLiteral("debug-effect-probe-layers")},
+        QStringLiteral("Layer IDs whose stripped puppet mixed effect chains should be rendered only for debug capture. Requires --debug-effect-captures."),
+        QStringLiteral("ids")
+    );
 
     parser.addOption(backendOption);
     parser.addOption(sourceOption);
@@ -277,6 +310,7 @@ int main(int argc, char* argv[])
     parser.addOption(captureTimesOption);
     parser.addOption(captureSequenceOption);
     parser.addOption(debugEffectCapturesOption);
+    parser.addOption(debugEffectProbeLayersOption);
     parser.process(app);
 
     const QString qmlDir = QStringLiteral(YAKKAI_SCENE_HARNESS_QML_DIR);
@@ -294,16 +328,28 @@ int main(int argc, char* argv[])
     const QString captureTimesValue = parser.value(captureTimesOption).trimmed();
     const QString captureSequenceValue = parser.value(captureSequenceOption).trimmed();
     const QString debugEffectCapturesPath = parser.value(debugEffectCapturesOption).trimmed();
+    const QString debugEffectProbeLayersValue = parser.value(debugEffectProbeLayersOption).trimmed();
     const bool debugEffectCapturesRequested = !debugEffectCapturesPath.isEmpty();
+    const bool debugEffectProbeLayersRequested = !debugEffectProbeLayersValue.isEmpty();
     const QString debugEffectCapturesDir =
         debugEffectCapturesRequested ? QFileInfo(debugEffectCapturesPath).absoluteFilePath() : QString();
     const QString debugEffectCaptureCommand = app.arguments().join(QLatin1Char(' '));
+    const std::optional<QString> debugEffectProbeLayers =
+        debugEffectProbeLayersRequested ? parsePositiveIdList(debugEffectProbeLayersValue) : std::optional<QString>(QString());
     const bool multiCaptureRequested = !captureDirPath.isEmpty() || !captureTimesValue.isEmpty() || !captureSequenceValue.isEmpty();
     std::optional<std::vector<CaptureRequest>> parsedCaptures;
     const std::optional<QSize> windowSize = parseWindowSize(windowSizeValue);
 
     if (debugEffectCapturesRequested && backend != QStringLiteral("paper")) {
         qWarning() << "yakkai_scene_harness: --debug-effect-captures requires --backend paper";
+        return 2;
+    }
+    if (debugEffectProbeLayersRequested && !debugEffectCapturesRequested) {
+        qWarning() << "yakkai_scene_harness: --debug-effect-probe-layers requires --debug-effect-captures";
+        return 2;
+    }
+    if (!debugEffectProbeLayers) {
+        qWarning() << "yakkai_scene_harness: invalid --debug-effect-probe-layers value" << debugEffectProbeLayersValue;
         return 2;
     }
     if (debugEffectCapturesRequested && !QDir().mkpath(debugEffectCapturesDir)) {
@@ -366,6 +412,7 @@ int main(int argc, char* argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessQmlDir"), qmlDir);
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugEffectCapturesPath"), debugEffectCapturesDir);
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugEffectCaptureCommand"), debugEffectCaptureCommand);
+    engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugEffectProbeLayers"), *debugEffectProbeLayers);
 
     const QUrl mainQml = QUrl::fromLocalFile(QDir(qmlDir).filePath(QStringLiteral("Main.qml")));
     QObject::connect(

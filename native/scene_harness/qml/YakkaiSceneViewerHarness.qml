@@ -11,6 +11,7 @@ Item {
     property bool muted: true
     property string debugEffectCapturesPath: ""
     property string debugEffectCaptureCommand: ""
+    property string debugEffectProbeLayers: ""
 
     function assetsUrl(path) {
         const asText = String(path ?? "")
@@ -58,6 +59,7 @@ Item {
         anchors.fill: parent
         debugEffectCapturesPath: root.debugEffectCapturesPath
         debugEffectCaptureCommand: root.debugEffectCaptureCommand
+        debugEffectProbeLayers: root.debugEffectProbeLayers
         source: root.sceneSource
         assets: root.assetsUrl(root.assetsPath)
         fillMode: root.sceneFillMode()

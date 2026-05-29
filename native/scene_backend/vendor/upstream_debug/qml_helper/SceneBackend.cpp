@@ -373,6 +373,7 @@ QString SceneObject::scenePropertiesJson() const { return m_scenePropertiesJson;
 QString SceneObject::debugEffectCapturesPath() const { return m_debugEffectCapturesPath; }
 QString SceneObject::debugEffectCaptureCommand() const { return m_debugEffectCaptureCommand; }
 QString SceneObject::debugEffectProbeLayers() const { return m_debugEffectProbeLayers; }
+QString SceneObject::debugEffectProbeHighRiskLayers() const { return m_debugEffectProbeHighRiskLayers; }
 
 int   SceneObject::fps() const { return m_fps; }
 int   SceneObject::fillMode() const { return m_fillMode; }
@@ -427,6 +428,15 @@ void SceneObject::setDebugEffectProbeLayers(const QString& value) {
                  wallpaper::PROPERTY_DEBUG_EFFECT_PROBE_LAYERS,
                  m_debugEffectProbeLayers.toStdString());
     Q_EMIT debugEffectProbeLayersChanged();
+}
+
+void SceneObject::setDebugEffectProbeHighRiskLayers(const QString& value) {
+    if (m_debugEffectProbeHighRiskLayers == value) return;
+    m_debugEffectProbeHighRiskLayers = value;
+    SET_PROPERTY(String,
+                 wallpaper::PROPERTY_DEBUG_EFFECT_PROBE_HIGH_RISK_LAYERS,
+                 m_debugEffectProbeHighRiskLayers.toStdString());
+    Q_EMIT debugEffectProbeHighRiskLayersChanged();
 }
 
 void SceneObject::setFps(int value) {

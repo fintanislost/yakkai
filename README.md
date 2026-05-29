@@ -98,7 +98,7 @@ For effect-chain debugging, the paper backend can write intermediate render-targ
 
 `--debug-effect-captures` is harness-only and off by default. It writes `manifest.json` plus `effect-input`, `effect-output`, and `final-publish` TGA captures for preserved effect-chain layers. Rendered effect entries include diagnostic classification fields such as `candidateFamilies`, `candidateMixFamilies`, `candidateRisk`, `candidateChainShape`, `candidateBlockedReason`, and `candidateChecks` when the policy can classify the layer. `candidateChecks` also flags high-risk stripped families with `hasBlurFamily`, `hasLutFamily`, and `hasColorGradingFamily`. These fields are diagnostic metadata only and do not imply that an effect chain is safe to render. The manifest also includes a top-level `strippedCandidates` array for effect chains that policy removed before render graph construction; these entries are metadata only and do not represent failed dumps. Simple isolated water candidates (`waterflow`, `waterripple`, and isolated `waterwaves`) can be preserved, while mixed chains, blur/LUT/color-grading paths, and protected paths remain in stripped diagnostics. These captures are run artifacts for investigation; PNG smoke baselines remain the committed source of truth.
 
-For investigation only, combine `--debug-effect-captures` with `--debug-effect-probe-layers 168,22` to render specific stripped puppet mixed-chain layers and dump their usual effect captures. This probe is rejected without `--debug-effect-captures`, is available only through the harness, and does not change normal Plasma wallpaper behavior. The manifest records the configured `probeLayerIds` and per-layer `debugProbe` metadata so probe artifacts are visibly distinct from default policy output.
+For investigation only, combine `--debug-effect-captures` with `--debug-effect-probe-layers 168,22` to render specific stripped puppet mixed-chain layers and dump their usual effect captures. Use `--debug-effect-probe-high-risk-layers 53,155` for explicit stripped blur/LUT/color-grading candidates. Both probe flags are rejected without `--debug-effect-captures`, are available only through the harness, and do not change normal Plasma wallpaper behavior. The manifest records the configured `probeLayerIds`, `highRiskProbeLayerIds`, and per-layer `debugProbe` metadata so probe artifacts are visibly distinct from default policy output.
 
 Summarize a capture manifest before comparing images:
 
@@ -108,7 +108,7 @@ tools/effect-capture-summary.py /tmp/yakkai-effect-debug/manifest.json
 
 `tools/effect-capture-summary.py` reports stripped-candidate risk, chain-shape, family, and mix-family counts so mixed water chains can be triaged before enabling any new effect behavior. It also prints `stripped-high-risk-*` sections for blur, LUT, and color-grading candidates so Arona/background parity work can start from exact layer and shader evidence.
 
-`tools/validate-scene.sh` also writes a debug effect manifest during validation. For the renderer-risk fixtures, it fails if `3476236738` has no allowed simple-water candidates, if any simple-water candidate remains stripped there, or if `3228578419` gains any allowed simple-water candidates.
+`tools/validate-scene.sh` also writes a debug effect manifest during validation. For the renderer-risk fixtures, it fails if `3476236738` has no allowed simple-water candidates, if any simple-water candidate remains stripped there, if the `3476236738` background visual sentinel detects clear-color leakage, or if `3228578419` gains any allowed simple-water candidates.
 
 ### Manual Build
 
@@ -247,6 +247,7 @@ The native backend supports:
 
 ### Known limitations
 - Regular per-layer offscreen effect chains in puppet scenes can break alpha compositing. Yakkai selectively strips regular/heavy effects in puppet scenes while preserving composelayers, colorkey, flare/lens, and other essential effect paths.
+- Some effect-heavy scene backgrounds are still incomplete. `3476236738` currently renders a large flat gray mid/background area; high-risk blur/color-grading probes on layers `137` and `365` produce useful diagnostics but do not yet fix that background parity gap. The validator now hard-fails that scene with a background visual sentinel until the renderer parity gap is fixed.
 - The current stripped-effect family backlog, including candidate scenes and blocked follow-up slices, is tracked in `docs/renderer-effect-candidate-backlog.md`.
 - Small embedded video textures are decoded as static first frames to keep CPU use bounded. Continuous decode is enabled only for large/main videos when FFmpeg is available at build time.
 - Static model scenes use an experimental fallback for basis correction, camera framing, and material selection.

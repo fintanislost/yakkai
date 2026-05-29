@@ -75,6 +75,7 @@ class YakkaiSceneViewer : public QQuickItem
     Q_PROPERTY(QString debugEffectCapturesPath READ debugEffectCapturesPath WRITE setDebugEffectCapturesPath NOTIFY debugEffectCapturesPathChanged)
     Q_PROPERTY(QString debugEffectCaptureCommand READ debugEffectCaptureCommand WRITE setDebugEffectCaptureCommand NOTIFY debugEffectCaptureCommandChanged)
     Q_PROPERTY(QString debugEffectProbeLayers READ debugEffectProbeLayers WRITE setDebugEffectProbeLayers NOTIFY debugEffectProbeLayersChanged)
+    Q_PROPERTY(QString debugEffectProbeHighRiskLayers READ debugEffectProbeHighRiskLayers WRITE setDebugEffectProbeHighRiskLayers NOTIFY debugEffectProbeHighRiskLayersChanged)
 
 public:
     enum FillMode
@@ -125,6 +126,9 @@ public:
     QString debugEffectProbeLayers() const;
     void setDebugEffectProbeLayers(const QString& value);
 
+    QString debugEffectProbeHighRiskLayers() const;
+    void setDebugEffectProbeHighRiskLayers(const QString& value);
+
     Q_INVOKABLE void requestGraphvizDump();
 
 signals:
@@ -141,6 +145,7 @@ signals:
     void debugEffectCapturesPathChanged();
     void debugEffectCaptureCommandChanged();
     void debugEffectProbeLayersChanged();
+    void debugEffectProbeHighRiskLayersChanged();
 
 private:
     void updateMouseAcceptance();
@@ -159,6 +164,7 @@ private:
     QString m_debugEffectCapturesPath;
     QString m_debugEffectCaptureCommand;
     QString m_debugEffectProbeLayers;
+    QString m_debugEffectProbeHighRiskLayers;
 };
 
 #endif

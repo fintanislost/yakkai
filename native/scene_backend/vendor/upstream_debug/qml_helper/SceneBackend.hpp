@@ -22,6 +22,7 @@ class SceneObject : public QQuickItem {
     Q_PROPERTY(QString debugEffectCapturesPath READ debugEffectCapturesPath WRITE setDebugEffectCapturesPath NOTIFY debugEffectCapturesPathChanged)
     Q_PROPERTY(QString debugEffectCaptureCommand READ debugEffectCaptureCommand WRITE setDebugEffectCaptureCommand NOTIFY debugEffectCaptureCommandChanged)
     Q_PROPERTY(QString debugEffectProbeLayers READ debugEffectProbeLayers WRITE setDebugEffectProbeLayers NOTIFY debugEffectProbeLayersChanged)
+    Q_PROPERTY(QString debugEffectProbeHighRiskLayers READ debugEffectProbeHighRiskLayers WRITE setDebugEffectProbeHighRiskLayers NOTIFY debugEffectProbeHighRiskLayersChanged)
     Q_PROPERTY(int fps READ fps WRITE setFps NOTIFY fpsChanged)
     Q_PROPERTY(int fillMode READ fillMode WRITE setFillMode NOTIFY fillModeChanged)
     Q_PROPERTY(float speed READ speed WRITE setSpeed NOTIFY speedChanged)
@@ -45,12 +46,14 @@ public:
     QString debugEffectCapturesPath() const;
     QString debugEffectCaptureCommand() const;
     QString debugEffectProbeLayers() const;
+    QString debugEffectProbeHighRiskLayers() const;
     void setSource(const QUrl& source);
     void setAssets(const QUrl& assets);
     void setScenePropertiesJson(const QString& value);
     void setDebugEffectCapturesPath(const QString& value);
     void setDebugEffectCaptureCommand(const QString& value);
     void setDebugEffectProbeLayers(const QString& value);
+    void setDebugEffectProbeHighRiskLayers(const QString& value);
 
     int   fps() const;
     int   fillMode() const;
@@ -88,6 +91,7 @@ signals:
     void debugEffectCapturesPathChanged();
     void debugEffectCaptureCommandChanged();
     void debugEffectProbeLayersChanged();
+    void debugEffectProbeHighRiskLayersChanged();
     void fpsChanged();
     void fillModeChanged();
     void speedChanged();
@@ -102,6 +106,7 @@ private:
     QString m_debugEffectCapturesPath;
     QString m_debugEffectCaptureCommand;
     QString m_debugEffectProbeLayers;
+    QString m_debugEffectProbeHighRiskLayers;
 
     int   m_fps { 15 };
     int   m_fillMode { FillMode::ASPECTCROP };

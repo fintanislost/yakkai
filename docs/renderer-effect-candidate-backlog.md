@@ -10,6 +10,9 @@ Latest source artifacts used for this revision:
 - `3228578419`: `/tmp/yakkai-debug/effect-captures-3228578419/manifest.json`
 - `3476236738` Phase 3.8 probe:
   `/tmp/yakkai-phase3-8-probe-3476236738/effect-captures/manifest.json`
+- Phase 3.10 high-risk probes can be regenerated with
+  `--debug-effect-probe-high-risk-layers`; the probe artifacts remain
+  generated diagnostics and are not committed baselines.
 
 Those artifacts are generated diagnostics and are not committed baselines. If
 they are missing, regenerate them with `--debug-effect-captures` before changing
@@ -29,6 +32,19 @@ negative evidence for broad puppet mixed-chain preservation. Phase 3.9 is
 diagnostic-only and adds canonical blur/LUT/color-grade family flags plus
 carrier-aware chain shapes so parity work can identify exact blocked layers
 without re-enabling them.
+Phase 3.10 adds a separate harness-only `--debug-effect-probe-high-risk-layers`
+path for explicit stripped blur/LUT/color-grading layer IDs. This path records
+`highRiskProbeLayerIds` and per-layer `debugProbe` reasons in the manifest, but
+it is still diagnostic-only and does not alter normal Plasma rendering policy.
+The `3476236738` Phase 3.10 probe on layers `137` and `365` completed without
+capture failures and confirmed those layers can be isolated, but visual review
+still shows the scene's large mid/background area as flat gray. Treat that as
+negative evidence for a simple policy re-enable and as input for a future
+background parity renderer slice.
+Phase 3.10a adds a hard-fail validator sentinel for this scene. The sentinel
+checks background regions for low-detail pixels close to the tint-adjusted clear
+color, so `tools/validate-scene.sh 3476236738 10000` now fails until the
+background parity gap is fixed.
 
 ## Rules For Candidate Slices
 

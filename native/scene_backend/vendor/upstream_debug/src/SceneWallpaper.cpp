@@ -169,6 +169,7 @@ private:
     std::string m_debug_effect_captures;
     std::string m_debug_effect_capture_command;
     std::string m_debug_effect_probe_layers;
+    std::string m_debug_effect_probe_high_risk_layers;
     bool        m_gen_graphviz { false };
 
     WPSceneParser                        m_scene_parser;
@@ -435,6 +436,8 @@ MHANDLER_CMD_IMPL(MainHandler, SET_PROPERTY) {
             msg->findString("value", &m_debug_effect_capture_command);
         } else if (property == PROPERTY_DEBUG_EFFECT_PROBE_LAYERS) {
             msg->findString("value", &m_debug_effect_probe_layers);
+        } else if (property == PROPERTY_DEBUG_EFFECT_PROBE_HIGH_RISK_LAYERS) {
+            msg->findString("value", &m_debug_effect_probe_high_risk_layers);
         } else if (property == PROPERTY_FIRST_FRAME_CALLBACK) {
             std::shared_ptr<FirstFrameCallback> cb;
             msg->findObject("value", &cb);
@@ -535,6 +538,7 @@ void MainHandler::loadScene() {
             .outputDir = m_debug_effect_captures,
             .commandLine = m_debug_effect_capture_command,
             .probeLayerIds = wallpaper::debug::parseProbeLayerIdList(m_debug_effect_probe_layers),
+            .highRiskProbeLayerIds = wallpaper::debug::parseProbeLayerIdList(m_debug_effect_probe_high_risk_layers),
         });
         m_scene_parser.SetScenePropertiesJson(
             ResolveScenePropertiesJson(m_scene_properties_json, pkgDir));

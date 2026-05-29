@@ -1,0 +1,240 @@
+#!/usr/bin/env python3
+"""Scene-specific visual sentinels for renderer validation."""
+
+from __future__ import annotations
+
+import argparse
+from dataclasses import dataclass
+import math
+from pathlib import Path
+import re
+import subprocess
+import sys
+
+
+@dataclass(frozen=True)
+class RegionConfig:
+    name: str
+    x: int
+    y: int
+    width: int
+    height: int
+
+    @property
+    def crop_arg(self) -> str:
+        return f"{self.width}x{self.height}+{self.x}+{self.y}"
+
+
+@dataclass(frozen=True)
+class RegionStats:
+    name: str
+    mean_rgb: tuple[float, float, float]
+    stddev_rgb: tuple[float, float, float]
+    unique_colors: int
+
+
+@dataclass(frozen=True)
+class VisualSentinelConfig:
+    scene_id: str
+    clear_rgb: tuple[float, float, float]
+    regions: tuple[RegionConfig, ...]
+    min_leak_regions: int
+    max_color_distance: float = 18.0
+    max_channel_stddev: float = 12.0
+    max_unique_colors: int = 250
+
+
+@dataclass(frozen=True)
+class VisualSentinelResult:
+    passed: bool
+    detail: str
+
+
+SCENE_SENTINELS: dict[str, VisualSentinelConfig] = {
+    "3476236738": VisualSentinelConfig(
+        scene_id="3476236738",
+        clear_rgb=(126.0, 136.0, 166.0),
+        min_leak_regions=2,
+        max_unique_colors=300,
+        regions=(
+            RegionConfig("mid_wall_between_chars", 715, 150, 185, 180),
+            RegionConfig("right_wall_under_window", 1020, 150, 240, 270),
+            RegionConfig("gray_band_right", 1200, 320, 260, 200),
+        ),
+    ),
+}
+
+
+_CLEAR_COLOR_RE = re.compile(r"tint-adjusted clear color:\s*\(([^)]+)\)")
+
+
+def color_distance(left: tuple[float, float, float], right: tuple[float, float, float]) -> float:
+    return math.sqrt(sum((a - b) ** 2 for a, b in zip(left, right)))
+
+
+def is_clear_color_leak(
+    stats: RegionStats,
+    clear_rgb: tuple[float, float, float],
+    *,
+    max_color_distance: float = 18.0,
+    max_channel_stddev: float = 12.0,
+    max_unique_colors: int = 250,
+) -> bool:
+    return (
+        color_distance(stats.mean_rgb, clear_rgb) <= max_color_distance
+        and max(stats.stddev_rgb) <= max_channel_stddev
+        and stats.unique_colors <= max_unique_colors
+    )
+
+
+def parse_clear_color_from_log(log_path: Path) -> tuple[float, float, float] | None:
+    if not log_path.exists():
+        return None
+    for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        match = _CLEAR_COLOR_RE.search(line)
+        if not match:
+            continue
+        values = [float(part.strip()) for part in match.group(1).split(",")]
+        if len(values) != 3:
+            return None
+        if all(0.0 <= value <= 1.0 for value in values):
+            return tuple(value * 255.0 for value in values)
+        return tuple(values)
+    return None
+
+
+def _run_imagemagick(args: list[str]) -> str:
+    completed = subprocess.run(
+        args,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    return completed.stdout.strip()
+
+
+def collect_region_stats(image: Path, region: RegionConfig) -> RegionStats:
+    stats_text = _run_imagemagick(
+        [
+            "convert",
+            str(image),
+            "-crop",
+            region.crop_arg,
+            "+repage",
+            "-format",
+            "%[fx:mean.r*255] %[fx:mean.g*255] %[fx:mean.b*255] "
+            "%[fx:standard_deviation.r*255] %[fx:standard_deviation.g*255] "
+            "%[fx:standard_deviation.b*255]",
+            "info:",
+        ]
+    )
+    values = [float(value) for value in stats_text.split()]
+    if len(values) != 6:
+        raise RuntimeError(f"unexpected ImageMagick stats output for {region.name}: {stats_text}")
+
+    unique_text = _run_imagemagick(
+        [
+            "convert",
+            str(image),
+            "-crop",
+            region.crop_arg,
+            "+repage",
+            "-resize",
+            "64x64!",
+            "-unique-colors",
+            "-format",
+            "%k",
+            "info:",
+        ]
+    )
+    return RegionStats(
+        name=region.name,
+        mean_rgb=tuple(values[0:3]),
+        stddev_rgb=tuple(values[3:6]),
+        unique_colors=int(unique_text),
+    )
+
+
+def collect_scene_stats(scene_id: str, image: Path) -> dict[str, RegionStats]:
+    config = SCENE_SENTINELS.get(scene_id)
+    if config is None:
+        return {}
+    return {region.name: collect_region_stats(image, region) for region in config.regions}
+
+
+def evaluate_scene_sentinel(
+    scene_id: str,
+    stats_by_region: dict[str, RegionStats],
+    clear_rgb: tuple[float, float, float] | None = None,
+) -> VisualSentinelResult:
+    config = SCENE_SENTINELS.get(scene_id)
+    if config is None:
+        return VisualSentinelResult(True, f"no visual sentinel configured for scene {scene_id}")
+
+    effective_clear = clear_rgb or config.clear_rgb
+    missing = [region.name for region in config.regions if region.name not in stats_by_region]
+    if missing:
+        return VisualSentinelResult(
+            False,
+            "missing visual sentinel region stats: " + ",".join(missing),
+        )
+
+    leaked: list[str] = []
+    for region in config.regions:
+        stats = stats_by_region[region.name]
+        if is_clear_color_leak(
+            stats,
+            effective_clear,
+            max_color_distance=config.max_color_distance,
+            max_channel_stddev=config.max_channel_stddev,
+            max_unique_colors=config.max_unique_colors,
+        ):
+            leaked.append(region.name)
+
+    if len(leaked) >= config.min_leak_regions:
+        return VisualSentinelResult(
+            False,
+            f"{len(leaked)} background regions look like clear-color leakage: "
+            + ",".join(leaked),
+        )
+
+    plural = "regions" if len(leaked) != 1 else "region"
+    return VisualSentinelResult(
+        True,
+        f"{len(leaked)} clear-color-like {plural}; threshold={config.min_leak_regions}",
+    )
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("scene_id")
+    parser.add_argument("capture", type=Path)
+    parser.add_argument("--log", type=Path)
+    args = parser.parse_args(argv)
+
+    if args.scene_id not in SCENE_SENTINELS:
+        print(f"no visual sentinel configured for scene {args.scene_id}")
+        return 0
+    if not args.capture.exists():
+        print(f"capture not found: {args.capture}", file=sys.stderr)
+        return 1
+
+    config = SCENE_SENTINELS[args.scene_id]
+    clear_rgb = config.clear_rgb
+    if args.log is not None:
+        clear_rgb = parse_clear_color_from_log(args.log) or clear_rgb
+
+    try:
+        stats = collect_scene_stats(args.scene_id, args.capture)
+    except (subprocess.CalledProcessError, RuntimeError, ValueError) as exc:
+        print(f"could not evaluate visual sentinel: {exc}", file=sys.stderr)
+        return 1
+
+    result = evaluate_scene_sentinel(args.scene_id, stats, clear_rgb)
+    print(result.detail)
+    return 0 if result.passed else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

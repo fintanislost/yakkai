@@ -818,6 +818,27 @@ void testEffectCaptureDebug()
         check(config.shouldProbeLayer(22), "effect capture config probes listed layer ids");
         check(config.shouldProbeLayer(168), "effect capture config probes every listed layer id");
         check(!config.shouldProbeLayer(42), "effect capture config does not probe unlisted layer ids");
+        check(!config.shouldProbeHighRiskLayer(22),
+              "effect capture config keeps regular probe ids separate from high-risk probe ids");
+    }
+
+    {
+        const wallpaper::debug::EffectCaptureConfig config {
+            .outputDir = "/tmp/yakkai-effect-debug",
+            .commandLine = "unit",
+            .probeLayerIds = {22},
+            .highRiskProbeLayerIds = {53, 155},
+        };
+        check(config.shouldProbeLayer(22),
+              "effect capture config still probes listed puppet layer ids");
+        check(!config.shouldProbeLayer(53),
+              "effect capture config keeps high-risk ids out of regular probe ids");
+        check(config.shouldProbeHighRiskLayer(53),
+              "effect capture config probes listed high-risk layer ids");
+        check(config.shouldProbeHighRiskLayer(155),
+              "effect capture config probes every listed high-risk layer id");
+        check(!config.shouldProbeHighRiskLayer(22),
+              "effect capture config keeps regular probe ids out of high-risk ids");
     }
 
     {
@@ -872,6 +893,58 @@ void testEffectCaptureDebug()
     }
 
     {
+        wallpaper::debug::EffectCaptureConfig config {
+            .outputDir = "/tmp/yakkai-effect-debug",
+            .commandLine = "unit",
+            .probeLayerIds = {53},
+        };
+
+        wallpaper::debug::EffectCaptureLayerInfo layer;
+        layer.layerId = 53;
+        layer.policyReason = "puppet-alpha-strip";
+        layer.candidateChainShape = "blur-utility";
+        layer.candidateChecks.hasBlurFamily = true;
+        layer.candidateChecks.isUtilityCarrier = true;
+
+        check(!wallpaper::debug::shouldProbeStrippedEffectLayer(config, layer),
+              "regular puppet probe list does not probe high-risk blur utility layers");
+
+        config.probeLayerIds.clear();
+        config.highRiskProbeLayerIds = {53};
+
+        check(wallpaper::debug::shouldProbeStrippedEffectLayer(config, layer),
+              "high-risk probe list can probe listed stripped blur utility layers");
+        check(wallpaper::debug::strippedEffectProbeReason(config, layer) == "high-risk-layer-id-probe",
+              "high-risk probe reason is distinct from puppet probe reason");
+
+        layer.candidateChecks.hasBlurFamily = false;
+        layer.candidateChecks.hasLutFamily = true;
+        layer.candidateChainShape = "lut-only";
+        check(wallpaper::debug::shouldProbeStrippedEffectLayer(config, layer),
+              "high-risk probe list can probe listed stripped LUT layers");
+
+        layer.candidateChecks.hasLutFamily = false;
+        layer.candidateChecks.hasColorGradingFamily = true;
+        layer.candidateChainShape = "blur-color-grade-composelayer";
+        check(wallpaper::debug::shouldProbeStrippedEffectLayer(config, layer),
+              "high-risk probe list can probe listed stripped color-grading layers");
+
+        layer.layerId = 54;
+        check(!wallpaper::debug::shouldProbeStrippedEffectLayer(config, layer),
+              "unlisted high-risk stripped layer is not eligible for high-risk probe");
+
+        layer.layerId = 53;
+        layer.policyReason = "simple-water-effect";
+        check(!wallpaper::debug::shouldProbeStrippedEffectLayer(config, layer),
+              "high-risk probe does not override non-stripped policy decisions");
+
+        layer.policyReason = "puppet-alpha-strip";
+        layer.candidateChecks.hasColorGradingFamily = false;
+        check(!wallpaper::debug::shouldProbeStrippedEffectLayer(config, layer),
+              "high-risk probe requires blur, LUT, or color-grading diagnostics");
+    }
+
+    {
         const auto outDir =
             std::filesystem::temp_directory_path() / "yakkai-stripped-candidate-policy-test";
         std::filesystem::remove_all(outDir);
@@ -882,6 +955,7 @@ void testEffectCaptureDebug()
             .outputDir = outDir.string(),
             .commandLine = "unit --debug-effect-captures " + outDir.string(),
             .probeLayerIds = {42},
+            .highRiskProbeLayerIds = {53},
         };
 
         wallpaper::debug::EffectCaptureLayerInfo layer;
@@ -930,8 +1004,12 @@ void testEffectCaptureDebug()
               "manifest includes strippedCandidates array");
         check(manifest.find("\"probeLayerIds\"") != std::string::npos,
               "manifest includes configured probe layer ids");
+        check(manifest.find("\"highRiskProbeLayerIds\"") != std::string::npos,
+              "manifest includes configured high-risk probe layer ids");
         check(manifest.find("42") != std::string::npos,
               "manifest includes configured probe layer id value");
+        check(manifest.find("53") != std::string::npos,
+              "manifest includes configured high-risk probe layer id value");
         check(manifest.find("\"debugProbe\"") != std::string::npos,
               "manifest includes stripped candidate debug probe metadata");
         check(manifest.find("\"requested\": true") != std::string::npos,

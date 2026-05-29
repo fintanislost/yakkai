@@ -104,6 +104,24 @@ nlohmann::json layerToJson(const EffectCaptureLayerInfo& layer)
     };
 }
 
+bool containsLayerId(const std::vector<int>& layerIds, int layerId)
+{
+    return std::find(layerIds.begin(), layerIds.end(), layerId) != layerIds.end();
+}
+
+bool hasHighRiskEffectFamily(const EffectCaptureLayerInfo& layer)
+{
+    return layer.candidateChecks.hasBlurFamily ||
+           layer.candidateChecks.hasLutFamily ||
+           layer.candidateChecks.hasColorGradingFamily;
+}
+
+bool hasPuppetMixedChainShape(const EffectCaptureLayerInfo& layer)
+{
+    return layer.candidateChainShape == "puppet-mixed" ||
+           layer.candidateChainShape == "protected-puppet-mixed";
+}
+
 } // namespace
 
 std::filesystem::path EffectCaptureConfig::manifestPath() const
@@ -113,20 +131,36 @@ std::filesystem::path EffectCaptureConfig::manifestPath() const
 
 bool EffectCaptureConfig::shouldProbeLayer(int layerId) const
 {
-    return std::find(probeLayerIds.begin(), probeLayerIds.end(), layerId) != probeLayerIds.end();
+    return containsLayerId(probeLayerIds, layerId);
+}
+
+bool EffectCaptureConfig::shouldProbeHighRiskLayer(int layerId) const
+{
+    return containsLayerId(highRiskProbeLayerIds, layerId);
 }
 
 bool shouldProbeStrippedEffectLayer(const EffectCaptureConfig& config,
                                     const EffectCaptureLayerInfo& layer)
 {
-    if (!config.enabled() || !config.shouldProbeLayer(layer.layerId)) {
-        return false;
+    return !strippedEffectProbeReason(config, layer).empty();
+}
+
+std::string strippedEffectProbeReason(const EffectCaptureConfig& config,
+                                      const EffectCaptureLayerInfo& layer)
+{
+    if (!config.enabled() || layer.policyReason != "puppet-alpha-strip") {
+        return {};
     }
-    if (layer.policyReason != "puppet-alpha-strip") {
-        return false;
+
+    if (config.shouldProbeLayer(layer.layerId) && hasPuppetMixedChainShape(layer)) {
+        return "layer-id-probe";
     }
-    return layer.candidateChainShape == "puppet-mixed" ||
-           layer.candidateChainShape == "protected-puppet-mixed";
+
+    if (config.shouldProbeHighRiskLayer(layer.layerId) && hasHighRiskEffectFamily(layer)) {
+        return "high-risk-layer-id-probe";
+    }
+
+    return {};
 }
 
 std::string sanitizeCapturePathSegment(std::string_view value)
@@ -280,6 +314,7 @@ bool writeEffectCaptureManifest(const Scene& scene)
         {"sceneId", scene.scene_id},
         {"commandLine", scene.debugEffectCaptures.commandLine},
         {"probeLayerIds", scene.debugEffectCaptures.probeLayerIds},
+        {"highRiskProbeLayerIds", scene.debugEffectCaptures.highRiskProbeLayerIds},
         {"captureCount", scene.debugEffectCaptureRecords.size()},
         {"captures", captures},
         {"passStates", passStates},

@@ -13,6 +13,7 @@ Item {
     property string debugEffectCapturesPath: ""
     property string debugEffectCaptureCommand: ""
     property string debugEffectProbeLayers: ""
+    property string debugEffectProbeHighRiskLayers: ""
 
     function assetsUrl(path) {
         const asText = String(path ?? "")

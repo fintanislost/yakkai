@@ -21,6 +21,7 @@ Window {
     property string debugEffectCapturesPath: sceneHarnessDebugEffectCapturesPath
     property string debugEffectCaptureCommand: sceneHarnessDebugEffectCaptureCommand
     property string debugEffectProbeLayers: sceneHarnessDebugEffectProbeLayers
+    property string debugEffectProbeHighRiskLayers: sceneHarnessDebugEffectProbeHighRiskLayers
 
     Component.onCompleted: {
         console.log("[Harness] window completed backend=" + backendName
@@ -71,6 +72,9 @@ Window {
             })
             item.debugEffectProbeLayers = Qt.binding(function() {
                 return root.debugEffectProbeLayers
+            })
+            item.debugEffectProbeHighRiskLayers = Qt.binding(function() {
+                return root.debugEffectProbeHighRiskLayers
             })
             item.sceneSource = Qt.binding(function() {
                 return root.sceneSource

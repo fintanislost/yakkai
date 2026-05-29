@@ -354,6 +354,14 @@ else
             printf "    %-12s avg=(%s)\n" "$Q" "$Q_AVG"
         fi
     done
+
+    if [ "$SCENE_ID" = "3476236738" ]; then
+        if VISUAL_SENTINEL=$(python3 tools/scene_visual_sentinels.py "$SCENE_ID" "$CAPTURE" --log "$LOG" 2>&1); then
+            check "Background visual sentinel" "PASS" "$VISUAL_SENTINEL"
+        else
+            check "Background visual sentinel" "FAIL" "$VISUAL_SENTINEL"
+        fi
+    fi
 fi
 
 # === Summary ===

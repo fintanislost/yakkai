@@ -2537,25 +2537,29 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     effectCaptureInfo.candidateChecks = candidateClassification.candidateChecks;
     if (context.scene) {
         effectCaptureInfo.debugProbeRequested =
-            context.scene->debugEffectCaptures.shouldProbeLayer(wpimgobj.id);
+            context.scene->debugEffectCaptures.shouldProbeLayer(wpimgobj.id) ||
+            context.scene->debugEffectCaptures.shouldProbeHighRiskLayer(wpimgobj.id);
     }
-    const bool debugProbeStrippedLayer =
-        context.scene &&
-        wallpaper::debug::shouldProbeStrippedEffectLayer(context.scene->debugEffectCaptures,
-                                                         effectCaptureInfo);
+    const std::string debugProbeReason =
+        context.scene ? wallpaper::debug::strippedEffectProbeReason(
+                            context.scene->debugEffectCaptures,
+                            effectCaptureInfo)
+                      : std::string();
+    const bool debugProbeStrippedLayer = !debugProbeReason.empty();
     if (effectCaptureInfo.debugProbeRequested) {
         effectCaptureInfo.debugProbeOverrodePolicy = debugProbeStrippedLayer;
         effectCaptureInfo.debugProbeReason =
-            debugProbeStrippedLayer ? "layer-id-probe" : "not-eligible";
+            debugProbeStrippedLayer ? debugProbeReason : "not-eligible";
     }
     if (puppetEffectDecision.reason == "puppet-alpha-strip") {
         if (context.scene && context.scene->debugEffectCaptures.enabled()) {
             wallpaper::debug::recordStrippedEffectCandidate(*context.scene, effectCaptureInfo);
         }
         if (debugProbeStrippedLayer) {
-            LOG_INFO("debug probing stripped puppet mixed effect layer: id=%d name=%s",
+            LOG_INFO("debug probing stripped effect layer: id=%d name=%s reason=%s",
                      wpimgobj.id,
-                     wpimgobj.name.c_str());
+                     wpimgobj.name.c_str(),
+                     debugProbeReason.c_str());
         } else {
             LOG_INFO("stripping %d effects from layer (alpha fix): name=%s",
                      count_eff, wpimgobj.name.c_str());
@@ -2817,11 +2821,9 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             scene.renderTargets[effect_ppong_b] = scene.renderTargets.at(effect_ppong_a);
             if (debugEffectCaptures) {
                 debugEffectInputTarget = "_rt_debug_effect_input_" + nodeAddr;
-                scene.renderTargets[debugEffectInputTarget] = {
-                    .width      = scene.renderTargets.at(effect_ppong_a).width,
-                    .height     = scene.renderTargets.at(effect_ppong_a).height,
-                    .allowReuse = false,
-                };
+                scene.renderTargets[debugEffectInputTarget] =
+                    scene.renderTargets.at(effect_ppong_a);
+                scene.renderTargets[debugEffectInputTarget].allowReuse = false;
                 debugEffectOutputSourceTarget =
                     useStandalonePuppetFinalDisplay
                         ? std::string(WE_DEBUG_EFFECT_FINAL_OUTPUT_PREFIX) + nodeAddr

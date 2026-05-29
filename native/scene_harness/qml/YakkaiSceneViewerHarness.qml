@@ -12,6 +12,7 @@ Item {
     property string debugEffectCapturesPath: ""
     property string debugEffectCaptureCommand: ""
     property string debugEffectProbeLayers: ""
+    property string debugEffectProbeHighRiskLayers: ""
 
     function assetsUrl(path) {
         const asText = String(path ?? "")
@@ -60,6 +61,7 @@ Item {
         debugEffectCapturesPath: root.debugEffectCapturesPath
         debugEffectCaptureCommand: root.debugEffectCaptureCommand
         debugEffectProbeLayers: root.debugEffectProbeLayers
+        debugEffectProbeHighRiskLayers: root.debugEffectProbeHighRiskLayers
         source: root.sceneSource
         assets: root.assetsUrl(root.assetsPath)
         fillMode: root.sceneFillMode()

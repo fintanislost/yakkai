@@ -17,9 +17,11 @@ struct EffectCaptureConfig {
     std::string outputDir;
     std::string commandLine;
     std::vector<int> probeLayerIds;
+    std::vector<int> highRiskProbeLayerIds;
 
     bool enabled() const { return !outputDir.empty(); }
     bool shouldProbeLayer(int layerId) const;
+    bool shouldProbeHighRiskLayer(int layerId) const;
     std::filesystem::path manifestPath() const;
 };
 
@@ -93,6 +95,9 @@ void recordStrippedEffectCandidate(Scene& scene, const EffectCaptureLayerInfo& l
 
 bool shouldProbeStrippedEffectLayer(const EffectCaptureConfig& config,
                                     const EffectCaptureLayerInfo& layer);
+
+std::string strippedEffectProbeReason(const EffectCaptureConfig& config,
+                                      const EffectCaptureLayerInfo& layer);
 
 bool writeEffectCaptureManifest(const Scene& scene);
 

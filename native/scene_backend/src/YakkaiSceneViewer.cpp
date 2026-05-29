@@ -390,6 +390,21 @@ void YakkaiSceneViewer::setDebugEffectProbeLayers(const QString& value)
     emit debugEffectProbeLayersChanged();
 }
 
+QString YakkaiSceneViewer::debugEffectProbeHighRiskLayers() const
+{
+    return m_debugEffectProbeHighRiskLayers;
+}
+
+void YakkaiSceneViewer::setDebugEffectProbeHighRiskLayers(const QString& value)
+{
+    if (m_debugEffectProbeHighRiskLayers == value) {
+        return;
+    }
+
+    m_debugEffectProbeHighRiskLayers = value;
+    emit debugEffectProbeHighRiskLayersChanged();
+}
+
 void YakkaiSceneViewer::requestGraphvizDump()
 {
     setBackendStatus(QStringLiteral("Scene backend scaffold only. Graphviz dump requested but no native renderer is wired yet."));

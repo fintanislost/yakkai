@@ -21,6 +21,7 @@ Automated validator that checks both structural rendering state and pixel output
 - QuickJS script evaluation
 - Material loading failures
 - Effect capture manifest gates for known renderer-risk fixtures (`3476236738` must allow at least one simple-water candidate; `3228578419` must allow none)
+- Scene-specific visual sentinels for known broad visual failures (`3476236738` hard-fails when multiple background regions look like tint-adjusted clear-color leakage)
 
 **Pixel analysis:**
 - Capture file size (blank detection)
@@ -28,6 +29,14 @@ Automated validator that checks both structural rendering state and pixel output
 - Average color (hue verification)
 - Color diversity (unique colors in 100x100 downscale)
 - Quadrant breakdown (spatial color distribution)
+
+### `tools/scene_visual_sentinels.py`
+
+Scene-specific visual sentinel helper used by `tools/validate-scene.sh`. It
+uses ImageMagick to sample configured regions from a capture and fails when
+known scene regions match a broad visual failure signature. The current
+sentinel covers `3476236738` by detecting multiple background regions that are
+both low-detail and close to the scene's tint-adjusted clear color.
 
 ### `smoke-tests/run.sh`
 

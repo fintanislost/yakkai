@@ -165,6 +165,34 @@ void testEffectFinalOutputDebugPlaceholder()
           "previous-input placeholder still resolves to current ping-pong input");
 }
 
+void testEffectSourceUsesLocalSpaceWhileFinalOutputKeepsParent()
+{
+    const std::string pingpongA = "_rt_effect_pingpong_a_parented";
+    const std::string pingpongB = "_rt_effect_pingpong_b_parented";
+
+    auto parent = std::make_shared<wallpaper::SceneNode>(
+        Eigen::Vector3f { 100.0f, 50.0f, 0.0f },
+        Eigen::Vector3f { 1.0f, 1.0f, 1.0f },
+        Eigen::Vector3f::Zero());
+    auto worldNode = std::make_shared<wallpaper::SceneNode>();
+    parent->AppendChild(worldNode);
+
+    wallpaper::SceneImageEffectLayer layer(worldNode.get(), 100.0f, 100.0f, pingpongA, pingpongB);
+    layer.SetFinalBlend(wallpaper::BlendMode::Normal);
+    auto effect = std::make_shared<wallpaper::SceneImageEffect>();
+    auto outputNode = effectNode();
+    effect->nodes.push_back({ std::string(wallpaper::WE_EFFECT_PPONG_PREFIX_B), outputNode, false });
+    layer.AddEffect(effect);
+
+    wallpaper::SceneMesh defaultMesh;
+    layer.ResolveEffect(defaultMesh, "effect");
+
+    check(worldNode->Parent() == nullptr,
+          "effect source node is detached from scene parent for local offscreen render");
+    check(outputNode->Parent() == parent.get(),
+          "effect final output keeps the original scene parent");
+}
+
 void testEffectCandidateClassification()
 {
     {
@@ -1252,6 +1280,7 @@ int main()
 {
     testEffectCaptureDebug();
     testEffectFinalOutputDebugPlaceholder();
+    testEffectSourceUsesLocalSpaceWhileFinalOutputKeepsParent();
     testEffectCandidateClassification();
     testEffectPolicy();
     testVideoTexturePolicy();

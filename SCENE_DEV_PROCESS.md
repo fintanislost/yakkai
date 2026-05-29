@@ -132,15 +132,15 @@ Only commit when:
 
 **Scene structure:** 2 puppets (20+64 bones), 15+ image layers with parent container at (2294, 1078), composelayer with color grading + blur, 3 particle systems, waterflow/waterwaves/opacity/shine/iris effects.
 
-**Current baseline (2026-04-01):**
-- Render nodes: 52
-- Effect passes: 23 (blur, iris, opacity, shine, waterflow, waterwaves)
-- Color variance: 0.087
-- Unique colors: 5905
-- Avg color: R=109 G=116 B=135 (blue-shifted, correct)
+**Current baseline (2026-05-29):**
+- Render nodes: 44
+- Effect passes: 7 (waterflow, waterwaves)
+- Color variance: 0.136581
+- Unique colors: 10000
+- Avg color: R=103 G=132 B=171
 - Shader fails: 0
 - Material fails: 0
-- Validator result: 14 pass, 0 fail, 0 warnings
+- Validator result: 19 pass, 0 fail, 1 warning (mixed water chain warning)
 
 **Progress history:**
 | Date | Change | Nodes | Shader fails | Variance | Colors |
@@ -153,8 +153,10 @@ Only commit when:
 | +alpha | Effect alpha write | 52 | 0 | **0.127** | 5935 |
 | +mask | ENABLEMASK→MASK | 52 | 0 | 0.127 | 6035 |
 | **natural** | **Remove tint, use texture colors** | 52 | 0 | **0.125** | 5955 |
+| 2026-05-29 | Local offscreen effect sources keep scene parent transforms out of effect inputs | 44 | 0 | 0.137 | 10000 |
 
 **Known limitations:**
 - Textures have their own blue-purple colors baked in (BC3/DXT5 with full RGB). The composite tint was REMOVED — textures render with natural colors. Clear color uses a 50/50 blend of the original gray and the scene's atmosphere property.
 - QuickJS is embedded and ready but scripts are compiled, not inline text
-- Scene segfaults on capture exit (render completes, capture saved, crash during cleanup)
+- High-risk blur, LUT, and color-grading effect paths remain stripped or harness-probe-only.
+- Mixed puppet effect chains, audio utility effects, and protected crop-sheet effect chains remain deferred.

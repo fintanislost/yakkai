@@ -31,6 +31,14 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
         return std::array<usize, 4> { vaCount, iaCount, verts, inds };
     };
     const bool debugLongEffectChain = m_effects.size() >= 10;
+    if (! m_final_parent_captured) {
+        m_final_parent = m_worldNode ? m_worldNode->Parent() : nullptr;
+        m_final_parent_captured = true;
+    }
+
+    if (m_worldNode != nullptr && ! fullscreen) {
+        m_worldNode->SetVirtualParent(nullptr);
+    }
 
     SceneImageEffectNode* last_output { nullptr };
     for (size_t effectIndex = 0; effectIndex < m_effects.size(); ++effectIndex) {
@@ -118,13 +126,13 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
                          material.textures.empty() ? "" : material.textures.front().c_str());
             } else {
                 last_output->sceneNode->SetCamera(std::string());
-                last_output->sceneNode->SetVirtualParent(m_worldNode ? m_worldNode->Parent() : nullptr);
+                last_output->sceneNode->SetVirtualParent(m_final_parent);
                 const auto finalMeshInfo = describe_mesh(*m_final_mesh);
                 LOG_INFO("effect final output: totalEffects=%zu blend=%d hasWorldNode=%d hasParent=%d finalMeshVerts=%zu tex0=%s",
                          m_effects.size(),
                          static_cast<int>(m_final_blend),
                          m_worldNode ? 1 : 0,
-                         (m_worldNode && m_worldNode->Parent()) ? 1 : 0,
+                         m_final_parent ? 1 : 0,
                          finalMeshInfo[2],
                          material.textures.empty() ? "" : material.textures.front().c_str());
                 last_output->sceneNode->CopyTrans(*m_final_node);

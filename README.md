@@ -108,7 +108,7 @@ tools/effect-capture-summary.py /tmp/yakkai-effect-debug/manifest.json
 
 `tools/effect-capture-summary.py` reports stripped-candidate risk, chain-shape, family, and mix-family counts so mixed water chains can be triaged before enabling any new effect behavior. It also prints `stripped-high-risk-*` sections for blur, LUT, and color-grading candidates so Arona/background parity work can start from exact layer and shader evidence.
 
-`tools/validate-scene.sh` also writes a debug effect manifest during validation. For the renderer-risk fixtures, it fails if `3476236738` has no allowed simple-water candidates, if any simple-water candidate remains stripped there, if the `3476236738` background visual sentinel detects clear-color leakage, or if `3228578419` gains any allowed simple-water candidates.
+`tools/validate-scene.sh` also writes a debug effect manifest during validation. For the renderer-risk fixtures, it fails if `3476236738` has no allowed simple-water candidates, if any simple-water candidate remains stripped there, if the `3476236738` background visual sentinel detects clear-color leakage, or if `3228578419` gains any allowed simple-water candidates. That sentinel is a regression guard for the layer-local effect source fix that keeps large parented background effect inputs from being cropped to clear color.
 
 ### Manual Build
 
@@ -247,7 +247,7 @@ The native backend supports:
 
 ### Known limitations
 - Regular per-layer offscreen effect chains in puppet scenes can break alpha compositing. Yakkai selectively strips regular/heavy effects in puppet scenes while preserving composelayers, colorkey, flare/lens, and other essential effect paths.
-- Some effect-heavy scene backgrounds are still incomplete. `3476236738` currently renders a large flat gray mid/background area; high-risk blur/color-grading probes on layers `137` and `365` produce useful diagnostics but do not yet fix that background parity gap. The validator now hard-fails that scene with a background visual sentinel until the renderer parity gap is fixed.
+- High-risk blur, LUT, and color-grading effect paths remain stripped or probe-only. The former `3476236738` flat gray background regression is fixed by rendering regular effect sources in layer-local space while keeping the final published output under its original parent; the scene's background visual sentinel now guards that behavior.
 - The current stripped-effect family backlog, including candidate scenes and blocked follow-up slices, is tracked in `docs/renderer-effect-candidate-backlog.md`.
 - Small embedded video textures are decoded as static first frames to keep CPU use bounded. Continuous decode is enabled only for large/main videos when FFmpeg is available at build time.
 - Static model scenes use an experimental fallback for basis correction, camera framing, and material selection.

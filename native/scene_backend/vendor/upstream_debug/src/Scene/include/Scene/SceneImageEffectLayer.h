@@ -59,6 +59,8 @@ private:
     std::string m_pingpong_b;
 
     bool fullscreen { false };
+    bool m_final_parent_captured { false };
+    SceneNode* m_final_parent { nullptr };
     //    std::vector<float> m_size;
     std::unique_ptr<SceneMesh> m_final_mesh;
     std::unique_ptr<SceneNode> m_final_node;

@@ -43,8 +43,15 @@ negative evidence for a simple policy re-enable and as input for a future
 background parity renderer slice.
 Phase 3.10a adds a hard-fail validator sentinel for this scene. The sentinel
 checks background regions for low-detail pixels close to the tint-adjusted clear
-color, so `tools/validate-scene.sh 3476236738 10000` now fails until the
-background parity gap is fixed.
+color.
+Phase 3.11 fixes the `3476236738` background parity gap. The root cause was
+parent transforms leaking into regular layer-local offscreen effect sources:
+layer `124` (`窗户`) rendered only a cropped corner of its window/sky texture
+into the effect input, leaving the final background close to clear color.
+`SceneImageEffectLayer` now detaches the effect source node from its scene
+parent for the local offscreen render while preserving the captured parent for
+the final published output. `tools/validate-scene.sh 3476236738 10000` now
+passes the sentinel, which remains a hard-fail regression guard.
 
 ## Rules For Candidate Slices
 
@@ -66,7 +73,7 @@ rm -rf ~/.cache/wescene-renderer/*/spvs01/
 
 | Family | Current status | Evidence | Blocker | Required next slice |
 | --- | --- | --- | --- | --- |
-| `waterflow` / `waterripple` | Partially enabled for `simple-water` | `3476236738` layer `124` (`窗户`) uses `effects/waterflow`; `3228578419` layer `239` is a utility composelayer with `effects/waterripple` and `effects/waterflow` | Utility composelayer evidence remains blocked; generic puppet/carrier paths are not part of the allow path | Keep the simple-water allow path narrow and validate `3476236738` plus `3228578419` before any broader effect work |
+| `waterflow` / `waterripple` | Partially enabled for `simple-water` | `3476236738` layer `124` (`窗户`) uses `effects/waterflow`; `3228578419` layer `239` is a utility composelayer with `effects/waterripple` and `effects/waterflow` | Phase 3.11 fixed parented layer-local effect source cropping for `3476236738`; utility composelayer evidence remains blocked, and generic puppet/carrier paths are not part of the allow path | Keep the simple-water allow path narrow and validate `3476236738` plus `3228578419` before any broader effect work |
 | `waterwaves` | Partially enabled for isolated `simple-water` | `3476236738` layers `322`, `446`, `438`, `442`, `133`, `145` are simple `effects/waterwaves`; layers `168` and `22` are `puppet-mixed` chains mixing waterwaves with opacity/shine/iris; `3228578419` layer `405` is a `protected-puppet-mixed` chain on `ARONA_CROP_SHEET` with waterwaves plus LUT, pulse, and shake | Phase 3.8 probe rendered layers `168` and `22` only for debug and produced obvious rectangular/gray occlusion; mixed puppet chains and protected crop-sheet paths remain blocked | Do not broaden the waterwaves allow path. Any future puppet mixed work needs a renderer fix for puppet effect publish/alpha behavior, not a policy allowlist |
 | `opacity` | Blocked | `3476236738` layers `168`, `22`, `219`, and `277` include `effects/opacity`; Phase 3.7 classifies `168` and `22` as `puppet-mixed`, while `219` and `277` are audio/utility-style `unknown-mixed` chains; Phase 3.8 probe captured `168` and `22` and confirmed unsafe final composition | Opacity appears only in mixed chains in the current evidence, including audio utility carriers. The only probed puppet opacity chains are unsafe with the current renderer path | Keep blocked. Split puppet opacity from audio/utility opacity only after a renderer-level puppet effect-chain fix exists |
 | `shine` / `iris` | Blocked | `3476236738` layer `22` includes `effects/shine_*` and `effects/iris` mixed with waterwaves and opacity; Phase 3.8 probe captured this layer and produced unsafe final composition | Single mixed puppet layer, no isolated fixture, and current puppet mixed-chain route is visually unsafe | Find or install an isolated shine/iris fixture before any renderer or policy change |

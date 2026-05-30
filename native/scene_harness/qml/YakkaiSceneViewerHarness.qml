@@ -14,6 +14,8 @@ Item {
     property string debugEffectProbeLayers: ""
     property string debugEffectProbeHighRiskLayers: ""
 
+    signal firstFrameReady()
+
     function assetsUrl(path) {
         const asText = String(path ?? "")
 
@@ -68,5 +70,13 @@ Item {
         fps: 30
         muted: root.muted
         mouseInputEnabled: root.mouseInputEnabled
+
+        Connections {
+            target: viewer
+
+            function onFirstFrame() {
+                root.firstFrameReady()
+            }
+        }
     }
 }

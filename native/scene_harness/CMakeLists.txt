@@ -25,3 +25,19 @@ endif()
 if(TARGET yakkai_scene_backendplugin)
     add_dependencies(yakkai_scene_harness yakkai_scene_backendplugin)
 endif()
+
+add_executable(yakkai_scene_harness_tests
+    tests/test_capture_gate.cpp
+)
+
+target_include_directories(yakkai_scene_harness_tests
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
+target_link_libraries(yakkai_scene_harness_tests
+    PRIVATE
+        Qt6::Core
+)
+
+target_compile_features(yakkai_scene_harness_tests PRIVATE cxx_std_20)

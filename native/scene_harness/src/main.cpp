@@ -17,7 +17,10 @@
 #include <QtQml/QQmlApplicationEngine>
 #include <QtQml/QQmlContext>
 
+#include "CaptureGate.hpp"
+
 #include <algorithm>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -27,6 +30,8 @@ namespace
 {
 constexpr int MaxCaptureSequenceFrames = 3600;
 constexpr int CaptureExitDrainMs = 500;
+constexpr int CaptureReadyPollMs = 50;
+constexpr int CaptureReadyTimeoutMs = 60000;
 
 struct CaptureRequest
 {
@@ -184,6 +189,107 @@ void requestCaptureExit(QQuickWindow* window, int status)
     QTimer::singleShot(CaptureExitDrainMs, QCoreApplication::instance(), [status]() {
         QCoreApplication::exit(status);
     });
+}
+
+void scheduleSingleCapture(QCoreApplication* app,
+                           QPointer<QQuickWindow> guardedWindow,
+                           QString absoluteCapturePath,
+                           int captureDelayMs)
+{
+    QTimer::singleShot(std::max(captureDelayMs, 0), app, [guardedWindow, absoluteCapturePath]() {
+        if (!guardedWindow) {
+            qWarning() << "yakkai_scene_harness: capture window was destroyed before capture";
+            QCoreApplication::exit(3);
+            return;
+        }
+        requestCaptureExit(guardedWindow, saveWindowCapture(guardedWindow, absoluteCapturePath));
+    });
+}
+
+void scheduleMultiCaptures(QCoreApplication* app,
+                           QPointer<QQuickWindow> guardedWindow,
+                           const std::vector<CaptureRequest>& captures,
+                           const QString& absoluteCaptureDir)
+{
+    auto remaining = std::make_shared<int>(static_cast<int>(captures.size()));
+    auto failed = std::make_shared<bool>(false);
+
+    for (const CaptureRequest& capture : captures) {
+        const QString absolutePath = QDir(absoluteCaptureDir).filePath(capture.fileName);
+        QTimer::singleShot(capture.timeMs, app, [guardedWindow, absolutePath, remaining, failed]() {
+            if (!guardedWindow) {
+                qWarning() << "yakkai_scene_harness: capture window was destroyed before capture";
+                *failed = true;
+            } else if (saveWindowCapture(guardedWindow, absolutePath) != CaptureSuccess) {
+                *failed = true;
+            }
+
+            *remaining -= 1;
+            if (*remaining == 0) {
+                requestCaptureExit(guardedWindow, *failed ? 5 : 0);
+            }
+        });
+    }
+}
+
+void startCaptureTimersAfterFirstFrame(QCoreApplication* app,
+                                       QPointer<QQuickWindow> guardedWindow,
+                                       std::function<void()> startCaptureTimers)
+{
+    auto gate = std::make_shared<yakkai::harness::CaptureStartGate>();
+    gate->markRootWindowReady();
+
+    auto readyPollTimer = new QTimer(app);
+    auto readyTimeoutTimer = new QTimer(app);
+    readyPollTimer->setInterval(CaptureReadyPollMs);
+    readyTimeoutTimer->setSingleShot(true);
+
+    auto tryStart = std::make_shared<std::function<void()>>();
+    *tryStart = [gate, readyPollTimer, readyTimeoutTimer, startCaptureTimers = std::move(startCaptureTimers)]() {
+        if (!gate->consumeReadyToStart()) {
+            return;
+        }
+
+        qInfo() << "yakkai_scene_harness: backend first frame ready; arming capture timers";
+        readyPollTimer->stop();
+        readyTimeoutTimer->stop();
+        readyPollTimer->deleteLater();
+        readyTimeoutTimer->deleteLater();
+        startCaptureTimers();
+    };
+
+    QObject::connect(readyPollTimer, &QTimer::timeout, app, [guardedWindow, gate, tryStart]() {
+        if (!guardedWindow) {
+            qWarning() << "yakkai_scene_harness: capture window was destroyed before backend first frame";
+            QCoreApplication::exit(3);
+            return;
+        }
+
+        if (guardedWindow->property("captureReady").toBool()) {
+            gate->markFirstFrameReady();
+            (*tryStart)();
+        }
+    });
+    QObject::connect(readyTimeoutTimer, &QTimer::timeout, app, [guardedWindow]() {
+        const QString status = guardedWindow
+            ? guardedWindow->property("backendStatus").toString()
+            : QStringLiteral("<window destroyed>");
+        qWarning() << "yakkai_scene_harness: timed out waiting for backend first frame before capture"
+                   << "timeoutMs=" << CaptureReadyTimeoutMs
+                   << "backendStatus=" << status;
+        QCoreApplication::exit(7);
+    });
+
+    qInfo() << "yakkai_scene_harness: waiting for backend first frame before capture"
+            << "timeoutMs=" << CaptureReadyTimeoutMs;
+    if (guardedWindow && guardedWindow->property("captureReady").toBool()) {
+        gate->markFirstFrameReady();
+        (*tryStart)();
+        return;
+    }
+
+    readyPollTimer->start();
+    readyTimeoutTimer->start(CaptureReadyTimeoutMs);
 }
 
 int fillModeFromString(const QString& fillMode)
@@ -481,13 +587,8 @@ int main(int argc, char* argv[])
 
         if (!capturePath.isEmpty()) {
             const QString absoluteCapturePath = QFileInfo(capturePath).absoluteFilePath();
-            QTimer::singleShot(std::max(captureDelayMs, 0), &app, [guardedWindow, absoluteCapturePath]() {
-                if (!guardedWindow) {
-                    qWarning() << "yakkai_scene_harness: capture window was destroyed before capture";
-                    QCoreApplication::exit(3);
-                    return;
-                }
-                requestCaptureExit(guardedWindow, saveWindowCapture(guardedWindow, absoluteCapturePath));
+            startCaptureTimersAfterFirstFrame(&app, guardedWindow, [&app, guardedWindow, absoluteCapturePath, captureDelayMs]() {
+                scheduleSingleCapture(&app, guardedWindow, absoluteCapturePath, captureDelayMs);
             });
             return;
         }
@@ -504,25 +605,9 @@ int main(int argc, char* argv[])
             QCoreApplication::exit(5);
             return;
         }
-        auto remaining = std::make_shared<int>(static_cast<int>(parsedCaptures->size()));
-        auto failed = std::make_shared<bool>(false);
-
-        for (const CaptureRequest& capture : *parsedCaptures) {
-            const QString absolutePath = QDir(absoluteCaptureDir).filePath(capture.fileName);
-            QTimer::singleShot(capture.timeMs, &app, [guardedWindow, absolutePath, remaining, failed]() {
-                if (!guardedWindow) {
-                    qWarning() << "yakkai_scene_harness: capture window was destroyed before capture";
-                    *failed = true;
-                } else if (saveWindowCapture(guardedWindow, absolutePath) != CaptureSuccess) {
-                    *failed = true;
-                }
-
-                *remaining -= 1;
-                if (*remaining == 0) {
-                    requestCaptureExit(guardedWindow, *failed ? 5 : 0);
-                }
-            });
-        }
+        startCaptureTimersAfterFirstFrame(&app, guardedWindow, [&app, guardedWindow, parsedCaptures, absoluteCaptureDir]() {
+            scheduleMultiCaptures(&app, guardedWindow, *parsedCaptures, absoluteCaptureDir);
+        });
     });
     engine.load(mainQml);
 

@@ -15,6 +15,8 @@ Item {
     property string debugEffectProbeLayers: ""
     property string debugEffectProbeHighRiskLayers: ""
 
+    signal firstFrameReady()
+
     function assetsUrl(path) {
         const asText = String(path ?? "")
 
@@ -76,6 +78,15 @@ Item {
 
         Component.onCompleted: {
             root.applyMouseInput()
+        }
+
+        Connections {
+            target: viewer
+            ignoreUnknownSignals: true
+
+            function onFirstFrame() {
+                root.firstFrameReady()
+            }
         }
     }
 }

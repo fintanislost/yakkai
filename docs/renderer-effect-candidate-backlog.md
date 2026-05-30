@@ -13,6 +13,11 @@ Latest source artifacts used for this revision:
 - Phase 3.10 high-risk probes can be regenerated with
   `--debug-effect-probe-high-risk-layers`; the probe artifacts remain
   generated diagnostics and are not committed baselines.
+- Phase 3.12 blur/LUT probe artifacts:
+  `/tmp/yakkai-phase3-12-probe-347-blur-137/effect-captures/manifest.json`,
+  `/tmp/yakkai-phase3-12-probe-347-colorgrade-365/effect-captures/manifest.json`,
+  `/tmp/yakkai-phase3-12-probe-arona-blur/effect-captures/manifest.json`, and
+  `/tmp/yakkai-phase3-12-probe-arona-lut-wall-15s/effect-captures/manifest.json`.
 
 Those artifacts are generated diagnostics and are not committed baselines. If
 they are missing, regenerate them with `--debug-effect-captures` before changing
@@ -52,6 +57,22 @@ into the effect input, leaving the final background close to clear color.
 parent for the local offscreen render while preserving the captured parent for
 the final published output. `tools/validate-scene.sh 3476236738 10000` now
 passes the sentinel, which remains a hard-fail regression guard.
+Phase 3.12 is a diagnostic blur/LUT parity probe. It does not change normal
+policy. For `3476236738`, probing both high-risk layers `137` and `365`
+changed the frame materially (`RMSE 0.0851`). Splitting the run showed that
+`137` (`桌左`, `blur-only`) is a small localized shift (`RMSE 0.0216`, mean and
+variance essentially unchanged), while `365` (`可调整组合层`,
+`blur-color-grade-composelayer`) accounts for the broad frame change
+(`RMSE 0.0862`, mean drops from `0.642` to `0.620`). For `3228578419`, probing
+fullscreen blur utility layers `53` and `155` was a small final-frame delta
+(`RMSE 0.0057`), while a 15s single-layer LUT probe for `82` (`WALL`) produced a
+valid structural render (`RMSE 0.0183`) and composed the sky/window plate behind
+the character without obvious mask corruption. Earlier 8s Arona LUT captures hit
+the harness loader screen, which led to first-frame-gated harness capture
+timing: capture delays now start after the backend reports a real first frame.
+Treat this as positive evidence for future narrow `blur-only` and background
+`lut-only` investigations, but negative evidence for broad
+color-grade/composelayer or utility-carrier re-enables.
 
 ## Rules For Candidate Slices
 
@@ -77,9 +98,9 @@ rm -rf ~/.cache/wescene-renderer/*/spvs01/
 | `waterwaves` | Partially enabled for isolated `simple-water` | `3476236738` layers `322`, `446`, `438`, `442`, `133`, `145` are simple `effects/waterwaves`; layers `168` and `22` are `puppet-mixed` chains mixing waterwaves with opacity/shine/iris; `3228578419` layer `405` is a `protected-puppet-mixed` chain on `ARONA_CROP_SHEET` with waterwaves plus LUT, pulse, and shake | Phase 3.8 probe rendered layers `168` and `22` only for debug and produced obvious rectangular/gray occlusion; mixed puppet chains and protected crop-sheet paths remain blocked | Do not broaden the waterwaves allow path. Any future puppet mixed work needs a renderer fix for puppet effect publish/alpha behavior, not a policy allowlist |
 | `opacity` | Blocked | `3476236738` layers `168`, `22`, `219`, and `277` include `effects/opacity`; Phase 3.7 classifies `168` and `22` as `puppet-mixed`, while `219` and `277` are audio/utility-style `unknown-mixed` chains; Phase 3.8 probe captured `168` and `22` and confirmed unsafe final composition | Opacity appears only in mixed chains in the current evidence, including audio utility carriers. The only probed puppet opacity chains are unsafe with the current renderer path | Keep blocked. Split puppet opacity from audio/utility opacity only after a renderer-level puppet effect-chain fix exists |
 | `shine` / `iris` | Blocked | `3476236738` layer `22` includes `effects/shine_*` and `effects/iris` mixed with waterwaves and opacity; Phase 3.8 probe captured this layer and produced unsafe final composition | Single mixed puppet layer, no isolated fixture, and current puppet mixed-chain route is visually unsafe | Find or install an isolated shine/iris fixture before any renderer or policy change |
-| `blur` | High-risk blocked | `3476236738` layer `137` uses `effects/blur_precise_gaussian`; `3476236738` layer `365` mixes blur with color grading on a utility composelayer; `3228578419` layers `53` and `155` are fullscreen blur layers | Blur is a known Arona failure class and appears on fullscreen/utility carriers; Phase 3.9 classifies blur diagnostics with shapes such as `blur-only`, `blur-utility`, and `blur-color-grade-composelayer`, but does not prove render safety | Keep stripped until a blur-specific render-target slice can prove alpha/load/blend behavior against Arona |
+| `blur` | High-risk blocked | `3476236738` layer `137` uses `effects/blur_precise_gaussian`; `3476236738` layer `365` mixes blur with color grading on a utility composelayer; `3228578419` layers `53` and `155` are fullscreen blur layers; Phase 3.12 found `137` has only a small final-frame delta while `365` carries the broad color/brightness change | Blur is a known Arona failure class and appears on fullscreen/utility carriers; isolated `blur-only` evidence is more promising than composelayer or fullscreen utility blur, but it still lacks Wallpaper Engine frame parity proof | Keep stripped globally. A future slice may target a narrow non-carrier `blur-only` predicate, with `3476236738` layer `137` as the candidate and Arona utility blur as the regression guard |
 | `audio` | Deferred | `3476236738` layers `219` and `277` use `workshop/3082978660/effects/Simple_Audio_Bars` on `models/util/solidlayer.json`; Phase 3.7 reports audio mix-family evidence separately from puppet chains | Requires audio buffer semantics and utility carrier handling; not just an effect-chain issue | Defer to a future audio-reactive support slice |
-| `color grading` / `LUT` | High-risk blocked | `3228578419` layers `174`, `314`, `82`, `267`, `1032`, `1013`, `2143`, and `405` use `workshop/3165346237/effects/lut_loader`; `3476236738` layer `365` uses `workshop/2795521260/effects/color_grading` | Known source of washed-out Arona backgrounds; appears on protected background, character, and utility paths; Phase 3.9 reports canonical `lut` and `color-grade` families plus high-risk summary sections, but still keeps them stripped | Keep stripped until a LUT/color-management slice can compare Wallpaper Engine output and Yakkai output frame-by-frame |
+| `color grading` / `LUT` | High-risk blocked | `3228578419` layers `174`, `314`, `82`, `267`, `1032`, `1013`, `2143`, and `405` use `workshop/3165346237/effects/lut_loader`; `3476236738` layer `365` uses `workshop/2795521260/effects/color_grading`; Phase 3.12 found Arona layer `82` (`WALL`) structurally plausible in isolation, but `3476236738` layer `365` still changes the whole frame materially | Known source of washed-out Arona backgrounds; LUT appears on protected background, character, and crop-sheet paths; color grading mixed with composelayer blur remains unsafe for broad policy | Keep stripped globally. A future slice may target a narrow background `lut-only` predicate starting with Arona layer `82`, but protected crop-sheet and composelayer color-grade paths stay blocked until frame-by-frame Wallpaper Engine comparison exists |
 | `pulse` / `shake` | High-risk blocked | `3228578419` layer `405` (`ARONA_CROP_SHEET`) mixes `effects/pulse`, `effects/shake`, waterwaves, and LUT | Directly affects the protected puppet crop sheet and is mixed with other dangerous effects | Defer until puppet-through-effect-chain rendering has a dedicated plan |
 
 ## Current Protected Paths

@@ -82,6 +82,10 @@ Use the dev flag when working on the renderer or smoke-test harness:
 ```
 
 Add `--capture /tmp/output.png --capture-delay-ms 10000` for automated testing.
+Capture timers start only after the scene backend reports its first rendered
+frame, so the delay is measured from the first real scene frame rather than
+from QML window creation. This avoids saving the harness loader screen when a
+scene needs extra time to compile shaders or build its render graph.
 
 For effect-chain debugging, the paper backend can write intermediate render-target captures and a manifest:
 
@@ -160,7 +164,7 @@ The release suite contains the currently baselined required scenes. Add optional
 
 Use the coverage command before renderer phase work to confirm the limitation has an active baseline or candidate fixture. It performs no rendering and does not promote candidates into active smoke suites.
 
-The harness compares deterministic PNG captures against versioned baselines and writes review artifacts to `/tmp/yakkai-smoke`. Smoke-test captures hide the local harness info overlay; generated review videos are for human inspection only, and PNG frames remain the source of truth.
+The harness compares deterministic PNG captures against versioned baselines and writes review artifacts to `/tmp/yakkai-smoke`. Capture schedules are relative to the backend's first rendered frame, not process startup. Smoke-test captures hide the local harness info overlay; generated review videos are for human inspection only, and PNG frames remain the source of truth.
 
 Native renderer policy decisions for effect preservation, video texture playback, static model fallback, and SceneScript stubs live in focused C++ modules under `native/scene_backend/vendor/upstream_debug/src/Policy/`. Run `yakkai_scene_policy_tests` alongside smoke tests when changing these boundaries:
 

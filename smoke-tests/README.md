@@ -27,6 +27,7 @@ The smoke-test harness is the local visual regression gate for Wallpaper Engine 
 
 PNG frames under `smoke-tests/baselines/` are the versioned comparison source of truth. Generated MP4/WebM clips, diffs, logs, and summaries are artifacts and stay out of git.
 Smoke-test captures hide the harness info overlay so baselines contain scene content instead of local machine paths.
+Capture timestamps are measured from the harness backend's first rendered frame, not from process startup or QML window creation.
 Animated and video-heavy sequences can opt into a small `temporalToleranceFrames` window in `scenes.json`; the runner still compares PNGs, but it uses the closest nearby baseline frame to absorb animation or decoder timing jitter. Video-texture fixtures should prefer sequence baselines over standalone still captures when the decoder phase is not stable across harness invocations.
 
 Baseline updates are two-step:

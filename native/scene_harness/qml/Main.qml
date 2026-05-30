@@ -22,6 +22,10 @@ Window {
     property string debugEffectCaptureCommand: sceneHarnessDebugEffectCaptureCommand
     property string debugEffectProbeLayers: sceneHarnessDebugEffectProbeLayers
     property string debugEffectProbeHighRiskLayers: sceneHarnessDebugEffectProbeHighRiskLayers
+    property bool captureReady: false
+    property string backendStatus: backendLoader.item && backendLoader.item.backendStatus
+        ? backendLoader.item.backendStatus
+        : ""
 
     Component.onCompleted: {
         console.log("[Harness] window completed backend=" + backendName
@@ -101,6 +105,13 @@ Window {
         function onBackendStatusChanged() {
             console.log("[Harness] backendStatus=" + String(backendLoader.item.backendStatus ?? ""))
         }
+
+        function onFirstFrameReady() {
+            if (!root.captureReady) {
+                root.captureReady = true
+                console.log("[Harness] backend first frame ready for capture")
+            }
+        }
     }
 
     Rectangle {
@@ -139,5 +150,6 @@ Window {
             + (backendLoader.item && backendLoader.item.backendStatus
                 ? "Backend Status: " + backendLoader.item.backendStatus + "\n"
                 : "")
+            + "Capture Ready: " + (root.captureReady ? "yes" : "no") + "\n"
     }
 }

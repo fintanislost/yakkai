@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import runner
 
 
@@ -39,6 +40,148 @@ class RunnerCoreTests(unittest.TestCase):
         }
         self.assertEqual([s["id"] for s in runner.select_scenes(manifest, "quick")], ["a"])
         self.assertEqual([s["id"] for s in runner.select_scenes(manifest, "deep")], ["b"])
+
+    def test_expand_manifest_scenes_turns_base_with_variants_into_cases(self):
+        manifest = {
+            "scenes": [
+                {
+                    "id": "3228578419",
+                    "name": "Sleeping Arona",
+                    "source": "${workshop}/3228578419/scene.pkg",
+                    "gates": ["quick", "deep", "release"],
+                    "required": True,
+                    "captures": [{"name": "still-8000", "timeMs": 8000, "baseline": "3228578419/stills/still-8000.png"}],
+                    "sequences": [{"name": "motion-8000", "baselineDir": "3228578419/sequences/motion-8000"}],
+                    "thresholds": {"rmseReview": 0.035},
+                    "expectations": {"motion": True},
+                    "variants": [
+                        {
+                            "id": "3228578419-day",
+                            "name": "Sleeping Arona - Day",
+                            "gates": ["quick", "deep", "release"],
+                            "baselinePrefix": "3228578419-day",
+                            "scenePropertyOverrides": {"timeofday": "1"},
+                        },
+                        {
+                            "id": "3228578419-night",
+                            "name": "Sleeping Arona - Night",
+                            "gates": ["deep"],
+                            "baselinePrefix": "3228578419-night",
+                            "scenePropertyOverrides": {"timeofday": "3"},
+                        },
+                    ],
+                },
+                {
+                    "id": "3327063360",
+                    "name": "Shiroko Night Video",
+                    "gates": ["quick", "deep", "release"],
+                },
+            ]
+        }
+
+        cases = runner.expand_manifest_scenes(manifest)
+
+        self.assertEqual([case["id"] for case in cases], ["3228578419-day", "3228578419-night", "3327063360"])
+        day = cases[0]
+        self.assertEqual(day["sourceSceneId"], "3228578419")
+        self.assertEqual(day["source"], "${workshop}/3228578419/scene.pkg")
+        self.assertEqual(day["required"], True)
+        self.assertEqual(day["thresholds"], {"rmseReview": 0.035})
+        self.assertEqual(day["expectations"], {"motion": True})
+        self.assertEqual(day["scenePropertyOverrides"], {"timeofday": "1"})
+        self.assertEqual(day["captures"][0]["baseline"], "3228578419-day/stills/still-8000.png")
+        self.assertEqual(day["sequences"][0]["baselineDir"], "3228578419-day/sequences/motion-8000")
+
+    def test_scene_properties_json_merges_over_project_defaults(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            scene_dir = root / "3228578419"
+            scene_dir.mkdir()
+            source = scene_dir / "scene.pkg"
+            source.write_text("scene", encoding="utf-8")
+            (scene_dir / "project.json").write_text(
+                json.dumps({
+                    "general": {
+                        "properties": {
+                            "timeofday": {"type": "combo", "value": "0"},
+                            "weather": {"type": "combo", "value": "0"},
+                        }
+                    }
+                }),
+                encoding="utf-8",
+            )
+
+            merged = runner.scene_properties_json_for_scene(
+                {"id": "3228578419-day", "scenePropertyOverrides": {"timeofday": "1"}},
+                source,
+            )
+
+        self.assertEqual(
+            json.loads(merged),
+            {
+                "timeofday": {"type": "combo", "value": "1"},
+                "weather": {"type": "combo", "value": "0"},
+            },
+        )
+        self.assertEqual(merged, json.dumps(json.loads(merged), separators=(",", ":"), sort_keys=True))
+
+    def test_scene_properties_json_returns_none_without_overrides(self):
+        self.assertIsNone(runner.scene_properties_json_for_scene({"id": "plain"}, Path("/repo/plain/scene.pkg")))
+
+    def test_scene_properties_json_rejects_non_object_overrides(self):
+        with self.assertRaises(ValueError):
+            runner.scene_properties_json_for_scene({"id": "bad", "scenePropertyOverrides": ["timeofday", "1"]}, Path("/repo/scene.pkg"))
+
+    def test_load_project_scene_properties_treats_non_object_shapes_as_empty(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "scene.pkg"
+            source.write_text("scene", encoding="utf-8")
+            project = source.parent / "project.json"
+
+            for payload in (["not", "object"], {"general": []}, {"general": {"properties": []}}):
+                project.write_text(json.dumps(payload), encoding="utf-8")
+                self.assertEqual(runner.load_project_scene_properties(source), {})
+
+    def test_apply_scene_property_overrides_does_not_mutate_defaults(self):
+        defaults = {"timeofday": {"value": "0"}}
+
+        merged = runner.apply_scene_property_overrides(defaults, {"timeofday": "1"})
+
+        self.assertEqual(defaults, {"timeofday": {"value": "0"}})
+        self.assertEqual(merged, {"timeofday": {"value": "1"}})
+
+    def test_select_scenes_uses_expanded_variants_and_excludes_template_base(self):
+        manifest = {
+            "scenes": [
+                {
+                    "id": "3228578419",
+                    "name": "Sleeping Arona",
+                    "gates": ["quick", "deep", "release"],
+                    "variants": [
+                        {"id": "3228578419-day", "name": "Day", "gates": ["quick", "deep", "release"], "baselinePrefix": "3228578419-day"},
+                        {"id": "3228578419-sunset", "name": "Sunset", "gates": ["deep"], "baselinePrefix": "3228578419-sunset"},
+                        {"id": "3228578419-night", "name": "Night", "gates": ["deep"], "baselinePrefix": "3228578419-night"},
+                    ],
+                }
+            ]
+        }
+
+        self.assertEqual([scene["id"] for scene in runner.select_scenes(manifest, "quick")], ["3228578419-day"])
+        self.assertEqual(
+            [scene["id"] for scene in runner.select_scenes(manifest, "deep")],
+            ["3228578419-day", "3228578419-sunset", "3228578419-night"],
+        )
+        self.assertEqual([scene["id"] for scene in runner.select_scenes(manifest, "release")], ["3228578419-day"])
+
+    def test_apply_baseline_prefix_rejects_absolute_or_parent_paths(self):
+        with self.assertRaises(ValueError):
+            runner.baseline_path_with_prefix("/tmp/outside.png", "variant")
+        with self.assertRaises(ValueError):
+            runner.baseline_path_with_prefix("../outside.png", "variant")
+        self.assertEqual(
+            runner.baseline_path_with_prefix("3228578419/stills/still-8000.png", "3228578419-day"),
+            "3228578419-day/stills/still-8000.png",
+        )
 
     def test_classify_rmse_result(self):
         thresholds = {"rmseReview": 0.01, "rmseFail": 0.05}
@@ -185,6 +328,19 @@ class RunnerCoreTests(unittest.TestCase):
             ],
         )
 
+    def test_build_harness_base_command_adds_scene_properties_json(self):
+        command = runner.build_harness_base_command(
+            Path("/repo/build/harness"),
+            {"backend": "paper", "fill": "crop"},
+            Path("/repo/scene.pkg"),
+            Path("/repo/assets"),
+            {"width": 1280, "height": 720},
+            '{"timeofday":{"value":"1"}}',
+        )
+
+        self.assertIn("--scene-properties-json", command)
+        self.assertEqual(command[command.index("--scene-properties-json") + 1], '{"timeofday":{"value":"1"}}')
+
     def test_run_command_writes_combined_output_and_returns_exit_code(self):
         with tempfile.TemporaryDirectory() as temp:
             log_path = Path(temp) / "logs" / "command.log"
@@ -240,11 +396,13 @@ class RunnerCoreTests(unittest.TestCase):
 
     def test_dataclass_to_json_serializes_nested_scene_result(self):
         result = runner.SceneResult(
-            id="scene",
-            name="Scene",
+            id="3228578419-day",
+            name="Sleeping Arona - Day",
             status="review",
             required=True,
             log=None,
+            sourceSceneId="3228578419",
+            scenePropertiesJson='{"timeofday":{"value":"1"}}',
             frames=[
                 runner.FrameResult(
                     name="frame-00008000ms",
@@ -261,11 +419,13 @@ class RunnerCoreTests(unittest.TestCase):
         self.assertEqual(
             runner.dataclass_to_json(result),
             {
-                "id": "scene",
-                "name": "Scene",
+                "id": "3228578419-day",
+                "name": "Sleeping Arona - Day",
                 "status": "review",
                 "required": True,
                 "log": None,
+                "sourceSceneId": "3228578419",
+                "scenePropertiesJson": '{"timeofday":{"value":"1"}}',
                 "frames": [
                     {
                         "name": "frame-00008000ms",
@@ -376,6 +536,10 @@ class RunnerCoreTests(unittest.TestCase):
             run_dir = root / "run"
             harness.write_text("harness", encoding="utf-8")
             source.write_text("scene", encoding="utf-8")
+            (source.parent / "project.json").write_text(
+                json.dumps({"general": {"properties": {"timeofday": {"value": "0"}}}}),
+                encoding="utf-8",
+            )
             assets.mkdir()
             manifest = {
                 "defaults": {"captureSize": {"width": 1280, "height": 720}},
@@ -391,9 +555,15 @@ class RunnerCoreTests(unittest.TestCase):
                 "source": str(source),
                 "captures": [{"timeMs": 8000, "baseline": "scene/stills/still-8000.png"}],
                 "sequences": [{"name": "motion", "startMs": 8000, "frames": 2, "intervalMs": 33}],
+                "scenePropertyOverrides": {"timeofday": "1"},
             }
+            timeouts = []
 
             def fake_run(command, log_path, timeout_seconds):
+                timeouts.append(timeout_seconds)
+                self.assertIn("--scene-properties-json", command)
+                properties = json.loads(command[command.index("--scene-properties-json") + 1])
+                self.assertEqual(properties["timeofday"]["value"], "1")
                 capture_dir = Path(command[command.index("--capture-dir") + 1])
                 capture_dir.mkdir(parents=True)
                 if "--capture-times-ms" in command:
@@ -418,6 +588,107 @@ class RunnerCoreTests(unittest.TestCase):
         self.assertEqual(notes, [])
         self.assertEqual(log_path, run_dir / "scene" / "harness.log")
         self.assertEqual([path.name for path in actuals], ["frame-00008000ms.png", "frame-0000.png", "frame-0001.png"])
+        self.assertEqual(timeouts, [78, 79])
+
+    def test_run_scene_captures_reuses_precomputed_scene_properties_json(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            harness = root / "harness"
+            assets = root / "assets"
+            source = root / "scene.pkg"
+            run_dir = root / "run"
+            harness.write_text("harness", encoding="utf-8")
+            source.write_text("scene", encoding="utf-8")
+            assets.mkdir()
+            manifest = {
+                "defaults": {"captureSize": {"width": 1280, "height": 720}},
+                "paths": {
+                    "harness": str(harness),
+                    "assets": str(assets),
+                    "baselines": "baselines",
+                    "workshop": "workshop",
+                },
+            }
+            scene = {
+                "id": "scene",
+                "source": str(source),
+                "captures": [{"timeMs": 8000, "baseline": "scene/stills/still-8000.png"}],
+                "sequences": [],
+            }
+            precomputed = '{"timeofday":{"value":"1"}}'
+
+            def fake_run(command, log_path, timeout_seconds):
+                self.assertIn("--scene-properties-json", command)
+                self.assertEqual(command[command.index("--scene-properties-json") + 1], precomputed)
+                capture_dir = Path(command[command.index("--capture-dir") + 1])
+                capture_dir.mkdir(parents=True)
+                (capture_dir / "frame-00008000ms.png").write_text("still", encoding="utf-8")
+                log_path.write_text("ok", encoding="utf-8")
+                return 0
+
+            with (
+                mock.patch.object(runner, "run_command", side_effect=fake_run),
+                mock.patch.object(
+                    runner,
+                    "scene_properties_json_for_scene",
+                    side_effect=AssertionError("scene properties should be precomputed"),
+                ),
+            ):
+                status, log_path, actuals, notes = runner.run_scene_captures(
+                    manifest=manifest,
+                    scene=scene,
+                    root=root,
+                    run_dir=run_dir,
+                    assets_override=None,
+                    workshop_override=None,
+                    scene_properties_json=precomputed,
+                )
+
+        self.assertEqual(status, "pass")
+        self.assertEqual(notes, [])
+        self.assertEqual(log_path, run_dir / "scene" / "harness.log")
+        self.assertEqual([path.name for path in actuals], ["frame-00008000ms.png"])
+
+    def test_run_scene_captures_fails_invalid_scene_property_overrides_shape(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            harness = root / "harness"
+            assets = root / "assets"
+            source = root / "scene.pkg"
+            run_dir = root / "run"
+            harness.write_text("harness", encoding="utf-8")
+            source.write_text("scene", encoding="utf-8")
+            assets.mkdir()
+            manifest = {
+                "defaults": {"captureSize": {"width": 1280, "height": 720}},
+                "paths": {
+                    "harness": str(harness),
+                    "assets": str(assets),
+                    "baselines": "baselines",
+                    "workshop": "workshop",
+                },
+            }
+            scene = {
+                "id": "scene",
+                "source": str(source),
+                "captures": [],
+                "sequences": [],
+                "scenePropertyOverrides": ["bad"],
+            }
+
+            status, log_path, actuals, notes = runner.run_scene_captures(
+                manifest=manifest,
+                scene=scene,
+                root=root,
+                run_dir=run_dir,
+                assets_override=None,
+                workshop_override=None,
+            )
+
+        self.assertEqual(status, "fail")
+        self.assertIsNone(log_path)
+        self.assertEqual(actuals, [])
+        self.assertEqual(notes, ["scene scene scenePropertyOverrides must be an object"])
 
     def test_run_scene_captures_fails_missing_still_output(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -949,7 +1220,71 @@ class RunnerCoreTests(unittest.TestCase):
 
         errors = runner.validate_coverage_matrix(matrix, manifest)
 
-        self.assertIn("active scene 3228578419 is missing from coverage matrix", errors)
+        self.assertIn("active scene 3228578419 source scene 3228578419 is missing from coverage matrix", errors)
+
+    def test_coverage_validation_accepts_variant_source_scene_id(self):
+        matrix = {
+            "buckets": [
+                {
+                    "id": "alpha-sensitive-effects",
+                    "minimumStatus": "active",
+                    "coverage": [{"sceneId": "3228578419", "status": "active"}],
+                }
+            ]
+        }
+        manifest = {
+            "scenes": [
+                {
+                    "id": "arona-template",
+                    "sourceSceneId": "3228578419",
+                    "name": "Sleeping Arona Template",
+                    "variants": [
+                        {"id": "3228578419-day", "name": "Day", "gates": ["quick"], "baselinePrefix": "3228578419-day"},
+                    ],
+                }
+            ]
+        }
+
+        self.assertEqual(runner.validate_coverage_matrix(matrix, manifest), [])
+
+    def test_manifest_includes_elaina_time_variants_as_deep_candidates(self):
+        manifest_path = Path(__file__).resolve().parent / "scenes.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+        cases = runner.expand_manifest_scenes(manifest)
+        elaina_cases = [case for case in cases if case.get("sourceSceneId") == "3326873240"]
+
+        self.assertEqual(
+            [case["id"] for case in elaina_cases],
+            [
+                "3326873240-morning",
+                "3326873240-day",
+                "3326873240-dusk",
+                "3326873240-night",
+                "3326873240-gradient",
+            ],
+        )
+        self.assertEqual([case.get("gates") for case in elaina_cases], [["deep"]] * 5)
+        self.assertEqual(
+            [case["scenePropertyOverrides"] for case in elaina_cases],
+            [
+                {"timevarying": False, "display": "0"},
+                {"timevarying": False, "display": "1"},
+                {"timevarying": False, "display": "2"},
+                {"timevarying": False, "display": "3"},
+                {"timevarying": False, "display": "4"},
+            ],
+        )
+        self.assertEqual(
+            [case["captures"][0]["baseline"] for case in elaina_cases],
+            [
+                "3326873240-morning/stills/still-10000.png",
+                "3326873240-day/stills/still-10000.png",
+                "3326873240-dusk/stills/still-10000.png",
+                "3326873240-night/stills/still-10000.png",
+                "3326873240-gradient/stills/still-10000.png",
+            ],
+        )
 
     def test_coverage_bucket_summary_accepts_candidate_for_phase_one(self):
         matrix = {

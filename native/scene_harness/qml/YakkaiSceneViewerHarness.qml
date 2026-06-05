@@ -11,8 +11,15 @@ Item {
     property bool muted: true
     property string debugEffectCapturesPath: ""
     property string debugEffectCaptureCommand: ""
+    property int debugEffectCaptureDelayMs: 0
     property string debugEffectProbeLayers: ""
     property string debugEffectProbeHighRiskLayers: ""
+    property string debugEffectProbeChannelMapSlots: ""
+    property string debugEffectProbeMaxEffects: ""
+    property string debugPuppetEffectFinalMesh: ""
+    property bool debugPuppetEffectRouteOnly: false
+    property string debugPuppetAnimationLayerOverrides: ""
+    property string scenePropertiesJson: ""
 
     signal firstFrameReady()
 
@@ -62,8 +69,15 @@ Item {
         anchors.fill: parent
         debugEffectCapturesPath: root.debugEffectCapturesPath
         debugEffectCaptureCommand: root.debugEffectCaptureCommand
+        debugEffectCaptureDelayMs: root.debugEffectCaptureDelayMs
         debugEffectProbeLayers: root.debugEffectProbeLayers
         debugEffectProbeHighRiskLayers: root.debugEffectProbeHighRiskLayers
+        debugEffectProbeChannelMapSlots: root.debugEffectProbeChannelMapSlots
+        debugEffectProbeMaxEffects: root.debugEffectProbeMaxEffects
+        debugPuppetEffectFinalMesh: root.debugPuppetEffectFinalMesh
+        debugPuppetEffectRouteOnly: root.debugPuppetEffectRouteOnly
+        debugPuppetAnimationLayerOverrides: root.debugPuppetAnimationLayerOverrides
+        scenePropertiesJson: root.scenePropertiesJson
         source: root.sceneSource
         assets: root.assetsUrl(root.assetsPath)
         fillMode: root.sceneFillMode()

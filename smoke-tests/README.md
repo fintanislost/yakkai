@@ -2,7 +2,7 @@
 
 The smoke-test harness is the local visual regression gate for Wallpaper Engine scene rendering.
 
-`quick`, `deep`, and `release` currently contain the same baselined required scenes. Add optional candidates only after reviewing the local asset and promoting baselines.
+`quick` and `release` keep stable required coverage. `deep` can include additional visual variants for renderer-risk states. Arona is split into deterministic Day/Sunset/Night variants so LUT changes are tested without depending on the local clock. Elaina `3326873240` is split into deep-only Morning/Day/Dusk/Night/Day Night Gradient candidates for SceneScript and time-mode review.
 
 ## Commands
 
@@ -22,6 +22,14 @@ The smoke-test harness is the local visual regression gate for Wallpaper Engine 
 - `review`: visual drift exceeded the warning threshold but not the hard-fail threshold. The command exits zero unless `--strict` is set.
 - `fail`: blank frames, missing expected motion, structural errors, shader/material errors, required dependency failures, missing expected frames, capture size mismatches, or large visual drift.
 - `skip`: local Workshop assets are missing. Skips exit zero unless `--require-assets` is set for required scenes.
+
+## Scene Variants
+
+Scene entries in `scenes.json` can define `variants`. Variants inherit base fields such as source, required status, captures, sequences, thresholds, features, and expectations, while supplying their own ids, names, gates, baseline prefixes, and property overrides.
+
+`scenePropertyOverrides` values are raw Wallpaper Engine user-property values. The runner loads the scene's `project.json` defaults, merges the overrides over those defaults, and passes compact JSON to the harness with `--scene-properties-json`.
+
+`baselinePrefix` moves inherited capture and sequence baseline paths into a variant-specific directory, so related cases can share schedules without sharing PNG baselines.
 
 ## Baselines
 

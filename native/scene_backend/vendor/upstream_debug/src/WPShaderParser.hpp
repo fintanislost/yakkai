@@ -3,7 +3,7 @@
 #include <span>
 #include "Scene/Scene.h"
 #include "Scene/SceneShader.h"
-#include "Type.hpp"
+#include "Shader/ShaderTypes.hpp"
 
 namespace wallpaper
 {
@@ -11,8 +11,6 @@ namespace fs
 {
 class VFS;
 }
-using Combos = Map<std::string, std::string>;
-
 // ui material name to gl uniform name
 using WPAliasValueDict = Map<std::string, std::string>;
 
@@ -46,6 +44,10 @@ struct WPShaderUnit {
 
 class WPShaderParser {
 public:
+    static std::string ApplySourceAlphaPreservePatch(const std::string& src,
+                                                     const Combos& combos,
+                                                     ShaderType type);
+
     static std::string PreShaderSrc(fs::VFS&, const std::string& src, WPShaderInfo* pWPShaderInfo,
                                     const std::vector<WPShaderTexInfo>& texs);
 

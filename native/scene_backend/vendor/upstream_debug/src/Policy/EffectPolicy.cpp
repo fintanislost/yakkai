@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstdint>
+#include <cmath>
+#include <limits>
 #include <utility>
 
 namespace wallpaper::policy {
@@ -297,6 +300,9 @@ std::string diagnosticChainShape(const CandidateClassification& classification)
         if (const std::string shape = carrierShape(riskyShape, "composelayer"); !shape.empty()) {
             return shape;
         }
+        if (classification.candidateChecks.waterOnly) {
+            return "water-composelayer";
+        }
         return "carrier-mixed";
     }
     if (classification.candidateChecks.isUtilityCarrier) {
@@ -306,11 +312,17 @@ std::string diagnosticChainShape(const CandidateClassification& classification)
         if (const std::string shape = carrierShape(riskyShape, "utility"); !shape.empty()) {
             return shape;
         }
+        if (classification.candidateChecks.waterOnly) {
+            return "water-utility";
+        }
         return "carrier-mixed";
     }
     if (classification.candidateChecks.isFullscreen) {
         if (const std::string shape = carrierShape(riskyShape, "fullscreen"); !shape.empty()) {
             return shape;
+        }
+        if (classification.candidateChecks.waterOnly) {
+            return "water-fullscreen";
         }
         return "carrier-mixed";
     }
@@ -321,6 +333,80 @@ std::string diagnosticChainShape(const CandidateClassification& classification)
         return "unknown-mixed";
     }
     return "simple-water";
+}
+
+std::string diagnosticEffectClass(const CandidateClassification& classification)
+{
+    const bool hasBlur = classification.candidateChecks.hasBlurFamily;
+    const bool hasLut = classification.candidateChecks.hasLutFamily;
+    const bool hasColorGrade = classification.candidateChecks.hasColorGradingFamily;
+    if (classification.candidateChainShape == "water-composelayer") {
+        return "composelayer-water-only";
+    }
+    if (classification.candidateChainShape == "water-utility") {
+        return "utility-water-only";
+    }
+    if (classification.candidateChainShape == "water-fullscreen") {
+        return "fullscreen-water-only";
+    }
+    if (!hasBlur && !hasLut && !hasColorGrade) {
+        return "none";
+    }
+
+    if (hasBlur && !hasLut && !hasColorGrade) {
+        if (classification.candidateChecks.isProtectedPuppetPath) {
+            return "protected-puppet-blur";
+        }
+        if (classification.candidateChecks.isPuppetLayer) {
+            return "mixed-puppet-blur";
+        }
+        if (classification.candidateChecks.isComposelayer) {
+            return "composelayer-blur";
+        }
+        if (classification.candidateChecks.isUtilityCarrier) {
+            return "utility-blur";
+        }
+        if (classification.candidateChecks.isFullscreen) {
+            return "fullscreen-blur";
+        }
+        if (classification.candidateChainShape == "blur-only") {
+            return "regular-blur-only";
+        }
+        return "mixed-blur";
+    }
+
+    if (classification.candidateChecks.isProtectedPuppetPath) {
+        if (hasLut) {
+            return "protected-puppet-lut";
+        }
+        return "protected-puppet-color-grade";
+    }
+    if (classification.candidateChecks.isPuppetLayer) {
+        if (hasLut) {
+            return "mixed-puppet-lut";
+        }
+        return "mixed-puppet-color-grade";
+    }
+    if (classification.candidateChecks.isComposelayer) {
+        if (hasColorGrade) {
+            return "composelayer-color-grade";
+        }
+        return "composelayer-lut";
+    }
+
+    if (classification.candidateChainShape == "lut-only") {
+        return "regular-lut-only";
+    }
+    if (classification.candidateChainShape == "color-grade-only") {
+        return "regular-color-grade-only";
+    }
+    if (hasLut && hasColorGrade) {
+        return "mixed-lut-color-grade";
+    }
+    if (hasLut) {
+        return "mixed-lut";
+    }
+    return "mixed-color-grade";
 }
 
 bool fieldIsStrictWater(std::string_view value)
@@ -422,6 +508,94 @@ bool isFlareOrLensLayer(std::string_view layerName)
            layerName.find("lens") != std::string_view::npos;
 }
 
+bool isProtectedPuppetSafeMixFamily(std::string_view family)
+{
+    return family == "lut" || family == "pulse" || family == "shake";
+}
+
+bool isPuppetWaterSafeMixFamily(std::string_view family)
+{
+    return family == "opacity" || family == "shine" || family == "iris";
+}
+
+bool hasOnlyProtectedPuppetSafeFamilies(const CandidateClassification& classification)
+{
+    const auto& checks = classification.candidateChecks;
+    const bool hasSafeFamily = checks.hasWaterFamily ||
+                               std::any_of(classification.candidateMixFamilies.begin(),
+                                           classification.candidateMixFamilies.end(),
+                                           isProtectedPuppetSafeMixFamily);
+    if (!hasSafeFamily) {
+        return false;
+    }
+    return std::all_of(classification.candidateMixFamilies.begin(),
+                       classification.candidateMixFamilies.end(),
+                       isProtectedPuppetSafeMixFamily);
+}
+
+bool isPromotableProtectedPuppetEffect(const CandidateClassification& classification)
+{
+    const auto& checks = classification.candidateChecks;
+    return checks.isProtectedPuppetPath &&
+           checks.isPuppetLayer &&
+           hasOnlyProtectedPuppetSafeFamilies(classification) &&
+           !checks.hasBlurFamily &&
+           !checks.hasColorGradingFamily &&
+           !checks.isComposelayer &&
+           !checks.isFullscreen &&
+           !checks.isUtilityCarrier;
+}
+
+bool isPromotablePuppetWaterEffect(const CandidateClassification& classification)
+{
+    const auto& checks = classification.candidateChecks;
+    return checks.isPuppetLayer &&
+           !checks.isProtectedPuppetPath &&
+           checks.hasWaterFamily &&
+           std::all_of(classification.candidateMixFamilies.begin(),
+                       classification.candidateMixFamilies.end(),
+                       isPuppetWaterSafeMixFamily) &&
+           !checks.hasBlurFamily &&
+           !checks.hasLutFamily &&
+           !checks.hasColorGradingFamily &&
+           !checks.isComposelayer &&
+           !checks.isFullscreen &&
+           !checks.isUtilityCarrier;
+}
+
+int viewportExtentFromObject(float objectExtent)
+{
+    if (! std::isfinite(objectExtent) || objectExtent <= 0.0f) {
+        return 1;
+    }
+    const float clamped = std::min(objectExtent, static_cast<float>(std::numeric_limits<uint16_t>::max()));
+    return std::max(1, static_cast<int>(clamped));
+}
+
+int viewportExtentFromBounds(float objectExtent, float minPosition, float maxPosition)
+{
+    constexpr float kMeaningfulMeshOverflowRatio = 0.03f;
+    constexpr float kMeshOverflowEpsilonPx = 0.5f;
+    const int baseExtent = viewportExtentFromObject(objectExtent);
+    const float meaningfulOverflow =
+        std::max(kMeshOverflowEpsilonPx, static_cast<float>(baseExtent) * kMeaningfulMeshOverflowRatio);
+    const float baseHalfExtent = baseExtent / 2.0f;
+    float requiredHalfExtent = baseHalfExtent;
+    if (std::isfinite(minPosition)) {
+        requiredHalfExtent = std::max(requiredHalfExtent, std::abs(minPosition));
+    }
+    if (std::isfinite(maxPosition)) {
+        requiredHalfExtent = std::max(requiredHalfExtent, std::abs(maxPosition));
+    }
+    const float overflow = requiredHalfExtent - baseHalfExtent;
+    if (overflow <= meaningfulOverflow) {
+        return baseExtent;
+    }
+    const float requiredExtent =
+        std::min(requiredHalfExtent * 2.0f, static_cast<float>(std::numeric_limits<uint16_t>::max()));
+    return std::max(1, static_cast<int>(std::ceil(requiredExtent)));
+}
+
 } // namespace
 
 CandidateClassification classifyStrippedEffectCandidate(const LayerEffectInput& input)
@@ -472,6 +646,7 @@ CandidateClassification classifyStrippedEffectCandidate(const LayerEffectInput& 
     }
 
     classification.candidateChainShape = diagnosticChainShape(classification);
+    classification.candidateEffectClass = diagnosticEffectClass(classification);
 
     return classification;
 }
@@ -527,6 +702,34 @@ LayerEffectDecision decideLayerEffects(const LayerEffectInput& input)
             decision.reason = "simple-water-effect";
             return decision;
         }
+        if (candidateClassification.candidateChainShape == "lut-only") {
+            decision.reason = "lut-only-effect";
+            return decision;
+        }
+        if (candidateClassification.candidateEffectClass == "regular-blur-only") {
+            decision.reason = "regular-blur-only-effect";
+            return decision;
+        }
+        if (candidateClassification.candidateEffectClass == "utility-blur") {
+            decision.reason = "utility-blur-effect";
+            return decision;
+        }
+        if (candidateClassification.candidateEffectClass == "composelayer-color-grade") {
+            decision.reason = "composelayer-color-grade-effect";
+            return decision;
+        }
+        if (candidateClassification.candidateEffectClass == "composelayer-water-only") {
+            decision.reason = "composelayer-water-effect";
+            return decision;
+        }
+        if (isPromotablePuppetWaterEffect(candidateClassification)) {
+            decision.reason = "puppet-water-effect";
+            return decision;
+        }
+        if (isPromotableProtectedPuppetEffect(candidateClassification)) {
+            decision.reason = "protected-puppet-effect";
+            return decision;
+        }
 
         decision.keepEffects = false;
         decision.strippedEffects = true;
@@ -537,11 +740,87 @@ LayerEffectDecision decideLayerEffects(const LayerEffectInput& input)
         return decision;
     }
 
-    if (input.alpha == 0.0f) {
-        decision.forceAlphaOne = true;
-    }
     decision.reason = "essential-effect";
     return decision;
+}
+
+EffectPublishRouteDecision decideEffectPublishRoute(const EffectPublishRouteInput& input)
+{
+    EffectPublishRouteDecision route;
+
+    if (input.puppetLayer) {
+        const bool deferredPuppetFinal =
+            input.puppetFinalMeshOverride == "deferred-puppet-final" ||
+            (! input.usePuppetChannelMapPrepass &&
+             ! input.standalonePuppetFinalDisplay);
+        route.effectInputMeshKind =
+            input.usePuppetChannelMapPrepass
+                ? "puppet-channelmap-base-uv-mesh"
+                : deferredPuppetFinal ? "card" : "puppet-skinned-mesh";
+        route.effectInputMaterialPreservesLayerBlendMode =
+            input.standalonePuppetFinalDisplay;
+        route.effectFinalMeshKind =
+            (input.usePuppetChannelMapPrepass || deferredPuppetFinal)
+                ? "puppet-skinned-mesh"
+                : "flat-card";
+        if (input.standalonePuppetFinalDisplay) {
+            if (input.usePuppetChannelMapPrepass) {
+                route.standaloneFinalMeshKind =
+                    input.hasActivePuppetChannelBlendSlots
+                        ? "puppet-image-space-filtered-overlay-or-puppet-skinned-mesh"
+                        : "suppressed";
+                route.standaloneFinalMaterialUsesPuppetSkinning =
+                    route.standaloneFinalMeshKind != "suppressed";
+            } else {
+                route.standaloneFinalMeshKind =
+                    input.puppetFinalMeshOverride == "image-space"
+                        ? "puppet-image-space-mesh"
+                        : "layer-card";
+            }
+        }
+    } else {
+        route.effectInputMeshKind = "card";
+        route.effectFinalMeshKind =
+            (input.fullscreen || input.composelayer) ? "fullscreen-card" : "card";
+    }
+
+    if (input.standalonePuppetFinalDisplay) {
+        route.finalDisplayRoute = "standalone-puppet-final-display";
+        route.standaloneDisplayAttachMode = "original-parent-sibling";
+    } else if (input.composelayer) {
+        route.finalDisplayRoute = "effect-layer-composite-final-publish";
+    } else if (input.fullscreen) {
+        route.finalDisplayRoute = "effect-layer-fullscreen-final-publish";
+    } else {
+        route.finalDisplayRoute = "effect-layer-node-final-publish";
+    }
+
+    if (input.puppetLayer && input.standalonePuppetFinalDisplay &&
+        route.standaloneFinalMeshKind == "flat-card") {
+        route.routeRisk = "puppet-effect-output-displayed-as-flat-card";
+    }
+
+    return route;
+}
+
+LayerEffectViewportDecision decideLayerEffectViewport(const LayerEffectViewportInput& input)
+{
+    LayerEffectViewportDecision viewport;
+    viewport.width = viewportExtentFromObject(input.objectWidth);
+    viewport.height = viewportExtentFromObject(input.objectHeight);
+
+    if (! input.hasMeshBounds) {
+        return viewport;
+    }
+
+    viewport.width =
+        viewportExtentFromBounds(input.objectWidth, input.meshPositionMinX, input.meshPositionMaxX);
+    viewport.height =
+        viewportExtentFromBounds(input.objectHeight, input.meshPositionMinY, input.meshPositionMaxY);
+    viewport.expandedToMeshBounds =
+        viewport.width > viewportExtentFromObject(input.objectWidth) ||
+        viewport.height > viewportExtentFromObject(input.objectHeight);
+    return viewport;
 }
 
 } // namespace wallpaper::policy

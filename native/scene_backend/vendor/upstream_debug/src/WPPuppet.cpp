@@ -1,9 +1,43 @@
 #include "WPPuppet.hpp"
+#include "Puppet/PuppetSimulation.hpp"
+#include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include "Utils/Logging.h"
 
 using namespace wallpaper;
 using namespace Eigen;
+
+PuppetSimulationMode wallpaper::ParsePuppetSimulationMode(std::string_view value) {
+    if (value == "diagnostic") {
+        return PuppetSimulationMode::Diagnostic;
+    }
+    if (value == "runtime") {
+        return PuppetSimulationMode::Runtime;
+    }
+    return PuppetSimulationMode::Off;
+}
+
+static PuppetSimulationMode ReadPuppetSimulationModeFromEnvironment()
+{
+    const char* raw = std::getenv("YAKKAI_PUPPET_SIMULATION");
+    return ParsePuppetSimulationMode(raw == nullptr ? std::string_view() : std::string_view(raw));
+}
+
+static PuppetSimulationBoneInput ToSimulationBoneInput(const WPPuppet::Bone& bone)
+{
+    return {
+        .hasParent = !bone.noParent(),
+        .parent = bone.parent,
+        .metadata = {
+            .valid = bone.parsedSimulationMetadata.valid,
+            .physicsActive = bone.parsedSimulationMetadata.physicsActive,
+            .targetPointPresent = bone.parsedSimulationMetadata.targetPointPresent,
+            .targetPoint = bone.parsedSimulationMetadata.targetPoint,
+            .targetMass = bone.parsedSimulationMetadata.targetMass,
+        },
+    };
+}
 
 static Quaterniond ToQuaternion(Vector3f euler) {
     const std::array<Vector3d, 3> axis { Vector3d::UnitX(), Vector3d::UnitY(), Vector3d::UnitZ() };
@@ -136,6 +170,10 @@ std::span<const Eigen::Affine3f> WPPuppet::genFrame(WPPuppetLayer& puppet_layer,
         affine = parent * affine;
     }
 
+    if (puppet_layer.m_simulationMode == PuppetSimulationMode::Runtime) {
+        puppet_layer.applySimulationForFrame(time, bones, m_final_affines);
+    }
+
     for (uint i = 0; i < m_final_affines.size(); i++) {
         m_final_affines[i] *= bones[i].offset_trans.matrix();
     }
@@ -151,6 +189,24 @@ static constexpr void genInterpolationInfo(WPPuppet::Animation::InterpolationInf
     info.frame_a = ((uint)_rate) % length;
     info.frame_b = (info.frame_a + 1) % length;
     info.t       = _rate - (double)info.frame_a;
+}
+
+static bool HasMeaningfulAuthoredDelta(const WPPuppet::Animation::BoneFrames& frames)
+{
+    if (frames.frames.size() < 2) {
+        return false;
+    }
+
+    const auto& base = frames.frames.front();
+    for (size_t i = 1; i < frames.frames.size(); ++i) {
+        const auto& frame = frames.frames[i];
+        if ((frame.position - base.position).norm() > 1.0e-4f ||
+            (frame.scale - base.scale).norm() > 1.0e-4f ||
+            (frame.angle - base.angle).norm() > 1.0e-4f) {
+            return true;
+        }
+    }
+    return false;
 }
 
 WPPuppet::Animation::InterpolationInfo
@@ -181,7 +237,23 @@ WPPuppet::Animation::getInterpolationInfo(double* cur_time) const {
 }
 
 void WPPuppetLayer::prepared(std::span<AnimationLayer> alayers) {
+    if (!m_simulationModeExplicit) {
+        m_simulationMode = ReadPuppetSimulationModeFromEnvironment();
+    }
+
     m_layers.resize(alayers.size());
+    m_simulationBones.clear();
+    m_simulationAuthoredDeltaBones.clear();
+    m_simulationStates.clear();
+    if (m_puppet) {
+        m_simulationBones.reserve(m_puppet->bones.size());
+        for (const auto& bone : m_puppet->bones) {
+            m_simulationBones.push_back(ToSimulationBoneInput(bone));
+        }
+        m_simulationAuthoredDeltaBones.resize(m_puppet->bones.size(), false);
+        m_simulationStates.resize(m_puppet->bones.size());
+    }
+
     double& blend = m_global_blend;
     double& total_blend = m_total_blend;
 
@@ -219,12 +291,34 @@ void WPPuppetLayer::prepared(std::span<AnimationLayer> alayers) {
                 }
             }
 
+            std::vector<bool> authoredDeltaBones;
+            if (ok) {
+                authoredDeltaBones.reserve(it->bframes_array.size());
+                for (const auto& frames : it->bframes_array) {
+                    authoredDeltaBones.push_back(HasMeaningfulAuthoredDelta(frames));
+                }
+            }
+
             return Layer {
                 .anim_layer = layer,
                 .blend      = cur_blend,
                 .anim       = ok ? std::addressof(*it) : nullptr,
+                .authoredDeltaBones = std::move(authoredDeltaBones),
             };
         });
+
+    for (size_t i = 0; i < m_simulationAuthoredDeltaBones.size(); ++i) {
+        for (const auto& layer : m_layers) {
+            if (layer.anim == nullptr || !layer.anim_layer.visible) {
+                continue;
+            }
+            if (i < layer.authoredDeltaBones.size() &&
+                layer.authoredDeltaBones[i]) {
+                m_simulationAuthoredDeltaBones[i] = true;
+                break;
+            }
+        }
+    }
 }
 
 std::span<const Eigen::Affine3f> WPPuppetLayer::genFrame(double time) noexcept {
@@ -240,6 +334,38 @@ void WPPuppetLayer::updateInterpolation(double time) noexcept {
             layer.interp_info = layer.anim->getInterpolationInfo(&(layer.anim_layer.cur_time));
         }
     }
+}
+
+bool WPPuppetLayer::isBoneEligibleForSimulationForTests(size_t boneIndex) const
+{
+    if (!m_puppet || boneIndex >= m_puppet->bones.size()) {
+        return false;
+    }
+    if (boneIndex >= m_simulationBones.size()) {
+        return false;
+    }
+
+    return IsBoneEligibleForRuntimeSimulation(
+        m_simulationBones[boneIndex],
+        boneIndex < m_simulationAuthoredDeltaBones.size() &&
+            m_simulationAuthoredDeltaBones[boneIndex]);
+}
+
+void WPPuppetLayer::applySimulationForFrame(
+    double dt,
+    const std::vector<WPPuppet::Bone>& bones,
+    std::vector<Eigen::Affine3f>& worldAffines)
+{
+    if (m_simulationBones.size() != bones.size()) {
+        m_simulationBones.clear();
+        m_simulationBones.reserve(bones.size());
+        for (const auto& bone : bones) {
+            m_simulationBones.push_back(ToSimulationBoneInput(bone));
+        }
+    }
+
+    ApplyRuntimePuppetSimulationStep(
+        dt, m_simulationBones, m_simulationAuthoredDeltaBones, m_simulationStates, worldAffines);
 }
 
 WPPuppetLayer::WPPuppetLayer(std::shared_ptr<WPPuppet> pup): m_puppet(pup) {}

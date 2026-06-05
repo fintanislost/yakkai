@@ -19,5 +19,8 @@ wallpapers/logs.txt
 /smoke-tests/*.mp4
 /smoke-tests/*.webm
 /references/
+/yakkai_arona/
+/yakkai-reference/
+/yakkai-references/
 /md-fixes/
 /AGENTS.md

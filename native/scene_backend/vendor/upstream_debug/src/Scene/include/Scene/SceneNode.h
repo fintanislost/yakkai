@@ -58,6 +58,7 @@ public:
     Eigen::Matrix4d GetLocalTrans() const;
 
     const auto& Translate() const { return m_translate; }
+    const auto& Scale() const { return m_scale; }
     const auto& Rotation() const { return m_rotation; }
     void        SetRotation(Eigen::Vector3f v) {
                m_rotation = v;

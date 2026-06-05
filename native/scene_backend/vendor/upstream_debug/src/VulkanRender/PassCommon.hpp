@@ -23,7 +23,7 @@ inline void SetBlend(BlendMode bm, VkPipelineColorBlendAttachmentState& state) {
     case BlendMode::Translucent:
         state.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
         state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-        state.srcAlphaBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
         state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         break;
     case BlendMode::Additive:
@@ -32,6 +32,12 @@ inline void SetBlend(BlendMode bm, VkPipelineColorBlendAttachmentState& state) {
         state.srcAlphaBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
         state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
         break;
+    case BlendMode::PremultipliedTranslucent:
+        state.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        break;
     }
 }
 inline void SetAttachmentLoadOp(BlendMode bm, VkAttachmentLoadOp& load_op) {
@@ -39,6 +45,7 @@ inline void SetAttachmentLoadOp(BlendMode bm, VkAttachmentLoadOp& load_op) {
     case BlendMode::Disable:
     case BlendMode::Normal: load_op = VK_ATTACHMENT_LOAD_OP_DONT_CARE; break;
     case BlendMode::Additive:
+    case BlendMode::PremultipliedTranslucent:
     case BlendMode::Translucent: load_op = VK_ATTACHMENT_LOAD_OP_LOAD; break;
     }
 }

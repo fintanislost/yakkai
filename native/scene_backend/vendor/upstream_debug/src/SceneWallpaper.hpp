@@ -23,8 +23,14 @@ constexpr std::string_view PROPERTY_FIRST_FRAME_CALLBACK = "first_frame_callback
 constexpr std::string_view PROPERTY_SCENE_PROPERTIES_JSON = "scene_properties_json";
 constexpr std::string_view PROPERTY_DEBUG_EFFECT_CAPTURES = "debug_effect_captures";
 constexpr std::string_view PROPERTY_DEBUG_EFFECT_CAPTURE_COMMAND = "debug_effect_capture_command";
+constexpr std::string_view PROPERTY_DEBUG_EFFECT_CAPTURE_DELAY_MS = "debug_effect_capture_delay_ms";
 constexpr std::string_view PROPERTY_DEBUG_EFFECT_PROBE_LAYERS = "debug_effect_probe_layers";
 constexpr std::string_view PROPERTY_DEBUG_EFFECT_PROBE_HIGH_RISK_LAYERS = "debug_effect_probe_high_risk_layers";
+constexpr std::string_view PROPERTY_DEBUG_EFFECT_PROBE_CHANNELMAP_SLOTS = "debug_effect_probe_channelmap_slots";
+constexpr std::string_view PROPERTY_DEBUG_EFFECT_PROBE_MAX_EFFECTS = "debug_effect_probe_max_effects";
+constexpr std::string_view PROPERTY_DEBUG_PUPPET_EFFECT_FINAL_MESH = "debug_puppet_effect_final_mesh";
+constexpr std::string_view PROPERTY_DEBUG_PUPPET_EFFECT_ROUTE_ONLY = "debug_puppet_effect_route_only";
+constexpr std::string_view PROPERTY_DEBUG_PUPPET_ANIMATION_LAYER_OVERRIDES = "debug_puppet_animation_layer_overrides";
 
 #include "Core/NoCopyMove.hpp"
 class MainHandler;

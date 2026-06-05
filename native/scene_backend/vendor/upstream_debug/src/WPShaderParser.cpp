@@ -1,6 +1,7 @@
 #include "WPShaderParser.hpp"
 
 #include "Fs/IBinaryStream.h"
+#include "Shader/ShaderCompatPatches.hpp"
 #include "Utils/Logging.h"
 #include "WPJson.hpp"
 
@@ -68,6 +69,7 @@ static constexpr const char* pre_shader_code_vert = R"(
 static constexpr const char* pre_shader_code_frag = R"(
 #define varying in
 #define gl_FragColor glOutColor
+#define clip(x) if ((x) < 0.0) discard
 out vec4 glOutColor;
 
 )";
@@ -294,6 +296,7 @@ inline std::string Preprocessor(const std::string& in_src, ShaderType type, cons
     std::string res;
 
     std::string src = wallpaper::WPShaderParser::PreShaderHeader(in_src, combos, type);
+    src = wallpaper::ApplySourceAlphaPreservePatch(src, combos, type);
 
     // Resolve #require directives — WE injects these at runtime.
     // We provide our own implementations.
@@ -674,6 +677,13 @@ std::string WPShaderParser::PreShaderHeader(const std::string& src, const Combos
         header.append("#define " + cup + " " + c.second + "\n");
     }
     return header + src;
+}
+
+std::string WPShaderParser::ApplySourceAlphaPreservePatch(const std::string& src,
+                                                          const Combos& combos,
+                                                          ShaderType type)
+{
+    return wallpaper::ApplySourceAlphaPreservePatch(src, combos, type);
 }
 
 void WPShaderParser::InitGlslang() { glslang::InitializeProcess(); }

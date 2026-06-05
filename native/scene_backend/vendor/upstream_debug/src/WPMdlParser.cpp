@@ -9,9 +9,12 @@
 #include "wpscene/WPMaterial.h"
 #include "WPShaderParser.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <sstream>
 
 using namespace wallpaper;
 
@@ -35,6 +38,113 @@ WPPuppet::PlayMode ToPlayMode(std::string_view m) {
 
     LOG_ERROR("unknown puppet animation play mode \"%s\"", m.data());
     return WPPuppet::PlayMode::Loop;
+}
+
+bool ParseFloatTripleString(const std::string& value, std::array<float, 3>& out)
+{
+    std::istringstream stream(value);
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+    stream >> x >> y >> z;
+    if (!stream) {
+        return false;
+    }
+
+    std::string extra;
+    if (stream >> extra) {
+        return false;
+    }
+
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
+        return false;
+    }
+
+    out = { x, y, z };
+    return true;
+}
+
+bool ParseFloatTripleJson(const nlohmann::json& value, std::array<float, 3>& out)
+{
+    if (value.is_string()) {
+        return ParseFloatTripleString(value.get<std::string>(), out);
+    }
+    if (!value.is_array() || value.size() != 3) {
+        return false;
+    }
+
+    std::array<float, 3> parsed { 0.0f, 0.0f, 0.0f };
+    for (size_t i = 0; i < parsed.size(); ++i) {
+        if (!value[i].is_number()) {
+            return false;
+        }
+        parsed[i] = value[i].get<float>();
+        if (!std::isfinite(parsed[i])) {
+            return false;
+        }
+    }
+
+    out = parsed;
+    return true;
+}
+
+bool ParseFloatJson(const nlohmann::json& value, float& out)
+{
+    if (value.is_number()) {
+        out = value.get<float>();
+        return std::isfinite(out);
+    }
+    if (!value.is_string()) {
+        return false;
+    }
+
+    std::istringstream stream(value.get<std::string>());
+    float parsed = 0.0f;
+    stream >> parsed;
+    if (!stream) {
+        return false;
+    }
+
+    std::string extra;
+    if (stream >> extra) {
+        return false;
+    }
+
+    out = parsed;
+    return std::isfinite(out);
+}
+
+bool JsonBoolTrue(const nlohmann::json& metadata, std::string_view key)
+{
+    const auto it = metadata.find(std::string(key));
+    return it != metadata.end() && it->is_boolean() && it->get<bool>();
+}
+
+bool JsonNonNull(const nlohmann::json& metadata, std::string_view key)
+{
+    const auto it = metadata.find(std::string(key));
+    return it != metadata.end() && !it->is_null();
+}
+
+bool HasActiveBonePhysicsMetadata(const nlohmann::json& metadata)
+{
+    static constexpr std::array<std::string_view, 8> boolKeys {
+        "r", "t", "ik", "ikg", "ikr", "se", "ge", "re",
+    };
+    for (const std::string_view key : boolKeys) {
+        if (JsonBoolTrue(metadata, key)) {
+            return true;
+        }
+    }
+
+    static constexpr std::array<std::string_view, 2> valueKeys { "s", "a" };
+    for (const std::string_view key : valueKeys) {
+        if (JsonNonNull(metadata, key)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 } // namespace
 
@@ -76,6 +186,16 @@ uint32_t VertexStride(MdlVertexFormat format) {
             return static_singile_vertex;
     }
     return singile_vertex;
+}
+
+std::array<float, 2> NormalizeTextureMapRate(const std::array<float, 2>& textureMapRate) {
+    std::array<float, 2> normalized { 1.0f, 1.0f };
+    for (size_t i = 0; i < normalized.size(); ++i) {
+        if (std::isfinite(textureMapRate[i]) && textureMapRate[i] > 0.0f) {
+            normalized[i] = textureMapRate[i];
+        }
+    }
+    return normalized;
 }
 
 bool ReadStatic56VertexBlock(fs::IBinaryStream& f, uint32_t vertex_size,
@@ -352,6 +472,36 @@ bool SeekNextPuppetAnimationHeader(fs::IBinaryStream& f,
 }
 } // namespace
 
+WPPuppet::Bone::SimulationMetadata
+WPMdlParser::ParseBoneSimulationMetadata(std::string_view raw)
+{
+    WPPuppet::Bone::SimulationMetadata parsed;
+    if (raw.empty()) {
+        return parsed;
+    }
+
+    parsed.present = true;
+    try {
+        const auto metadata = nlohmann::json::parse(raw);
+        if (!metadata.is_object()) {
+            return parsed;
+        }
+
+        parsed.valid = true;
+        parsed.physicsActive = HasActiveBonePhysicsMetadata(metadata);
+        if (auto it = metadata.find("tp"); it != metadata.end()) {
+            parsed.targetPointPresent = ParseFloatTripleJson(*it, parsed.targetPoint);
+        }
+        if (auto it = metadata.find("tm"); it != metadata.end()) {
+            parsed.targetMassPresent = ParseFloatJson(*it, parsed.targetMass);
+        }
+    } catch (const nlohmann::json::exception&) {
+        return parsed;
+    }
+
+    return parsed;
+}
+
 bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
     auto str_path = std::string(path);
     auto pfile    = vfs.Open("/assets/" + str_path);
@@ -513,6 +663,7 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
     for (uint i = 0; i < bones_num; i++) {
         auto&       bone = bones[i];
         std::string name = f.ReadStr();
+        bone.name = name;
         f.ReadInt32(); // unk
 
         bone.parent = f.ReadUint32();
@@ -534,6 +685,8 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
         }
 
         std::string bone_simulation_json = f.ReadStr();
+        bone.simulationMetadata = bone_simulation_json;
+        bone.parsedSimulationMetadata = ParseBoneSimulationMetadata(bone_simulation_json);
         /*
         auto trans = bone.transform.translation();
         LOG_INFO("trans: %f %f %f", trans[0], trans[1], trans[2]);
@@ -681,7 +834,8 @@ bool WPMdlParser::Parse(std::string_view path, fs::VFS& vfs, WPMdl& mdl) {
 
 void WPMdlParser::GenPuppetMesh(SceneMesh& mesh,
                                 const WPMdl::Submesh& mdl,
-                                const Eigen::Matrix3f& basis) {
+                                const Eigen::Matrix3f& basis,
+                                const std::array<float, 2>& textureMapRate) {
     SceneVertexArray vertex({ { WE_IN_POSITION.data(), VertexType::FLOAT3 },
                               { WE_IN_BLENDINDICES.data(), VertexType::UINT4 },
                               { WE_IN_BLENDWEIGHTS.data(), VertexType::FLOAT4 },
@@ -692,6 +846,8 @@ void WPMdlParser::GenPuppetMesh(SceneMesh& mesh,
     if (! basisLinear.allFinite()) {
         basisLinear = Eigen::Matrix3f::Identity();
     }
+    const std::array<float, 2> normalizedTextureMapRate =
+        NormalizeTextureMapRate(textureMapRate);
 
     std::array<float, 16> one_vert;
     auto                  to_one = [](const WPMdl::Vertex& in, decltype(one_vert)& out) {
@@ -705,6 +861,8 @@ void WPMdlParser::GenPuppetMesh(SceneMesh& mesh,
         auto  v = mdl.vertexs[i];
         const Eigen::Vector3f position = basisLinear * Eigen::Vector3f(v.position.data());
         std::copy_n(position.data(), 3, v.position.begin());
+        v.texcoord[0] *= normalizedTextureMapRate[0];
+        v.texcoord[1] *= normalizedTextureMapRate[1];
         to_one(v, one_vert);
         vertex.SetVertexs(i, one_vert);
     }
@@ -717,21 +875,108 @@ void WPMdlParser::GenPuppetMesh(SceneMesh& mesh,
     mesh.AddIndexArray(SceneIndexArray(indices));
 }
 
+std::vector<uint32_t> WPMdlParser::ExpandPuppetActiveBlendSlots(
+    const WPMdl&              mdl,
+    std::span<const uint32_t> activeBlendSlots) {
+    std::vector<uint32_t> expanded;
+    const auto addSlot = [&expanded](uint32_t slot) {
+        if (std::find(expanded.begin(), expanded.end(), slot) == expanded.end()) {
+            expanded.push_back(slot);
+        }
+    };
+    for (const uint32_t slot : activeBlendSlots) {
+        addSlot(slot);
+    }
+
+    if (! mdl.puppet || mdl.puppet->bones.empty()) {
+        return expanded;
+    }
+
+    const size_t boneCount = mdl.puppet->bones.size();
+    std::vector<size_t> primaryVertexCounts(boneCount, 0);
+    std::vector<size_t> weightedVertexCounts(boneCount, 0);
+    for (const auto& vertex : mdl.vertexs) {
+        const uint32_t primarySlot = vertex.blend_indices[0];
+        if (primarySlot < boneCount) {
+            primaryVertexCounts[primarySlot] += 1;
+        }
+        for (size_t i = 0; i < vertex.blend_indices.size() && i < vertex.weight.size(); ++i) {
+            if (vertex.weight[i] <= 1.0e-3f) {
+                continue;
+            }
+            const uint32_t weightedSlot = vertex.blend_indices[i];
+            if (weightedSlot < boneCount) {
+                weightedVertexCounts[weightedSlot] += 1;
+            }
+        }
+    }
+
+    std::vector<bool> activeMask(boneCount, false);
+    for (const uint32_t slot : expanded) {
+        if (slot < boneCount) {
+            activeMask[slot] = true;
+        }
+    }
+
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (size_t slot = 0; slot < boneCount; ++slot) {
+            if (activeMask[slot] || primaryVertexCounts[slot] != 0 ||
+                weightedVertexCounts[slot] == 0) {
+                continue;
+            }
+
+            uint32_t parent = mdl.puppet->bones[slot].parent;
+            std::vector<bool> visited(boneCount, false);
+            while (parent < boneCount && ! visited[parent]) {
+                if (activeMask[parent]) {
+                    activeMask[slot] = true;
+                    addSlot(static_cast<uint32_t>(slot));
+                    changed = true;
+                    break;
+                }
+                visited[parent] = true;
+                if (mdl.puppet->bones[parent].noParent()) {
+                    break;
+                }
+                parent = mdl.puppet->bones[parent].parent;
+            }
+        }
+    }
+
+    return expanded;
+}
+
 void WPMdlParser::GenPuppetMesh(SceneMesh& mesh, const WPMdl& mdl) {
-    GenPuppetMesh(mesh, WPMdl::Submesh { mdl.mat_json_file, mdl.vertexs, mdl.indices }, Eigen::Matrix3f::Identity());
+    GenPuppetMesh(mesh,
+                  WPMdl::Submesh { mdl.mat_json_file, mdl.vertexs, mdl.indices },
+                  Eigen::Matrix3f::Identity());
+}
+
+void WPMdlParser::GenPuppetMesh(SceneMesh&                  mesh,
+                                const WPMdl&                mdl,
+                                const std::array<float, 2>& textureMapRate) {
+    GenPuppetMesh(mesh,
+                  WPMdl::Submesh { mdl.mat_json_file, mdl.vertexs, mdl.indices },
+                  Eigen::Matrix3f::Identity(),
+                  textureMapRate);
 }
 
 bool WPMdlParser::GenPuppetMesh(SceneMesh&                mesh,
                                 const WPMdl&              mdl,
                                 std::span<const uint32_t> activePrimaryBlendSlots,
-                                bool                      includeFullyActiveTriangles) {
+                                bool                      includeFullyActiveTriangles,
+                                const std::array<float, 2>& textureMapRate) {
     auto buildFilteredSubmesh = [&](WPMdl::Submesh& outSubmesh) {
-        if (activePrimaryBlendSlots.empty()) {
+        const std::vector<uint32_t> expandedActiveBlendSlots =
+            ExpandPuppetActiveBlendSlots(mdl, activePrimaryBlendSlots);
+        if (expandedActiveBlendSlots.empty()) {
             return false;
         }
 
         std::array<bool, 64> activeSlotMask {};
-        for (const uint32_t slot : activePrimaryBlendSlots) {
+        for (const uint32_t slot : expandedActiveBlendSlots) {
             activeSlotMask[std::min<size_t>(slot, activeSlotMask.size() - 1)] = true;
         }
 
@@ -803,11 +1048,11 @@ bool WPMdlParser::GenPuppetMesh(SceneMesh&                mesh,
 
     WPMdl::Submesh filteredSubmesh;
     if (! buildFilteredSubmesh(filteredSubmesh)) {
-        GenPuppetMesh(mesh, mdl);
+        GenPuppetMesh(mesh, mdl, textureMapRate);
         return activePrimaryBlendSlots.empty();
     }
 
-    GenPuppetMesh(mesh, filteredSubmesh, Eigen::Matrix3f::Identity());
+    GenPuppetMesh(mesh, filteredSubmesh, Eigen::Matrix3f::Identity(), textureMapRate);
     return true;
 }
 
@@ -855,12 +1100,14 @@ bool WPMdlParser::GenPuppetImageSpaceMesh(SceneMesh&                  mesh,
                                           std::span<const uint32_t>   activePrimaryBlendSlots,
                                           bool                        includeFullyActiveTriangles) {
     auto buildFilteredSubmesh = [&](WPMdl::Submesh& outSubmesh) {
-        if (activePrimaryBlendSlots.empty()) {
+        const std::vector<uint32_t> expandedActiveBlendSlots =
+            ExpandPuppetActiveBlendSlots(mdl, activePrimaryBlendSlots);
+        if (expandedActiveBlendSlots.empty()) {
             return false;
         }
 
         std::array<bool, 64> activeSlotMask {};
-        for (const uint32_t slot : activePrimaryBlendSlots) {
+        for (const uint32_t slot : expandedActiveBlendSlots) {
             activeSlotMask[std::min<size_t>(slot, activeSlotMask.size() - 1)] = true;
         }
 

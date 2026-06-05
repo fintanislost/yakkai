@@ -15,6 +15,14 @@ spec.loader.exec_module(scene_visual_sentinels)
 
 
 class SceneVisualSentinelTests(unittest.TestCase):
+    def hand_presence(self, matching_fraction=0.35):
+        return {
+            "left_character_extended_hand": scene_visual_sentinels.ColorPresenceStats(
+                name="left_character_extended_hand",
+                matching_fraction=matching_fraction,
+            )
+        }
+
     def test_clear_color_leak_detects_flat_region_near_clear_color(self):
         stats = scene_visual_sentinels.RegionStats(
             name="mid_wall",
@@ -83,6 +91,7 @@ class SceneVisualSentinelTests(unittest.TestCase):
             "3476236738",
             stats,
             clear_rgb=(126.0, 136.0, 166.0),
+            color_presence_by_region=self.hand_presence(),
         )
 
         self.assertFalse(result.passed)
@@ -121,10 +130,90 @@ class SceneVisualSentinelTests(unittest.TestCase):
             "3476236738",
             stats,
             clear_rgb=(126.0, 136.0, 166.0),
+            color_presence_by_region=self.hand_presence(),
         )
 
         self.assertTrue(result.passed)
         self.assertIn("1 clear-color-like region", result.detail)
+
+    def test_3476236738_fails_when_extended_hand_region_lacks_foreground(self):
+        stats = {
+            "mid_wall_between_chars": scene_visual_sentinels.RegionStats(
+                name="mid_wall_between_chars",
+                mean_rgb=(120.0, 150.0, 190.0),
+                stddev_rgb=(25.0, 30.0, 28.0),
+                unique_colors=900,
+            ),
+            "right_wall_under_window": scene_visual_sentinels.RegionStats(
+                name="right_wall_under_window",
+                mean_rgb=(120.0, 150.0, 190.0),
+                stddev_rgb=(25.0, 30.0, 28.0),
+                unique_colors=900,
+            ),
+            "gray_band_right": scene_visual_sentinels.RegionStats(
+                name="gray_band_right",
+                mean_rgb=(100.0, 120.0, 190.0),
+                stddev_rgb=(20.0, 25.0, 24.0),
+                unique_colors=700,
+            ),
+        }
+
+        result = scene_visual_sentinels.evaluate_scene_sentinel(
+            "3476236738",
+            stats,
+            clear_rgb=(126.0, 136.0, 166.0),
+            color_presence_by_region=self.hand_presence(matching_fraction=0.08),
+        )
+
+        self.assertFalse(result.passed)
+        self.assertIn("left_character_extended_hand=0.080<min=0.200", result.detail)
+
+    def test_region_delta_summary_compares_probe_to_baseline_regions(self):
+        baseline = {
+            "mid_wall_between_chars": scene_visual_sentinels.RegionStats(
+                name="mid_wall_between_chars",
+                mean_rgb=(90.0, 120.0, 150.0),
+                stddev_rgb=(20.0, 22.0, 18.0),
+                unique_colors=800,
+            ),
+            "right_wall_under_window": scene_visual_sentinels.RegionStats(
+                name="right_wall_under_window",
+                mean_rgb=(140.0, 180.0, 220.0),
+                stddev_rgb=(30.0, 28.0, 25.0),
+                unique_colors=1200,
+            ),
+        }
+        probe = {
+            "mid_wall_between_chars": scene_visual_sentinels.RegionStats(
+                name="mid_wall_between_chars",
+                mean_rgb=(93.0, 124.0, 150.0),
+                stddev_rgb=(21.0, 20.0, 22.0),
+                unique_colors=760,
+            ),
+            "right_wall_under_window": scene_visual_sentinels.RegionStats(
+                name="right_wall_under_window",
+                mean_rgb=(140.0, 180.0, 220.0),
+                stddev_rgb=(30.0, 28.0, 25.0),
+                unique_colors=1200,
+            ),
+        }
+
+        deltas = scene_visual_sentinels.compare_region_stats(baseline, probe)
+        summary = scene_visual_sentinels.format_region_delta_summary(deltas)
+
+        self.assertAlmostEqual(
+            deltas["mid_wall_between_chars"].mean_rgb_distance,
+            5.0,
+        )
+        self.assertEqual(deltas["mid_wall_between_chars"].unique_delta, -40)
+        self.assertIn(
+            "mid_wall_between_chars meanRgbDistance=5.000 maxStddevDelta=4.000 uniqueDelta=-40",
+            summary,
+        )
+        self.assertIn(
+            "right_wall_under_window meanRgbDistance=0.000 maxStddevDelta=0.000 uniqueDelta=0",
+            summary,
+        )
 
 
 if __name__ == "__main__":

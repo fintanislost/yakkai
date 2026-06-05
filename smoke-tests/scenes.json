@@ -28,7 +28,6 @@
       "name": "Sleeping Arona",
       "workshopUrl": "https://steamcommunity.com/sharedfiles/filedetails/?id=3228578419",
       "source": "${workshop}/3228578419/scene.pkg",
-      "gates": ["quick", "deep", "release"],
       "required": true,
       "features": ["puppet", "flare", "particles", "alpha-sensitive-effects"],
       "captures": [
@@ -54,7 +53,36 @@
       "expectations": {
         "motion": true,
         "manualReview": ["camera angle", "visible desk/background/character", "lens flare intensity", "halo glow", "sleep particles"]
-      }
+      },
+      "variants": [
+        {
+          "id": "3228578419-day",
+          "name": "Sleeping Arona - Day",
+          "gates": ["quick", "deep", "release"],
+          "baselinePrefix": "3228578419-day",
+          "scenePropertyOverrides": {
+            "timeofday": "1"
+          }
+        },
+        {
+          "id": "3228578419-sunset",
+          "name": "Sleeping Arona - Sunset",
+          "gates": ["deep"],
+          "baselinePrefix": "3228578419-sunset",
+          "scenePropertyOverrides": {
+            "timeofday": "2"
+          }
+        },
+        {
+          "id": "3228578419-night",
+          "name": "Sleeping Arona - Night",
+          "gates": ["deep"],
+          "baselinePrefix": "3228578419-night",
+          "scenePropertyOverrides": {
+            "timeofday": "3"
+          }
+        }
+      ]
     },
     {
       "id": "3327063360",
@@ -83,6 +111,81 @@
         "motion": true,
         "manualReview": ["video progression", "green particles", "background composition", "color balance"]
       }
+    },
+    {
+      "id": "3326873240",
+      "name": "Elaina Day Night Gradient",
+      "workshopUrl": "https://steamcommunity.com/sharedfiles/filedetails/?id=3326873240",
+      "source": "${workshop}/3326873240/scene.pkg",
+      "required": false,
+      "features": ["scene-script", "time-variant", "video-texture", "media-integration"],
+      "captures": [
+        {
+          "name": "still-10000",
+          "timeMs": 10000,
+          "baseline": "3326873240/stills/still-10000.png"
+        }
+      ],
+      "thresholds": {
+        "rmseReview": 0.04,
+        "rmseFail": 0.12
+      },
+      "expectations": {
+        "motion": true,
+        "manualReview": ["time-period color state", "foreground/background elements", "video texture", "missing media panel layers"]
+      },
+      "variants": [
+        {
+          "id": "3326873240-morning",
+          "name": "Elaina - Morning",
+          "gates": ["deep"],
+          "baselinePrefix": "3326873240-morning",
+          "scenePropertyOverrides": {
+            "timevarying": false,
+            "display": "0"
+          }
+        },
+        {
+          "id": "3326873240-day",
+          "name": "Elaina - Day",
+          "gates": ["deep"],
+          "baselinePrefix": "3326873240-day",
+          "scenePropertyOverrides": {
+            "timevarying": false,
+            "display": "1"
+          }
+        },
+        {
+          "id": "3326873240-dusk",
+          "name": "Elaina - Dusk",
+          "gates": ["deep"],
+          "baselinePrefix": "3326873240-dusk",
+          "scenePropertyOverrides": {
+            "timevarying": false,
+            "display": "2"
+          }
+        },
+        {
+          "id": "3326873240-night",
+          "name": "Elaina - Night",
+          "gates": ["deep"],
+          "baselinePrefix": "3326873240-night",
+          "scenePropertyOverrides": {
+            "timevarying": false,
+            "display": "3"
+          }
+        },
+        {
+          "id": "3326873240-gradient",
+          "name": "Elaina - Day Night Gradient",
+          "gates": ["deep"],
+          "baselinePrefix": "3326873240-gradient",
+          "scenePropertyOverrides": {
+            "timevarying": false,
+            "display": "4"
+          }
+        }
+      ]
     }
   ]
 }

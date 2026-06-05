@@ -21,8 +21,14 @@ class SceneObject : public QQuickItem {
     Q_PROPERTY(QString scenePropertiesJson READ scenePropertiesJson WRITE setScenePropertiesJson NOTIFY scenePropertiesJsonChanged)
     Q_PROPERTY(QString debugEffectCapturesPath READ debugEffectCapturesPath WRITE setDebugEffectCapturesPath NOTIFY debugEffectCapturesPathChanged)
     Q_PROPERTY(QString debugEffectCaptureCommand READ debugEffectCaptureCommand WRITE setDebugEffectCaptureCommand NOTIFY debugEffectCaptureCommandChanged)
+    Q_PROPERTY(int debugEffectCaptureDelayMs READ debugEffectCaptureDelayMs WRITE setDebugEffectCaptureDelayMs NOTIFY debugEffectCaptureDelayMsChanged)
     Q_PROPERTY(QString debugEffectProbeLayers READ debugEffectProbeLayers WRITE setDebugEffectProbeLayers NOTIFY debugEffectProbeLayersChanged)
     Q_PROPERTY(QString debugEffectProbeHighRiskLayers READ debugEffectProbeHighRiskLayers WRITE setDebugEffectProbeHighRiskLayers NOTIFY debugEffectProbeHighRiskLayersChanged)
+    Q_PROPERTY(QString debugEffectProbeChannelMapSlots READ debugEffectProbeChannelMapSlots WRITE setDebugEffectProbeChannelMapSlots NOTIFY debugEffectProbeChannelMapSlotsChanged)
+    Q_PROPERTY(QString debugEffectProbeMaxEffects READ debugEffectProbeMaxEffects WRITE setDebugEffectProbeMaxEffects NOTIFY debugEffectProbeMaxEffectsChanged)
+    Q_PROPERTY(QString debugPuppetEffectFinalMesh READ debugPuppetEffectFinalMesh WRITE setDebugPuppetEffectFinalMesh NOTIFY debugPuppetEffectFinalMeshChanged)
+    Q_PROPERTY(bool debugPuppetEffectRouteOnly READ debugPuppetEffectRouteOnly WRITE setDebugPuppetEffectRouteOnly NOTIFY debugPuppetEffectRouteOnlyChanged)
+    Q_PROPERTY(QString debugPuppetAnimationLayerOverrides READ debugPuppetAnimationLayerOverrides WRITE setDebugPuppetAnimationLayerOverrides NOTIFY debugPuppetAnimationLayerOverridesChanged)
     Q_PROPERTY(int fps READ fps WRITE setFps NOTIFY fpsChanged)
     Q_PROPERTY(int fillMode READ fillMode WRITE setFillMode NOTIFY fillModeChanged)
     Q_PROPERTY(float speed READ speed WRITE setSpeed NOTIFY speedChanged)
@@ -45,15 +51,27 @@ public:
     QString scenePropertiesJson() const;
     QString debugEffectCapturesPath() const;
     QString debugEffectCaptureCommand() const;
+    int debugEffectCaptureDelayMs() const;
     QString debugEffectProbeLayers() const;
     QString debugEffectProbeHighRiskLayers() const;
+    QString debugEffectProbeChannelMapSlots() const;
+    QString debugEffectProbeMaxEffects() const;
+    QString debugPuppetEffectFinalMesh() const;
+    bool debugPuppetEffectRouteOnly() const;
+    QString debugPuppetAnimationLayerOverrides() const;
     void setSource(const QUrl& source);
     void setAssets(const QUrl& assets);
     void setScenePropertiesJson(const QString& value);
     void setDebugEffectCapturesPath(const QString& value);
     void setDebugEffectCaptureCommand(const QString& value);
+    void setDebugEffectCaptureDelayMs(int value);
     void setDebugEffectProbeLayers(const QString& value);
     void setDebugEffectProbeHighRiskLayers(const QString& value);
+    void setDebugEffectProbeChannelMapSlots(const QString& value);
+    void setDebugEffectProbeMaxEffects(const QString& value);
+    void setDebugPuppetEffectFinalMesh(const QString& value);
+    void setDebugPuppetEffectRouteOnly(bool value);
+    void setDebugPuppetAnimationLayerOverrides(const QString& value);
 
     int   fps() const;
     int   fillMode() const;
@@ -90,8 +108,14 @@ signals:
     void scenePropertiesJsonChanged();
     void debugEffectCapturesPathChanged();
     void debugEffectCaptureCommandChanged();
+    void debugEffectCaptureDelayMsChanged();
     void debugEffectProbeLayersChanged();
     void debugEffectProbeHighRiskLayersChanged();
+    void debugEffectProbeChannelMapSlotsChanged();
+    void debugEffectProbeMaxEffectsChanged();
+    void debugPuppetEffectFinalMeshChanged();
+    void debugPuppetEffectRouteOnlyChanged();
+    void debugPuppetAnimationLayerOverridesChanged();
     void fpsChanged();
     void fillModeChanged();
     void speedChanged();
@@ -105,8 +129,14 @@ private:
     QString m_scenePropertiesJson;
     QString m_debugEffectCapturesPath;
     QString m_debugEffectCaptureCommand;
+    int m_debugEffectCaptureDelayMs { 0 };
     QString m_debugEffectProbeLayers;
     QString m_debugEffectProbeHighRiskLayers;
+    QString m_debugEffectProbeChannelMapSlots;
+    QString m_debugEffectProbeMaxEffects;
+    QString m_debugPuppetEffectFinalMesh;
+    bool m_debugPuppetEffectRouteOnly { false };
+    QString m_debugPuppetAnimationLayerOverrides;
 
     int   m_fps { 15 };
     int   m_fillMode { FillMode::ASPECTCROP };

@@ -336,6 +336,58 @@ class EffectCaptureSummaryTests(unittest.TestCase):
         self.assertIn("strippedCandidates=0", completed.stdout)
         self.assertNotIn("stripped-candidate-risks:", completed.stdout)
 
+    def test_reports_protected_puppet_cutout_inventory(self):
+        manifest = {
+            "captures": [
+                {
+                    "stage": "effect-output",
+                    "layer": {
+                        "layerId": 405,
+                        "layerName": "Generic Crop Sheet",
+                        "candidateChainShape": "protected-puppet-mixed",
+                        "candidateEffectClass": "protected-puppet-lut",
+                        "candidateFamilies": ["waterwaves"],
+                        "candidateMixFamilies": ["lut", "shake"],
+                        "candidateChecks": {
+                            "isProtectedPuppetPath": True,
+                            "isPuppetLayer": True,
+                        },
+                        "policy": {"reason": "protected-puppet-effect", "keepEffects": True},
+                        "puppetAnimationLayers": [
+                            {
+                                "animationId": 781,
+                                "animationName": "Active",
+                                "visibleAndWeighted": True,
+                                "activeBoneSlots": [2],
+                            }
+                        ],
+                        "publish": {
+                            "puppetLayer": True,
+                            "puppetCutoutSlotCoverage": [
+                                {"slot": 2, "active": True, "vertexCount": 42, "triangleCount": 17},
+                                {"slot": 5, "active": False, "vertexCount": 11, "triangleCount": 4},
+                            ],
+                        },
+                    },
+                }
+            ],
+            "strippedCandidates": [],
+            "protectedPuppetDiagnostics": [],
+        }
+
+        completed = self.run_summary(manifest)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("protected-puppet-cutout-inventory=1", completed.stdout)
+        self.assertIn("layer=405", completed.stdout)
+        self.assertIn("activeAnimations=781", completed.stdout)
+        self.assertIn("activeSlots=2", completed.stdout)
+        self.assertIn(
+            "slotCoverage=2*:unnamed[none#unknown]:primary=42v/17t:weighted=42v/17t:sim=no,"
+            "5:unnamed[none#unknown]:primary=11v/4t:weighted=11v/4t:sim=no",
+            completed.stdout,
+        )
+
     def test_summarizes_nested_candidate_layer_shape(self):
         completed = self.run_summary({
             "sceneId": "3476236738",

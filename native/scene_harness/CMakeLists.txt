@@ -1,5 +1,7 @@
 qt_add_executable(yakkai_scene_harness
     src/main.cpp
+    src/PuppetSimulationOption.cpp
+    src/ScenePropertiesOption.cpp
 )
 
 target_link_libraries(yakkai_scene_harness
@@ -28,6 +30,8 @@ endif()
 
 add_executable(yakkai_scene_harness_tests
     tests/test_capture_gate.cpp
+    src/PuppetSimulationOption.cpp
+    src/ScenePropertiesOption.cpp
 )
 
 target_include_directories(yakkai_scene_harness_tests

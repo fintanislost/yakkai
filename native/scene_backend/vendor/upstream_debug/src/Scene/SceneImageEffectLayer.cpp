@@ -112,6 +112,14 @@ void SceneImageEffectLayer::ResolveEffect(const SceneMesh& default_mesh,
     }
     if (last_output != nullptr && m_publish_final_output) {
         last_output->output = SpecTex_Default;
+        if (! m_effects.empty()) {
+            const i32 finalNodePos = static_cast<i32>(m_effects.back()->nodes.size());
+            for (auto& cmd : m_effects.back()->commands) {
+                if (cmd.srcFinalEffectOutput && cmd.afterpos >= finalNodePos) {
+                    cmd.src = last_output->output;
+                }
+            }
+        }
         auto& mesh          = *(last_output->sceneNode->Mesh());
         auto& material      = *mesh.Material();
         {

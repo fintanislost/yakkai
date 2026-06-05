@@ -74,8 +74,15 @@ class YakkaiSceneViewer : public QQuickItem
     Q_PROPERTY(QString backendStatus READ backendStatus NOTIFY backendStatusChanged)
     Q_PROPERTY(QString debugEffectCapturesPath READ debugEffectCapturesPath WRITE setDebugEffectCapturesPath NOTIFY debugEffectCapturesPathChanged)
     Q_PROPERTY(QString debugEffectCaptureCommand READ debugEffectCaptureCommand WRITE setDebugEffectCaptureCommand NOTIFY debugEffectCaptureCommandChanged)
+    Q_PROPERTY(int debugEffectCaptureDelayMs READ debugEffectCaptureDelayMs WRITE setDebugEffectCaptureDelayMs NOTIFY debugEffectCaptureDelayMsChanged)
     Q_PROPERTY(QString debugEffectProbeLayers READ debugEffectProbeLayers WRITE setDebugEffectProbeLayers NOTIFY debugEffectProbeLayersChanged)
     Q_PROPERTY(QString debugEffectProbeHighRiskLayers READ debugEffectProbeHighRiskLayers WRITE setDebugEffectProbeHighRiskLayers NOTIFY debugEffectProbeHighRiskLayersChanged)
+    Q_PROPERTY(QString debugEffectProbeChannelMapSlots READ debugEffectProbeChannelMapSlots WRITE setDebugEffectProbeChannelMapSlots NOTIFY debugEffectProbeChannelMapSlotsChanged)
+    Q_PROPERTY(QString debugEffectProbeMaxEffects READ debugEffectProbeMaxEffects WRITE setDebugEffectProbeMaxEffects NOTIFY debugEffectProbeMaxEffectsChanged)
+    Q_PROPERTY(QString debugPuppetEffectFinalMesh READ debugPuppetEffectFinalMesh WRITE setDebugPuppetEffectFinalMesh NOTIFY debugPuppetEffectFinalMeshChanged)
+    Q_PROPERTY(bool debugPuppetEffectRouteOnly READ debugPuppetEffectRouteOnly WRITE setDebugPuppetEffectRouteOnly NOTIFY debugPuppetEffectRouteOnlyChanged)
+    Q_PROPERTY(QString debugPuppetAnimationLayerOverrides READ debugPuppetAnimationLayerOverrides WRITE setDebugPuppetAnimationLayerOverrides NOTIFY debugPuppetAnimationLayerOverridesChanged)
+    Q_PROPERTY(QString scenePropertiesJson READ scenePropertiesJson WRITE setScenePropertiesJson NOTIFY scenePropertiesJsonChanged)
 
 public:
     enum FillMode
@@ -123,11 +130,32 @@ public:
     QString debugEffectCaptureCommand() const;
     void setDebugEffectCaptureCommand(const QString& value);
 
+    int debugEffectCaptureDelayMs() const;
+    void setDebugEffectCaptureDelayMs(int value);
+
     QString debugEffectProbeLayers() const;
     void setDebugEffectProbeLayers(const QString& value);
 
     QString debugEffectProbeHighRiskLayers() const;
     void setDebugEffectProbeHighRiskLayers(const QString& value);
+
+    QString debugEffectProbeChannelMapSlots() const;
+    void setDebugEffectProbeChannelMapSlots(const QString& value);
+
+    QString debugEffectProbeMaxEffects() const;
+    void setDebugEffectProbeMaxEffects(const QString& value);
+
+    QString debugPuppetEffectFinalMesh() const;
+    void setDebugPuppetEffectFinalMesh(const QString& value);
+
+    bool debugPuppetEffectRouteOnly() const;
+    void setDebugPuppetEffectRouteOnly(bool value);
+
+    QString debugPuppetAnimationLayerOverrides() const;
+    void setDebugPuppetAnimationLayerOverrides(const QString& value);
+
+    QString scenePropertiesJson() const;
+    void setScenePropertiesJson(const QString& value);
 
     Q_INVOKABLE void requestGraphvizDump();
 
@@ -144,8 +172,15 @@ signals:
     void backendStatusChanged();
     void debugEffectCapturesPathChanged();
     void debugEffectCaptureCommandChanged();
+    void debugEffectCaptureDelayMsChanged();
     void debugEffectProbeLayersChanged();
     void debugEffectProbeHighRiskLayersChanged();
+    void debugEffectProbeChannelMapSlotsChanged();
+    void debugEffectProbeMaxEffectsChanged();
+    void debugPuppetEffectFinalMeshChanged();
+    void debugPuppetEffectRouteOnlyChanged();
+    void debugPuppetAnimationLayerOverridesChanged();
+    void scenePropertiesJsonChanged();
 
 private:
     void updateMouseAcceptance();
@@ -163,8 +198,15 @@ private:
     QString m_backendStatus;
     QString m_debugEffectCapturesPath;
     QString m_debugEffectCaptureCommand;
+    int m_debugEffectCaptureDelayMs = 0;
     QString m_debugEffectProbeLayers;
     QString m_debugEffectProbeHighRiskLayers;
+    QString m_debugEffectProbeChannelMapSlots;
+    QString m_debugEffectProbeMaxEffects;
+    QString m_debugPuppetEffectFinalMesh;
+    bool m_debugPuppetEffectRouteOnly = false;
+    QString m_debugPuppetAnimationLayerOverrides;
+    QString m_scenePropertiesJson;
 };
 
 #endif

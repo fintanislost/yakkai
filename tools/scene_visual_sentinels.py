@@ -34,11 +34,43 @@ class RegionStats:
 
 
 @dataclass(frozen=True)
+class ColorPresenceConfig:
+    name: str
+    x: int
+    y: int
+    width: int
+    height: int
+    min_rgb: tuple[float, float, float]
+    max_rgb: tuple[float, float, float]
+    max_blue_red_delta: float
+    min_fraction: float
+
+    @property
+    def crop_arg(self) -> str:
+        return f"{self.width}x{self.height}+{self.x}+{self.y}"
+
+
+@dataclass(frozen=True)
+class ColorPresenceStats:
+    name: str
+    matching_fraction: float
+
+
+@dataclass(frozen=True)
+class RegionDelta:
+    name: str
+    mean_rgb_distance: float
+    max_stddev_delta: float
+    unique_delta: int
+
+
+@dataclass(frozen=True)
 class VisualSentinelConfig:
     scene_id: str
     clear_rgb: tuple[float, float, float]
     regions: tuple[RegionConfig, ...]
     min_leak_regions: int
+    required_color_presence: tuple[ColorPresenceConfig, ...] = ()
     max_color_distance: float = 18.0
     max_channel_stddev: float = 12.0
     max_unique_colors: int = 250
@@ -61,6 +93,19 @@ SCENE_SENTINELS: dict[str, VisualSentinelConfig] = {
             RegionConfig("right_wall_under_window", 1020, 150, 240, 270),
             RegionConfig("gray_band_right", 1200, 320, 260, 200),
         ),
+        required_color_presence=(
+            ColorPresenceConfig(
+                name="left_character_extended_hand",
+                x=725,
+                y=535,
+                width=160,
+                height=55,
+                min_rgb=(89.25, 96.9, 122.4),
+                max_rgb=(183.6, 183.6, 216.75),
+                max_blue_red_delta=71.4,
+                min_fraction=0.20,
+            ),
+        ),
     ),
 }
 
@@ -70,6 +115,37 @@ _CLEAR_COLOR_RE = re.compile(r"tint-adjusted clear color:\s*\(([^)]+)\)")
 
 def color_distance(left: tuple[float, float, float], right: tuple[float, float, float]) -> float:
     return math.sqrt(sum((a - b) ** 2 for a, b in zip(left, right)))
+
+
+def compare_region_stats(
+    baseline_stats: dict[str, RegionStats],
+    probe_stats: dict[str, RegionStats],
+) -> dict[str, RegionDelta]:
+    deltas: dict[str, RegionDelta] = {}
+    for name in sorted(set(baseline_stats) & set(probe_stats)):
+        baseline = baseline_stats[name]
+        probe = probe_stats[name]
+        deltas[name] = RegionDelta(
+            name=name,
+            mean_rgb_distance=color_distance(baseline.mean_rgb, probe.mean_rgb),
+            max_stddev_delta=max(
+                abs(left - right)
+                for left, right in zip(baseline.stddev_rgb, probe.stddev_rgb)
+            ),
+            unique_delta=probe.unique_colors - baseline.unique_colors,
+        )
+    return deltas
+
+
+def format_region_delta_summary(deltas: dict[str, RegionDelta]) -> str:
+    if not deltas:
+        return "no comparable sentinel region deltas"
+    return "; ".join(
+        f"{name} meanRgbDistance={delta.mean_rgb_distance:.3f} "
+        f"maxStddevDelta={delta.max_stddev_delta:.3f} "
+        f"uniqueDelta={delta.unique_delta}"
+        for name, delta in sorted(deltas.items())
+    )
 
 
 def is_clear_color_leak(
@@ -163,10 +239,57 @@ def collect_scene_stats(scene_id: str, image: Path) -> dict[str, RegionStats]:
     return {region.name: collect_region_stats(image, region) for region in config.regions}
 
 
+def collect_color_presence_stats(
+    image: Path,
+    region: ColorPresenceConfig,
+) -> ColorPresenceStats:
+    min_r, min_g, min_b = (value / 255.0 for value in region.min_rgb)
+    max_r, max_g, max_b = (value / 255.0 for value in region.max_rgb)
+    max_blue_red_delta = region.max_blue_red_delta / 255.0
+    expression = (
+        f"(u.r>{min_r:.8f} && u.r<{max_r:.8f} && "
+        f"u.g>{min_g:.8f} && u.g<{max_g:.8f} && "
+        f"u.b>{min_b:.8f} && u.b<{max_b:.8f} && "
+        f"abs(u.b-u.r)<{max_blue_red_delta:.8f})?1:0"
+    )
+    fraction_text = _run_imagemagick(
+        [
+            "magick",
+            str(image),
+            "-crop",
+            region.crop_arg,
+            "+repage",
+            "-fx",
+            expression,
+            "-format",
+            "%[fx:mean]",
+            "info:",
+        ]
+    )
+    return ColorPresenceStats(
+        name=region.name,
+        matching_fraction=float(fraction_text),
+    )
+
+
+def collect_scene_color_presence_stats(
+    scene_id: str,
+    image: Path,
+) -> dict[str, ColorPresenceStats]:
+    config = SCENE_SENTINELS.get(scene_id)
+    if config is None:
+        return {}
+    return {
+        region.name: collect_color_presence_stats(image, region)
+        for region in config.required_color_presence
+    }
+
+
 def evaluate_scene_sentinel(
     scene_id: str,
     stats_by_region: dict[str, RegionStats],
     clear_rgb: tuple[float, float, float] | None = None,
+    color_presence_by_region: dict[str, ColorPresenceStats] | None = None,
 ) -> VisualSentinelResult:
     config = SCENE_SENTINELS.get(scene_id)
     if config is None:
@@ -199,10 +322,42 @@ def evaluate_scene_sentinel(
             + ",".join(leaked),
         )
 
+    color_presence_by_region = color_presence_by_region or {}
+    missing_presence = [
+        region.name
+        for region in config.required_color_presence
+        if region.name not in color_presence_by_region
+    ]
+    if missing_presence:
+        return VisualSentinelResult(
+            False,
+            "missing visual sentinel color-presence stats: " + ",".join(missing_presence),
+        )
+
+    weak_presence: list[str] = []
+    for region in config.required_color_presence:
+        stats = color_presence_by_region[region.name]
+        if stats.matching_fraction < region.min_fraction:
+            weak_presence.append(
+                f"{region.name}={stats.matching_fraction:.3f}<min={region.min_fraction:.3f}"
+            )
+    if weak_presence:
+        return VisualSentinelResult(
+            False,
+            "foreground regions lack expected color presence: " + ",".join(weak_presence),
+        )
+
     plural = "regions" if len(leaked) != 1 else "region"
+    presence_detail = ""
+    if config.required_color_presence:
+        presence_detail = "; color presence " + ",".join(
+            f"{region.name}={color_presence_by_region[region.name].matching_fraction:.3f}"
+            for region in config.required_color_presence
+        )
     return VisualSentinelResult(
         True,
-        f"{len(leaked)} clear-color-like {plural}; threshold={config.min_leak_regions}",
+        f"{len(leaked)} clear-color-like {plural}; threshold={config.min_leak_regions}"
+        + presence_detail,
     )
 
 
@@ -210,6 +365,7 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("scene_id")
     parser.add_argument("capture", type=Path)
+    parser.add_argument("--baseline", type=Path)
     parser.add_argument("--log", type=Path)
     args = parser.parse_args(argv)
 
@@ -227,12 +383,26 @@ def main(argv: list[str]) -> int:
 
     try:
         stats = collect_scene_stats(args.scene_id, args.capture)
+        color_presence_stats = collect_scene_color_presence_stats(args.scene_id, args.capture)
     except (subprocess.CalledProcessError, RuntimeError, ValueError) as exc:
         print(f"could not evaluate visual sentinel: {exc}", file=sys.stderr)
         return 1
 
-    result = evaluate_scene_sentinel(args.scene_id, stats, clear_rgb)
+    result = evaluate_scene_sentinel(args.scene_id, stats, clear_rgb, color_presence_stats)
     print(result.detail)
+    if args.baseline is not None:
+        if not args.baseline.exists():
+            print(f"baseline capture not found: {args.baseline}", file=sys.stderr)
+            return 1
+        try:
+            baseline_stats = collect_scene_stats(args.scene_id, args.baseline)
+        except (subprocess.CalledProcessError, RuntimeError, ValueError) as exc:
+            print(f"could not evaluate baseline visual sentinel: {exc}", file=sys.stderr)
+            return 1
+        print(
+            "region deltas vs baseline: "
+            + format_region_delta_summary(compare_region_stats(baseline_stats, stats))
+        )
     return 0 if result.passed else 1
 
 

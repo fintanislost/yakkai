@@ -127,7 +127,8 @@ SceneScriptResult SceneScriptContext::evaluateLayerScript(
     std::string_view script,
     const std::array<float, 3>& currentOrigin,
     const std::array<float, 3>& currentColor,
-    float currentAlpha)
+    float currentAlpha,
+    int32_t layerId)
 {
     SceneScriptResult result;
     auto* ctx = m_impl->ctx;
@@ -138,25 +139,23 @@ SceneScriptResult SceneScriptContext::evaluateLayerScript(
     // Provide thisLayer/thisScene stubs that WE scripts expect.
     std::ostringstream wrapper;
     wrapper << "(function() {\n";
-    wrapper << "var thisLayer = { color: new Vec3("
-            << currentColor[0] << "," << currentColor[1] << "," << currentColor[2]
-            << "), alpha: " << currentAlpha
-            << ", visible: true"
-            << ", origin: new Vec3("
+    wrapper << "var __val = new Vec3("
             << currentOrigin[0] << "," << currentOrigin[1] << "," << currentOrigin[2]
-            << ")"
-            << ", getTextureAnimation: function() { return {"
-            << "    getFrame: function() { return 0; },"
-            << "    frameCount: 1, duration: 1, fps: 30,"
-            << "    play: function() {}, stop: function() {}, pause: function() {}"
-            << "}; }"
-            << ", getVideoTexture: function() { return { rate: 1, play: function(){}, pause: function(){} }; }"
-            << " };\n";
-    wrapper << "var thisScene = { clearColor: new Vec3(0,0,0) };\n";
+            << ");\n";
+    wrapper << "var thisLayer = __makeSceneScriptLayer('layer_" << layerId << "', __val, new Vec3(1,1,1), new Vec3("
+            << currentColor[0] << "," << currentColor[1] << "," << currentColor[2]
+            << "), " << currentAlpha
+            << ");\n";
+    wrapper << "var thisScene = __makeSceneScriptScene();\n";
     wrapper << src << "\n";
-    wrapper << "if (typeof init === 'function') { try { init(); } catch(e) {} }\n";
+    wrapper << "if (typeof init === 'function') { try {"
+            << "  var __initRet = init(__val);"
+            << "  if (__initRet !== undefined) {"
+            << "    __val = __initRet;"
+            << "    if (typeof __initRet === 'object') thisLayer.origin = __initRet;"
+            << "  }"
+            << "} catch(e) {} }\n";
     wrapper << "if (typeof update === 'function') {\n"
-            << "  var __val = new Vec3(" << currentOrigin[0] << "," << currentOrigin[1] << "," << currentOrigin[2] << ");\n"
             << "  var __ret = update(__val);\n"
             << "  if (__ret) { thisLayer.origin = __ret; }\n"
             << "}\n"
@@ -183,8 +182,18 @@ SceneScriptResult SceneScriptContext::evaluateLayerScript(
         // Get stack trace for more context
         JSValue stack = JS_GetPropertyStr(ctx, exc, "stack");
         const char* stackStr = JS_ToCString(ctx, stack);
+        const std::string message = msg ? msg : "unknown";
+        const std::string stackMessage = stackStr ? stackStr : "n/a";
+        const auto gap = wallpaper::policy::classifySceneScriptRuntimeGap(message, stackMessage);
+        const std::string gapKind = wallpaper::policy::sceneScriptRuntimeGapKindText(gap.kind);
         LOG_INFO("SceneScript eval (non-fatal): %s | stack: %s",
-                 msg ? msg : "unknown", stackStr ? stackStr : "n/a");
+                 message.c_str(), stackMessage.c_str());
+        LOG_INFO("SceneScript gap: layer=%d class=%s api=%s reason=%s message=%s",
+                 layerId,
+                 gapKind.c_str(),
+                 gap.api.c_str(),
+                 gap.reason.c_str(),
+                 message.c_str());
         if (stackStr) JS_FreeCString(ctx, stackStr);
         JS_FreeValue(ctx, stack);
         if (msg) JS_FreeCString(ctx, msg);

@@ -23,6 +23,7 @@
 #include "VulkanRender/SceneToRenderGraph.hpp"
 #include "VulkanRender/VulkanRender.hpp"
 #include <nlohmann/json.hpp>
+#include <algorithm>
 #include <atomic>
 #include <fstream>
 
@@ -168,8 +169,14 @@ private:
     std::string m_scene_properties_json;
     std::string m_debug_effect_captures;
     std::string m_debug_effect_capture_command;
+    int32_t     m_debug_effect_capture_delay_ms { 0 };
     std::string m_debug_effect_probe_layers;
     std::string m_debug_effect_probe_high_risk_layers;
+    std::string m_debug_effect_probe_channelmap_slots;
+    std::string m_debug_effect_probe_max_effects;
+    std::string m_debug_puppet_effect_final_mesh;
+    bool        m_debug_puppet_effect_route_only { false };
+    std::string m_debug_puppet_animation_layer_overrides;
     bool        m_gen_graphviz { false };
 
     WPSceneParser                        m_scene_parser;
@@ -434,10 +441,22 @@ MHANDLER_CMD_IMPL(MainHandler, SET_PROPERTY) {
             msg->findString("value", &m_debug_effect_captures);
         } else if (property == PROPERTY_DEBUG_EFFECT_CAPTURE_COMMAND) {
             msg->findString("value", &m_debug_effect_capture_command);
+        } else if (property == PROPERTY_DEBUG_EFFECT_CAPTURE_DELAY_MS) {
+            msg->findInt32("value", &m_debug_effect_capture_delay_ms);
         } else if (property == PROPERTY_DEBUG_EFFECT_PROBE_LAYERS) {
             msg->findString("value", &m_debug_effect_probe_layers);
         } else if (property == PROPERTY_DEBUG_EFFECT_PROBE_HIGH_RISK_LAYERS) {
             msg->findString("value", &m_debug_effect_probe_high_risk_layers);
+        } else if (property == PROPERTY_DEBUG_EFFECT_PROBE_CHANNELMAP_SLOTS) {
+            msg->findString("value", &m_debug_effect_probe_channelmap_slots);
+        } else if (property == PROPERTY_DEBUG_EFFECT_PROBE_MAX_EFFECTS) {
+            msg->findString("value", &m_debug_effect_probe_max_effects);
+        } else if (property == PROPERTY_DEBUG_PUPPET_EFFECT_FINAL_MESH) {
+            msg->findString("value", &m_debug_puppet_effect_final_mesh);
+        } else if (property == PROPERTY_DEBUG_PUPPET_EFFECT_ROUTE_ONLY) {
+            msg->findBool("value", &m_debug_puppet_effect_route_only);
+        } else if (property == PROPERTY_DEBUG_PUPPET_ANIMATION_LAYER_OVERRIDES) {
+            msg->findString("value", &m_debug_puppet_animation_layer_overrides);
         } else if (property == PROPERTY_FIRST_FRAME_CALLBACK) {
             std::shared_ptr<FirstFrameCallback> cb;
             msg->findObject("value", &cb);
@@ -534,11 +553,25 @@ void MainHandler::loadScene() {
             LOG_ERROR("Not supported scene type");
             return;
         }
+        auto puppetAnimationLayerOverrides =
+            wallpaper::debug::parsePuppetAnimationLayerOverrideList(
+                m_debug_puppet_animation_layer_overrides);
+        if (! puppetAnimationLayerOverrides) {
+            LOG_ERROR("invalid debug puppet animation layer overrides: %s",
+                      m_debug_puppet_animation_layer_overrides.c_str());
+            puppetAnimationLayerOverrides = std::vector<wallpaper::debug::PuppetAnimationLayerOverride> {};
+        }
         m_scene_parser.SetDebugEffectCaptureConfig({
             .outputDir = m_debug_effect_captures,
             .commandLine = m_debug_effect_capture_command,
             .probeLayerIds = wallpaper::debug::parseProbeLayerIdList(m_debug_effect_probe_layers),
+            .captureDelayMs = std::max<int32_t>(0, m_debug_effect_capture_delay_ms),
             .highRiskProbeLayerIds = wallpaper::debug::parseProbeLayerIdList(m_debug_effect_probe_high_risk_layers),
+            .probeChannelMapSlots = wallpaper::debug::parseProbeChannelMapSlotList(m_debug_effect_probe_channelmap_slots),
+            .puppetAnimationLayerOverrides = *puppetAnimationLayerOverrides,
+            .probeMaxEffects = wallpaper::debug::parseProbeMaxEffects(m_debug_effect_probe_max_effects),
+            .puppetFinalMeshOverride = m_debug_puppet_effect_final_mesh,
+            .puppetEffectRouteOnly = m_debug_puppet_effect_route_only,
         });
         m_scene_parser.SetScenePropertiesJson(
             ResolveScenePropertiesJson(m_scene_properties_json, pkgDir));

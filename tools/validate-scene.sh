@@ -2,7 +2,10 @@
 # Scene render validator — validates rendering quality without visual comparison.
 # Used during active development iteration on specific scenes.
 #
-# Usage: ./tools/validate-scene.sh <scene_id> [--capture-delay-ms N] [--expect-file expectations.conf]
+# Usage: ./tools/validate-scene.sh <scene_id> [capture_delay_ms] [expect_file]
+#        ./tools/validate-scene.sh <scene_id> [capture_delay_ms] --probe-high-risk-layers ids
+#        ./tools/validate-scene.sh <scene_id> [capture_delay_ms] --probe-layers ids [--probe-max-effects n] [--probe-puppet-final-mesh layer-card|image-space] [--probe-puppet-route-only]
+#        ./tools/validate-scene.sh <scene_id> [capture_delay_ms] --puppet-simulation off|diagnostic|runtime
 #
 # Outputs structured PASS/FAIL results for:
 #   - Shader compilation (no failures)
@@ -20,18 +23,161 @@ HARNESS="build/native/scene_harness/yakkai_scene_harness"
 ASSETS="$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/wallpaper_engine/assets"
 WORKSHOP="$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/workshop/content/431960"
 OUTDIR="/tmp/yakkai-debug"
+CACHE_ROOT="$HOME/.cache/wescene-renderer"
 
 SCENE_ID="${1:?Usage: $0 <scene_id>}"
-CAPTURE_DELAY="${2:-10000}"
-EXPECT_FILE="${3:-}"
+CAPTURE_DELAY="10000"
+EXPECT_FILE=""
+PROBE_LAYERS="${YAKKAI_PROBE_LAYERS:-}"
+PROBE_HIGH_RISK_LAYERS="${YAKKAI_PROBE_HIGH_RISK_LAYERS:-}"
+PROBE_MAX_EFFECTS="${YAKKAI_PROBE_MAX_EFFECTS:-}"
+PROBE_PUPPET_FINAL_MESH="${YAKKAI_PROBE_PUPPET_FINAL_MESH:-}"
+PROBE_PUPPET_ROUTE_ONLY="${YAKKAI_PROBE_PUPPET_ROUTE_ONLY:-}"
+PUPPET_SIMULATION="${YAKKAI_PUPPET_SIMULATION:-}"
+
+shift
+if [ "${1:-}" != "" ] && [[ "${1:-}" != --* ]]; then
+    CAPTURE_DELAY="$1"
+    shift
+fi
+if [ "${1:-}" != "" ] && [[ "${1:-}" != --* ]]; then
+    EXPECT_FILE="$1"
+    shift
+fi
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --probe-layers)
+            PROBE_LAYERS="${2:-}"
+            if [ -z "$PROBE_LAYERS" ]; then
+                echo "FAIL: --probe-layers requires a comma-separated layer id list"
+                exit 1
+            fi
+            shift 2
+            ;;
+        --probe-high-risk-layers)
+            PROBE_HIGH_RISK_LAYERS="${2:-}"
+            if [ -z "$PROBE_HIGH_RISK_LAYERS" ]; then
+                echo "FAIL: --probe-high-risk-layers requires a comma-separated layer id list"
+                exit 1
+            fi
+            shift 2
+            ;;
+        --probe-max-effects)
+            PROBE_MAX_EFFECTS="${2:-}"
+            if [[ ! "$PROBE_MAX_EFFECTS" =~ ^[0-9]+$ ]]; then
+                echo "FAIL: --probe-max-effects requires a non-negative integer"
+                exit 1
+            fi
+            shift 2
+            ;;
+        --probe-puppet-final-mesh)
+            PROBE_PUPPET_FINAL_MESH="${2:-}"
+            if [ "$PROBE_PUPPET_FINAL_MESH" != "layer-card" ] && [ "$PROBE_PUPPET_FINAL_MESH" != "image-space" ]; then
+                echo "FAIL: --probe-puppet-final-mesh requires layer-card or image-space"
+                exit 1
+            fi
+            shift 2
+            ;;
+        --probe-puppet-route-only)
+            PROBE_PUPPET_ROUTE_ONLY="1"
+            shift
+            ;;
+        --expect-file)
+            EXPECT_FILE="${2:-}"
+            if [ -z "$EXPECT_FILE" ]; then
+                echo "FAIL: --expect-file requires a path"
+                exit 1
+            fi
+            shift 2
+            ;;
+        --puppet-simulation)
+            PUPPET_SIMULATION="${2:-}"
+            if [ -z "$PUPPET_SIMULATION" ]; then
+                echo "FAIL: --puppet-simulation requires off, diagnostic, or runtime"
+                exit 1
+            fi
+            shift 2
+            ;;
+        *)
+            echo "FAIL: unknown argument: $1"
+            exit 1
+            ;;
+    esac
+done
+
+if [ -n "$PROBE_LAYERS" ] && [ -n "$PROBE_HIGH_RISK_LAYERS" ]; then
+    echo "FAIL: use either --probe-layers or --probe-high-risk-layers, not both"
+    exit 1
+fi
+if [ -n "$PROBE_MAX_EFFECTS" ] && [ -z "$PROBE_LAYERS" ] && [ -z "$PROBE_HIGH_RISK_LAYERS" ]; then
+    echo "FAIL: --probe-max-effects requires --probe-layers or --probe-high-risk-layers"
+    exit 1
+fi
+if [ -n "$PROBE_PUPPET_FINAL_MESH" ] && [ -z "$PROBE_LAYERS" ] && [ -z "$PROBE_HIGH_RISK_LAYERS" ]; then
+    echo "FAIL: --probe-puppet-final-mesh requires --probe-layers or --probe-high-risk-layers"
+    exit 1
+fi
+if [ -n "$PROBE_PUPPET_ROUTE_ONLY" ] && [ "$PROBE_PUPPET_ROUTE_ONLY" != "0" ] &&
+   [ -z "$PROBE_LAYERS" ] && [ -z "$PROBE_HIGH_RISK_LAYERS" ]; then
+    echo "FAIL: --probe-puppet-route-only requires --probe-layers or --probe-high-risk-layers"
+    exit 1
+fi
+
+PROBE_KIND=""
+PROBE_IDS=""
+PROBE_TITLE=""
+PROBE_ARGS=()
+PUPPET_SIMULATION_ARGS=()
+if [ -n "$PROBE_LAYERS" ]; then
+    PROBE_KIND="layer"
+    PROBE_IDS="$PROBE_LAYERS"
+    PROBE_TITLE="Explicit Probe Replay"
+    PROBE_ARGS=(--debug-effect-probe-layers "$PROBE_LAYERS")
+elif [ -n "$PROBE_HIGH_RISK_LAYERS" ]; then
+    PROBE_KIND="high-risk"
+    PROBE_IDS="$PROBE_HIGH_RISK_LAYERS"
+    PROBE_TITLE="High-Risk Probe Replay"
+    PROBE_ARGS=(--debug-effect-probe-high-risk-layers "$PROBE_HIGH_RISK_LAYERS")
+fi
+if [ -n "$PROBE_MAX_EFFECTS" ]; then
+    PROBE_ARGS+=(--debug-effect-probe-max-effects "$PROBE_MAX_EFFECTS")
+fi
+if [ -n "$PROBE_PUPPET_FINAL_MESH" ]; then
+    PROBE_ARGS+=(--debug-puppet-effect-final-mesh "$PROBE_PUPPET_FINAL_MESH")
+fi
+if [ -n "$PROBE_PUPPET_ROUTE_ONLY" ] && [ "$PROBE_PUPPET_ROUTE_ONLY" != "0" ]; then
+    PROBE_ARGS+=(--debug-puppet-effect-route-only)
+fi
+if [ -n "$PUPPET_SIMULATION" ]; then
+    PUPPET_SIMULATION_ARGS=(--puppet-simulation "$PUPPET_SIMULATION")
+fi
 
 SCENE_PKG="$WORKSHOP/$SCENE_ID/scene.pkg"
 CAPTURE="$OUTDIR/validate-$SCENE_ID.png"
 LOG="$OUTDIR/validate-$SCENE_ID.log"
 EFFECT_DEBUG_DIR="$OUTDIR/effect-captures-$SCENE_ID"
 EFFECT_MANIFEST="$EFFECT_DEBUG_DIR/manifest.json"
+PROBE_ROUTE_SUFFIX="effects"
+if [ -n "$PROBE_PUPPET_ROUTE_ONLY" ] && [ "$PROBE_PUPPET_ROUTE_ONLY" != "0" ]; then
+    PROBE_ROUTE_SUFFIX="route-only"
+fi
+PROBE_SUFFIX=$(printf '%s-%s-max-%s-final-%s-%s' "$PROBE_KIND" "$PROBE_IDS" "${PROBE_MAX_EFFECTS:-all}" "${PROBE_PUPPET_FINAL_MESH:-default}" "$PROBE_ROUTE_SUFFIX" | tr -c '[:alnum:]' '_')
+PROBE_CAPTURE="$OUTDIR/validate-$SCENE_ID-probe-$PROBE_SUFFIX.png"
+PROBE_LOG="$OUTDIR/validate-$SCENE_ID-probe-$PROBE_SUFFIX.log"
+PROBE_EFFECT_DEBUG_DIR="$OUTDIR/effect-captures-$SCENE_ID-probe-$PROBE_SUFFIX"
+PROBE_EFFECT_MANIFEST="$PROBE_EFFECT_DEBUG_DIR/manifest.json"
 
 mkdir -p "$OUTDIR"
+
+clear_shader_cache() {
+    local count=0
+    if [ -d "$CACHE_ROOT" ]; then
+        count=$(find "$CACHE_ROOT" -path '*/spvs01' -type d 2>/dev/null | wc -l | tr -cd '0-9')
+        find "$CACHE_ROOT" -path '*/spvs01' -type d -exec rm -rf {} + 2>/dev/null || true
+    fi
+    : "${count:=0}"
+    echo "Cleared shader cache entries: $count"
+}
 
 if [ ! -f "$HARNESS" ]; then
     echo "FAIL: harness not found at $HARNESS — build first"
@@ -48,12 +194,32 @@ cp build/native/scene_backend/libyakkai_scene_backend.so \
 
 echo "=== Scene Render Validator: $SCENE_ID ==="
 echo "Capture delay: ${CAPTURE_DELAY}ms"
+if [ -n "$PROBE_LAYERS" ]; then
+    echo "Probe layers: $PROBE_LAYERS"
+fi
+if [ -n "$PROBE_HIGH_RISK_LAYERS" ]; then
+    echo "High-risk probe layers: $PROBE_HIGH_RISK_LAYERS"
+fi
+if [ -n "$PROBE_MAX_EFFECTS" ]; then
+    echo "Probe max effects: $PROBE_MAX_EFFECTS"
+fi
+if [ -n "$PROBE_PUPPET_FINAL_MESH" ]; then
+    echo "Probe puppet final mesh: $PROBE_PUPPET_FINAL_MESH"
+fi
+if [ -n "$PROBE_PUPPET_ROUTE_ONLY" ] && [ "$PROBE_PUPPET_ROUTE_ONLY" != "0" ]; then
+    echo "Probe puppet route-only: enabled"
+fi
+if [ -n "$PUPPET_SIMULATION" ]; then
+    echo "Puppet simulation: $PUPPET_SIMULATION"
+fi
 echo ""
 
 # Run the harness and capture output
+clear_shader_cache
 rm -f "$CAPTURE" "$LOG"
 rm -rf "$EFFECT_DEBUG_DIR"
 HARNESS_STATUS=0
+unset YAKKAI_PUPPET_SIMULATION
 "$HARNESS" --backend paper \
     --source "$SCENE_PKG" \
     --assets "$ASSETS" \
@@ -61,6 +227,7 @@ HARNESS_STATUS=0
     --capture "$CAPTURE" \
     --capture-delay-ms "$CAPTURE_DELAY" \
     --debug-effect-captures "$EFFECT_DEBUG_DIR" \
+    "${PUPPET_SIMULATION_ARGS[@]}" \
     > "$LOG" 2>&1 || HARNESS_STATUS=$?
 
 PASS=0
@@ -175,6 +342,33 @@ else
     check "QuickJS scripts" "PASS" "no scripts to evaluate"
 fi
 
+if SCRIPT_SUMMARY=$(python3 tools/scene-script-log-summary.py "$LOG" 2>&1); then
+    SCRIPT_BINDINGS=$(printf '%s\n' "$SCRIPT_SUMMARY" | awk -F= '/^scene-script-bindings=/{print $2}')
+    SCRIPT_MEDIA_LAYERS=$(printf '%s\n' "$SCRIPT_SUMMARY" | awk -F= '/^unsupported-media-integration-layers=/{print $2}')
+    SCRIPT_GAPS=$(printf '%s\n' "$SCRIPT_SUMMARY" | awk -F= '/^scene-script-gaps-total=/{print $2}')
+    SCRIPT_VISIBLE=$(printf '%s\n' "$SCRIPT_SUMMARY" | awk '/  - visible:/{print $3}')
+    SCRIPT_MEDIA=$(printf '%s\n' "$SCRIPT_SUMMARY" | awk '/  - media-runtime-only:/{print $3}')
+    SCRIPT_HARMLESS=$(printf '%s\n' "$SCRIPT_SUMMARY" | awk '/  - harmless:/{print $3}')
+    SCRIPT_UNKNOWN=$(printf '%s\n' "$SCRIPT_SUMMARY" | awk '/  - unknown:/{print $3}')
+    : "${SCRIPT_BINDINGS:=0}"
+    : "${SCRIPT_MEDIA_LAYERS:=0}"
+    : "${SCRIPT_GAPS:=0}"
+    : "${SCRIPT_VISIBLE:=0}"
+    : "${SCRIPT_MEDIA:=0}"
+    : "${SCRIPT_HARMLESS:=0}"
+    : "${SCRIPT_UNKNOWN:=0}"
+    SCRIPT_DETAIL="bindings=${SCRIPT_BINDINGS}; media-layers=${SCRIPT_MEDIA_LAYERS}; gaps=${SCRIPT_GAPS}; visible=${SCRIPT_VISIBLE}; media-runtime-only=${SCRIPT_MEDIA}; harmless=${SCRIPT_HARMLESS}; unknown=${SCRIPT_UNKNOWN}; detail=${LOG}"
+    if [ "$SCRIPT_VISIBLE" -gt 0 ]; then
+        check "SceneScript runtime gaps" "WARN" "$SCRIPT_DETAIL"
+    elif [ "$SCRIPT_GAPS" -gt 0 ]; then
+        check "SceneScript runtime gaps" "PASS" "$SCRIPT_DETAIL"
+    else
+        check "SceneScript runtime gaps" "PASS" "$SCRIPT_DETAIL"
+    fi
+else
+    check "SceneScript runtime gaps" "WARN" "could not summarize script gaps"
+fi
+
 # Errors
 ERRORS=$(grep -ac "^ERROR\|LOG_ERROR" "$LOG" 2>/dev/null | tr -cd '0-9')
 : "${ERRORS:=0}"
@@ -258,6 +452,11 @@ print(f"stripped_mixed_chain={stripped_mixed}")
 PY
 ); then
         check "Effect capture manifest" "PASS" "$EFFECT_MANIFEST"
+        if PUPPET_ROUTE_GUARD=$(python3 tools/effect_route_guards.py "$EFFECT_MANIFEST" 2>&1); then
+            check "Puppet effect viewport guard" "PASS" "$PUPPET_ROUTE_GUARD"
+        else
+            check "Puppet effect viewport guard" "FAIL" "$PUPPET_ROUTE_GUARD"
+        fi
         ALLOWED_SIMPLE_WATER=$(printf '%s\n' "$WATER_COUNTS" | awk -F= '/^allowed_simple_water=/{print $2}')
         STRIPPED_SIMPLE_WATER=$(printf '%s\n' "$WATER_COUNTS" | awk -F= '/^stripped_simple_water=/{print $2}')
         STRIPPED_MIXED_CHAIN=$(printf '%s\n' "$WATER_COUNTS" | awk -F= '/^stripped_mixed_chain=/{print $2}')
@@ -364,10 +563,87 @@ else
     fi
 fi
 
+if [ -n "$PROBE_KIND" ]; then
+    echo ""
+    echo "--- $PROBE_TITLE ---"
+    clear_shader_cache
+    rm -f "$PROBE_CAPTURE" "$PROBE_LOG"
+    rm -rf "$PROBE_EFFECT_DEBUG_DIR"
+    PROBE_STATUS=0
+    "$HARNESS" --backend paper \
+        --source "$SCENE_PKG" \
+        --assets "$ASSETS" \
+        --fill crop \
+        --capture "$PROBE_CAPTURE" \
+        --capture-delay-ms "$CAPTURE_DELAY" \
+        --debug-effect-captures "$PROBE_EFFECT_DEBUG_DIR" \
+        "${PUPPET_SIMULATION_ARGS[@]}" \
+        "${PROBE_ARGS[@]}" \
+        > "$PROBE_LOG" 2>&1 || PROBE_STATUS=$?
+
+    if [ "$PROBE_STATUS" -eq 0 ]; then
+        check "Probe harness execution" "PASS" "exit=0"
+    else
+        check "Probe harness execution" "FAIL" "exit=$PROBE_STATUS"
+    fi
+
+    if [ -f "$PROBE_EFFECT_MANIFEST" ]; then
+        if PROBE_SUMMARY=$(tools/effect-capture-summary.py "$PROBE_EFFECT_MANIFEST" 2>&1); then
+            if [ "$PROBE_KIND" = "high-risk" ]; then
+                PROBE_DETAIL=$(printf '%s\n' "$PROBE_SUMMARY" \
+                    | awk '/^high-risk-probe-layers:/{flag=1; print; next} /^layer-stage-counts:/{flag=0} flag{print}' \
+                    | tr '\n' '; ' \
+                    | cut -c1-420)
+            else
+                PROBE_DETAIL=$(tools/effect-candidate-inventory.py "$PROBE_EFFECT_MANIFEST" 2>/dev/null \
+                    | awk '/^records:/{flag=1; next} flag && /probe-only/{print}' \
+                    | tr '\n' '; ' \
+                    | cut -c1-420)
+            fi
+            check "Probe effect manifest" "PASS" "$PROBE_EFFECT_MANIFEST"
+            check "Probe report" "PASS" "${PROBE_DETAIL:-no probe-only rows}"
+        else
+            check "Probe effect manifest" "FAIL" "could not summarize $PROBE_EFFECT_MANIFEST"
+        fi
+    else
+        check "Probe effect manifest" "FAIL" "missing $PROBE_EFFECT_MANIFEST"
+    fi
+
+    if [ -f "$PROBE_CAPTURE" ]; then
+        PROBE_FILESIZE=$(stat -c%s "$PROBE_CAPTURE")
+        if [ "$PROBE_FILESIZE" -lt 50000 ]; then
+            check "Probe capture produced" "FAIL" "too small (${PROBE_FILESIZE} bytes)"
+        else
+            check "Probe capture produced" "PASS" "$(( PROBE_FILESIZE / 1024 ))KB"
+        fi
+
+        if [ -f "$CAPTURE" ]; then
+            PROBE_RMSE_RAW=$(compare -metric RMSE "$CAPTURE" "$PROBE_CAPTURE" null: 2>&1 || true)
+            PROBE_RMSE=$(printf '%s' "$PROBE_RMSE_RAW" | sed -n 's/.*(\([^)]*\)).*/\1/p')
+            : "${PROBE_RMSE:=$PROBE_RMSE_RAW}"
+            check "Probe final-frame delta" "PASS" "baseline-vs-probe RMSE=$PROBE_RMSE"
+        fi
+
+        if VISUAL_SENTINEL=$(python3 tools/scene_visual_sentinels.py "$SCENE_ID" "$PROBE_CAPTURE" --baseline "$CAPTURE" --log "$PROBE_LOG" 2>&1); then
+            VISUAL_SENTINEL_ONE_LINE=$(printf '%s' "$VISUAL_SENTINEL" | tr '\n' '; ' | cut -c1-420)
+            check "Probe visual sentinel/delta" "PASS" "$VISUAL_SENTINEL_ONE_LINE"
+        else
+            VISUAL_SENTINEL_ONE_LINE=$(printf '%s' "$VISUAL_SENTINEL" | tr '\n' '; ' | cut -c1-420)
+            check "Probe visual sentinel/delta" "FAIL" "$VISUAL_SENTINEL_ONE_LINE"
+        fi
+    else
+        check "Probe capture produced" "FAIL" "missing $PROBE_CAPTURE"
+    fi
+fi
+
 # === Summary ===
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed, $WARN warnings ==="
 echo "Log: $LOG"
 echo "Capture: $CAPTURE"
+if [ -n "$PROBE_KIND" ]; then
+    echo "Probe log: $PROBE_LOG"
+    echo "Probe capture: $PROBE_CAPTURE"
+fi
 
 [ "$FAIL" -eq 0 ] || exit 1

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import os
 import shlex
@@ -10,7 +11,7 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 
@@ -21,6 +22,7 @@ COVERAGE_STATUS_ORDER = {
     "candidate": 2,
     "active": 3,
 }
+_UNRESOLVED_SCENE_PROPERTIES_JSON = object()
 
 
 def worst_status(left: str, right: str) -> str:
@@ -72,6 +74,8 @@ class SceneResult:
     status: str
     required: bool
     log: str | None
+    sourceSceneId: str | None = None
+    scenePropertiesJson: str | None = None
     frames: list[FrameResult] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
@@ -202,10 +206,11 @@ def validate_coverage_matrix(matrix: dict[str, Any], manifest: dict[str, Any]) -
             if status not in COVERAGE_STATUS_ORDER:
                 errors.append(f"bucket {bucket_id} scene {scene_id} has unknown status {status}")
 
-    for scene in manifest.get("scenes", []):
+    for scene in expand_manifest_scenes(manifest):
         scene_id = str(scene.get("id", ""))
-        if scene_id and scene_id not in matrix_scene_ids:
-            errors.append(f"active scene {scene_id} is missing from coverage matrix")
+        coverage_id = str(scene.get("sourceSceneId", scene_id))
+        if coverage_id and coverage_id not in matrix_scene_ids:
+            errors.append(f"active scene {scene_id} source scene {coverage_id} is missing from coverage matrix")
 
     for summary in coverage_bucket_summaries(matrix):
         if not summary["satisfied"]:
@@ -262,8 +267,109 @@ def expand_manifest_path(value: str, paths: dict[str, str], root: Path, env: dic
     return candidate
 
 
+def baseline_path_with_prefix(value: str, prefix: str) -> str:
+    path = PurePosixPath(value)
+    if path.is_absolute():
+        raise ValueError(f"baseline path must be relative: {value}")
+    if ".." in path.parts:
+        raise ValueError(f"baseline path must not contain parent traversal: {value}")
+    prefix_path = PurePosixPath(prefix)
+    if prefix_path.is_absolute() or ".." in prefix_path.parts:
+        raise ValueError(f"baselinePrefix must be relative and contained: {prefix}")
+    rest = path.parts[1:] if len(path.parts) > 1 else path.parts
+    return str(PurePosixPath(prefix, *rest))
+
+
+def apply_baseline_prefix(scene: dict[str, Any], prefix: str) -> None:
+    for capture in scene.get("captures", []):
+        if "baseline" in capture:
+            capture["baseline"] = baseline_path_with_prefix(str(capture["baseline"]), prefix)
+    for sequence in scene.get("sequences", []):
+        if "baselineDir" in sequence:
+            sequence["baselineDir"] = baseline_path_with_prefix(str(sequence["baselineDir"]), prefix)
+
+
+def expand_manifest_scenes(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    cases: list[dict[str, Any]] = []
+    for base in manifest.get("scenes", []):
+        variants = base.get("variants", [])
+        if not variants:
+            scene = copy.deepcopy(base)
+            scene["sourceSceneId"] = str(scene.get("sourceSceneId", scene.get("id", "")))
+            cases.append(scene)
+            continue
+
+        base_without_variants = copy.deepcopy(base)
+        base_without_variants.pop("variants", None)
+        base_source_scene_id = str(base_without_variants.get("sourceSceneId", base_without_variants.get("id", "")))
+        for variant in variants:
+            scene = copy.deepcopy(base_without_variants)
+            scene.update(copy.deepcopy(variant))
+            scene["sourceSceneId"] = str(scene.get("sourceSceneId", base_source_scene_id))
+            prefix = scene.get("baselinePrefix")
+            if prefix:
+                apply_baseline_prefix(scene, str(prefix))
+            elif scene.get("captures") or scene.get("sequences"):
+                raise ValueError(f"variant {scene.get('id', '<unknown>')} inherits captures or sequences without baselinePrefix")
+            cases.append(scene)
+    return cases
+
+
+def load_project_scene_properties(source: Path) -> dict[str, Any]:
+    project_json = source.parent / "project.json"
+    if not project_json.exists():
+        return {}
+    with project_json.open("r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    if not isinstance(data, dict):
+        return {}
+    general = data.get("general", {})
+    if not isinstance(general, dict):
+        return {}
+    properties = general.get("properties", {})
+    if not isinstance(properties, dict):
+        return {}
+    return copy.deepcopy(properties)
+
+
+def apply_scene_property_overrides(defaults: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
+    merged = copy.deepcopy(defaults)
+    for key, value in overrides.items():
+        if key in merged and isinstance(merged[key], dict) and "value" in merged[key]:
+            merged[key]["value"] = value
+        else:
+            merged[key] = value
+    return merged
+
+
+def scene_properties_json_for_scene(scene: dict[str, Any], source: Path) -> str | None:
+    if "scenePropertyOverrides" not in scene:
+        return None
+    overrides = scene["scenePropertyOverrides"]
+    if not isinstance(overrides, dict):
+        raise ValueError(f"scene {scene.get('id', '<unknown>')} scenePropertyOverrides must be an object")
+    merged = apply_scene_property_overrides(load_project_scene_properties(source), overrides)
+    return json.dumps(merged, sort_keys=True, separators=(",", ":"))
+
+
+def scene_result_metadata(
+    scene: dict[str, Any],
+    manifest: dict[str, Any],
+    root: Path,
+    assets_override: str | None,
+    workshop_override: str | None,
+) -> tuple[str, str | None]:
+    paths = dict(manifest["paths"])
+    if assets_override:
+        paths["assets"] = assets_override
+    if workshop_override:
+        paths["workshop"] = workshop_override
+    source = expand_manifest_path(scene["source"], paths, root)
+    return str(scene.get("sourceSceneId", scene["id"])), scene_properties_json_for_scene(scene, source)
+
+
 def select_scenes(manifest: dict[str, Any], suite: str) -> list[dict[str, Any]]:
-    return [scene for scene in manifest.get("scenes", []) if suite in scene.get("gates", [])]
+    return [scene for scene in expand_manifest_scenes(manifest) if suite in scene.get("gates", [])]
 
 
 def merged_thresholds(manifest: dict[str, Any], scene: dict[str, Any]) -> dict[str, float]:
@@ -407,6 +513,7 @@ def build_harness_base_command(
     source: Path,
     assets: Path,
     capture_size: dict[str, int] | None = None,
+    scene_properties_json: str | None = None,
 ) -> list[str]:
     command = [
         str(harness),
@@ -422,6 +529,8 @@ def build_harness_base_command(
     ]
     if capture_size is not None:
         command += ["--window-size", f"{capture_size['width']}x{capture_size['height']}"]
+    if scene_properties_json is not None:
+        command += ["--scene-properties-json", scene_properties_json]
     return command
 
 
@@ -459,6 +568,15 @@ def run_command(command: list[str], log_path: Path, timeout_seconds: float) -> i
     return completed.returncode
 
 
+HARNESS_FIRST_FRAME_TIMEOUT_SECONDS = 60
+HARNESS_CAPTURE_EXIT_SLACK_SECONDS = 10
+
+
+def harness_capture_timeout_seconds(capture_end_ms: int) -> int:
+    capture_seconds = (capture_end_ms + 999) // 1000
+    return HARNESS_FIRST_FRAME_TIMEOUT_SECONDS + capture_seconds + HARNESS_CAPTURE_EXIT_SLACK_SECONDS
+
+
 def run_scene_captures(
     *,
     manifest: dict[str, Any],
@@ -467,6 +585,7 @@ def run_scene_captures(
     run_dir: Path,
     assets_override: str | None,
     workshop_override: str | None,
+    scene_properties_json: str | None | object = _UNRESOLVED_SCENE_PROPERTIES_JSON,
 ) -> tuple[str, Path | None, list[Path], list[str]]:
     paths = dict(manifest["paths"])
     if assets_override:
@@ -489,14 +608,20 @@ def run_scene_captures(
     if not assets.exists():
         return "fail", None, [], [f"assets directory not found: {assets}"]
 
+    if scene_properties_json is _UNRESOLVED_SCENE_PROPERTIES_JSON:
+        try:
+            scene_properties_json = scene_properties_json_for_scene(scene, source)
+        except ValueError as exc:
+            return "fail", None, [], [str(exc)]
+
     capture_size = merged_capture_size(manifest, scene)
     captures = scene.get("captures", [])
     times = [str(capture["timeMs"]) for capture in captures]
     actuals: list[Path] = []
     if times:
-        command = build_harness_base_command(harness, scene, source, assets, capture_size)
+        command = build_harness_base_command(harness, scene, source, assets, capture_size, scene_properties_json)
         command += ["--capture-dir", str(capture_dir / "stills"), "--capture-times-ms", ",".join(times)]
-        timeout = max(int(value) for value in times) // 1000 + 30
+        timeout = harness_capture_timeout_seconds(max(int(value) for value in times))
         code = run_command(command, log_path, timeout)
         if code != 0:
             return "fail", log_path, [], [f"harness still capture exited {code}"]
@@ -512,9 +637,10 @@ def run_scene_captures(
         sequence_dir = capture_dir / sequence["name"]
         sequence_log_path = scene_dir / f"{sequence['name']}.log"
         sequence_arg = f"{sequence['startMs']}:{sequence['frames']}:{sequence['intervalMs']}"
-        command = build_harness_base_command(harness, scene, source, assets, capture_size)
+        command = build_harness_base_command(harness, scene, source, assets, capture_size, scene_properties_json)
         command += ["--capture-dir", str(sequence_dir), "--capture-sequence", sequence_arg]
-        timeout = (sequence["startMs"] + sequence["frames"] * sequence["intervalMs"]) // 1000 + 30
+        capture_end_ms = sequence["startMs"] + sequence["frames"] * sequence["intervalMs"]
+        timeout = harness_capture_timeout_seconds(capture_end_ms)
         code = run_command(command, sequence_log_path, timeout)
         expected_sequence = expected_sequence_paths(sequence_dir, sequence)
         sequence_actuals = [path for path in expected_sequence if path.exists()]
@@ -834,6 +960,31 @@ def main(argv: list[str] | None = None) -> int:
     baseline_root = expand_manifest_path(paths["baselines"], paths, root)
 
     for scene in scenes:
+        required = bool(scene.get("required", False))
+        try:
+            source_scene_id, scene_properties_json = scene_result_metadata(
+                scene,
+                manifest,
+                root,
+                args.assets,
+                args.workshop,
+            )
+        except ValueError as exc:
+            summary.add("fail", required=required)
+            scene_results.append(
+                SceneResult(
+                    id=scene["id"],
+                    name=scene["name"],
+                    status="fail",
+                    required=required,
+                    log=None,
+                    sourceSceneId=str(scene.get("sourceSceneId", scene["id"])),
+                    scenePropertiesJson=None,
+                    notes=[str(exc)],
+                )
+            )
+            print(f"FAIL {scene['id']} {scene['name']}: {exc}")
+            continue
         thresholds = merged_thresholds(manifest, scene)
         capture_size = merged_capture_size(manifest, scene)
         expected_dimensions = f"{capture_size['width']}x{capture_size['height']}"
@@ -844,12 +995,21 @@ def main(argv: list[str] | None = None) -> int:
             run_dir=run_dir,
             assets_override=args.assets,
             workshop_override=args.workshop,
+            scene_properties_json=scene_properties_json,
         )
-        required = bool(scene.get("required", False))
         if capture_status in ("skip", "fail"):
             summary.add(capture_status, required=required)
             scene_results.append(
-                SceneResult(scene["id"], scene["name"], capture_status, required, str(log_path) if log_path else None, notes=notes)
+                SceneResult(
+                    id=scene["id"],
+                    name=scene["name"],
+                    status=capture_status,
+                    required=required,
+                    log=str(log_path) if log_path else None,
+                    sourceSceneId=source_scene_id,
+                    scenePropertiesJson=scene_properties_json,
+                    notes=notes,
+                )
             )
             print(f"{capture_status.upper()} {scene['id']} {scene['name']}: {'; '.join(notes)}")
             continue
@@ -929,11 +1089,13 @@ def main(argv: list[str] | None = None) -> int:
         summary.add(scene_status, required=required)
         scene_results.append(
             SceneResult(
-                scene["id"],
-                scene["name"],
-                scene_status,
-                required,
-                str(log_path) if log_path else None,
+                id=scene["id"],
+                name=scene["name"],
+                status=scene_status,
+                required=required,
+                log=str(log_path) if log_path else None,
+                sourceSceneId=source_scene_id,
+                scenePropertiesJson=scene_properties_json,
                 frames=scene_frames,
                 notes=notes,
             )

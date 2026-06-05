@@ -20,8 +20,15 @@ Window {
     property string backendQmlFile: sceneHarnessBackendQmlFile
     property string debugEffectCapturesPath: sceneHarnessDebugEffectCapturesPath
     property string debugEffectCaptureCommand: sceneHarnessDebugEffectCaptureCommand
+    property int debugEffectCaptureDelayMs: sceneHarnessDebugEffectCaptureDelayMs
     property string debugEffectProbeLayers: sceneHarnessDebugEffectProbeLayers
     property string debugEffectProbeHighRiskLayers: sceneHarnessDebugEffectProbeHighRiskLayers
+    property string debugEffectProbeChannelMapSlots: sceneHarnessDebugEffectProbeChannelMapSlots
+    property string debugEffectProbeMaxEffects: sceneHarnessDebugEffectProbeMaxEffects
+    property string debugPuppetEffectFinalMesh: sceneHarnessDebugPuppetEffectFinalMesh
+    property bool debugPuppetEffectRouteOnly: sceneHarnessDebugPuppetEffectRouteOnly
+    property string debugPuppetAnimationLayerOverrides: sceneHarnessDebugPuppetAnimationLayerOverrides
+    property string scenePropertiesJson: sceneHarnessScenePropertiesJson
     property bool captureReady: false
     property string backendStatus: backendLoader.item && backendLoader.item.backendStatus
         ? backendLoader.item.backendStatus
@@ -74,11 +81,32 @@ Window {
             item.debugEffectCaptureCommand = Qt.binding(function() {
                 return root.debugEffectCaptureCommand
             })
+            item.debugEffectCaptureDelayMs = Qt.binding(function() {
+                return root.debugEffectCaptureDelayMs
+            })
             item.debugEffectProbeLayers = Qt.binding(function() {
                 return root.debugEffectProbeLayers
             })
             item.debugEffectProbeHighRiskLayers = Qt.binding(function() {
                 return root.debugEffectProbeHighRiskLayers
+            })
+            item.debugEffectProbeChannelMapSlots = Qt.binding(function() {
+                return root.debugEffectProbeChannelMapSlots
+            })
+            item.debugEffectProbeMaxEffects = Qt.binding(function() {
+                return root.debugEffectProbeMaxEffects
+            })
+            item.debugPuppetEffectFinalMesh = Qt.binding(function() {
+                return root.debugPuppetEffectFinalMesh
+            })
+            item.debugPuppetEffectRouteOnly = Qt.binding(function() {
+                return root.debugPuppetEffectRouteOnly
+            })
+            item.debugPuppetAnimationLayerOverrides = Qt.binding(function() {
+                return root.debugPuppetAnimationLayerOverrides
+            })
+            item.scenePropertiesJson = Qt.binding(function() {
+                return root.scenePropertiesJson
             })
             item.sceneSource = Qt.binding(function() {
                 return root.sceneSource

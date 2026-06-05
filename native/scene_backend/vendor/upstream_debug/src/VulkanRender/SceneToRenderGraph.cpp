@@ -167,6 +167,19 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
         }
     }
 
+    const wallpaper::debug::EffectCaptureFinalDisplayBoundaryHook* finalDisplayBoundary = nullptr;
+    for (const auto& hook : scene.debugEffectFinalDisplayBoundaryCaptures) {
+        if (hook.node == node) {
+            finalDisplayBoundary = &hook;
+            break;
+        }
+    }
+    if (finalDisplayBoundary != nullptr && !output.empty()) {
+        rg::addCopyPass(rgraph,
+                        rg::createTexDesc(std::string(output)),
+                        rg::createTexDesc(finalDisplayBoundary->beforeTarget));
+    }
+
     std::string passName = material->name;
 
     rgraph.addPass<vulkan::CustomShaderPass>(
@@ -224,6 +237,12 @@ static void ToGraphPass(SceneNode* node, std::string_view output, i32 imgId, Ext
                 extra.id_link_map[(usize)imgId] = output_node;
             }
         });
+
+    if (finalDisplayBoundary != nullptr && !output.empty()) {
+        rg::addCopyPass(rgraph,
+                        rg::createTexDesc(std::string(output)),
+                        rg::createTexDesc(finalDisplayBoundary->afterTarget));
+    }
 
     // load effect
     if (imgeff != nullptr) loadEffect(imgeff);

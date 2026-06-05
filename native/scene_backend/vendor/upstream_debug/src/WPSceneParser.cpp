@@ -2,6 +2,8 @@
 #include "WPJson.hpp"
 #include "Policy/EffectPolicy.hpp"
 #include "Policy/ModelFallbackPolicy.hpp"
+#include "Scene/PuppetEffectRoutePlan.hpp"
+#include "Scene/PuppetFinalDisplayBuilder.hpp"
 #include "WPSceneScript.hpp"
 #include <sstream>
 
@@ -14,6 +16,7 @@
 #include "SpecTexs.hpp"
 
 #include "WPShaderParser.hpp"
+#include "Shader/ShaderCompatPatches.hpp"
 #include "WPTexImageParser.hpp"
 #include "WPParticleParser.hpp"
 #include "WPSoundParser.hpp"
@@ -40,6 +43,7 @@
 #include <sstream>
 #include <string>
 #include <limits>
+#include <map>
 #include <unordered_map>
 #include <unordered_set>
 #include <random>
@@ -53,6 +57,82 @@ using namespace wallpaper;
 using namespace Eigen;
 
 std::string getAddr(void* p) { return std::to_string(reinterpret_cast<intptr_t>(p)); }
+
+std::vector<float> DebugVec3(const Eigen::Vector3f& value)
+{
+    return {value.x(), value.y(), value.z()};
+}
+
+wallpaper::debug::EffectCaptureTransformInfo DebugNodeTransform(const SceneNode& node)
+{
+    return {
+        .origin = DebugVec3(node.Translate()),
+        .scale = DebugVec3(node.Scale()),
+        .angles = DebugVec3(node.Rotation()),
+    };
+}
+
+wallpaper::debug::EffectCaptureMeshBoundsInfo DebugMeshBounds(const SceneMesh& mesh)
+{
+    wallpaper::debug::EffectCaptureMeshBoundsInfo info;
+    info.vertexArrayCount = static_cast<int>(mesh.VertexCount());
+    info.indexArrayCount = static_cast<int>(mesh.IndexCount());
+
+    for (usize i = 0; i < mesh.IndexCount(); ++i) {
+        const auto& indices = mesh.GetIndexArray(i);
+        info.indexDataCount += static_cast<int>(indices.DataCount());
+        info.indexRenderDataCount += static_cast<int>(indices.RenderDataCount());
+    }
+
+    std::array<float, 3> positionMin {
+        std::numeric_limits<float>::infinity(),
+        std::numeric_limits<float>::infinity(),
+        std::numeric_limits<float>::infinity(),
+    };
+    std::array<float, 3> positionMax {
+        -std::numeric_limits<float>::infinity(),
+        -std::numeric_limits<float>::infinity(),
+        -std::numeric_limits<float>::infinity(),
+    };
+    bool hasPosition = false;
+
+    for (usize i = 0; i < mesh.VertexCount(); ++i) {
+        const auto& vertex = mesh.GetVertexArray(i);
+        info.vertexCount += static_cast<int>(vertex.VertexCount());
+
+        const auto attrs = vertex.GetAttrOffsetMap();
+        const auto posIt = attrs.find(std::string(WE_IN_POSITION));
+        if (posIt == attrs.end()) {
+            continue;
+        }
+        if (SceneVertexArray::TypeCount(posIt->second.attr.type) < 3) {
+            continue;
+        }
+
+        const float* raw = vertex.Data();
+        if (raw == nullptr) {
+            continue;
+        }
+
+        const usize strideFloats = vertex.OneSize();
+        const usize positionOffsetFloats = posIt->second.offset / sizeof(float);
+        for (usize vertexIndex = 0; vertexIndex < vertex.VertexCount(); ++vertexIndex) {
+            const float* position = raw + vertexIndex * strideFloats + positionOffsetFloats;
+            for (usize axis = 0; axis < 3; ++axis) {
+                positionMin[axis] = std::min(positionMin[axis], position[axis]);
+                positionMax[axis] = std::max(positionMax[axis], position[axis]);
+            }
+            hasPosition = true;
+        }
+    }
+
+    if (hasPosition) {
+        info.positionMin = {positionMin[0], positionMin[1], positionMin[2]};
+        info.positionMax = {positionMax[0], positionMax[1], positionMax[2]};
+    }
+
+    return info;
+}
 
 struct CameraPose {
     std::array<float, 3> eye { 0.0f, 0.0f, 1.0f };
@@ -555,6 +635,181 @@ void LogPuppetChannelMapBlendIndexCoverage(const wpscene::WPImageObject& imageOb
              topStream.str().c_str());
 }
 
+std::vector<wallpaper::debug::PuppetCutoutSlotCoverageInfo>
+BuildPuppetCutoutSlotCoverage(const WPMdl& mdl, const std::vector<int>& activeSlots)
+{
+    struct SlotBoundsAccumulator {
+        bool has { false };
+        float minX { 0.0f };
+        float minY { 0.0f };
+        float maxX { 0.0f };
+        float maxY { 0.0f };
+        double weightedSumX { 0.0 };
+        double weightedSumY { 0.0 };
+        double weightSum { 0.0 };
+
+        void add(const WPMdl::Vertex& vertex, double sampleWeight)
+        {
+            if (sampleWeight <= 0.0) {
+                return;
+            }
+            const float x = vertex.position[0];
+            const float y = vertex.position[1];
+            if (! has) {
+                minX = maxX = x;
+                minY = maxY = y;
+                has = true;
+            } else {
+                minX = std::min(minX, x);
+                minY = std::min(minY, y);
+                maxX = std::max(maxX, x);
+                maxY = std::max(maxY, y);
+            }
+            weightedSumX += static_cast<double>(x) * sampleWeight;
+            weightedSumY += static_cast<double>(y) * sampleWeight;
+            weightSum += sampleWeight;
+        }
+
+        void copyTo(wallpaper::debug::PuppetCutoutSlotCoverageInfo& info) const
+        {
+            if (! has || weightSum <= 0.0) {
+                return;
+            }
+            info.layerLocalBounds = { minX, minY, maxX, maxY };
+            info.layerLocalCentroid = {
+                static_cast<float>(weightedSumX / weightSum),
+                static_cast<float>(weightedSumY / weightSum),
+            };
+        }
+    };
+
+    std::vector<uint32_t> activeUnsignedSlots;
+    activeUnsignedSlots.reserve(activeSlots.size());
+    for (const int slot : activeSlots) {
+        if (slot >= 0) {
+            activeUnsignedSlots.push_back(static_cast<uint32_t>(slot));
+        }
+    }
+    const std::vector<uint32_t> expandedActiveSlots =
+        WPMdlParser::ExpandPuppetActiveBlendSlots(mdl, activeUnsignedSlots);
+
+    std::unordered_set<int> active;
+    for (const uint32_t slot : expandedActiveSlots) {
+        if (slot <= static_cast<uint32_t>(std::numeric_limits<int>::max())) {
+            active.insert(static_cast<int>(slot));
+        }
+    }
+
+    std::map<int, wallpaper::debug::PuppetCutoutSlotCoverageInfo> coverage;
+    std::map<int, SlotBoundsAccumulator> primaryBounds;
+    std::map<int, SlotBoundsAccumulator> weightedBounds;
+    const auto ensureSlot = [&coverage, &active, &mdl](int slot)
+        -> wallpaper::debug::PuppetCutoutSlotCoverageInfo& {
+        auto& info = coverage[slot];
+        info.slot = slot;
+        info.active = active.count(slot) != 0;
+        if (mdl.puppet && slot >= 0 && static_cast<size_t>(slot) < mdl.puppet->bones.size()) {
+            const auto& bone = mdl.puppet->bones[static_cast<size_t>(slot)];
+            info.boneName = bone.name;
+            info.simulationMetadata = bone.simulationMetadata;
+            info.simulationMetadataPresent = !bone.simulationMetadata.empty();
+            info.simulationMetadataValid = bone.parsedSimulationMetadata.valid;
+            info.simulationPhysicsActive = bone.parsedSimulationMetadata.physicsActive;
+            info.simulationTargetPointPresent =
+                bone.parsedSimulationMetadata.targetPointPresent;
+            if (bone.parsedSimulationMetadata.targetPointPresent) {
+                info.simulationTargetPoint = {
+                    bone.parsedSimulationMetadata.targetPoint[0],
+                    bone.parsedSimulationMetadata.targetPoint[1],
+                    bone.parsedSimulationMetadata.targetPoint[2],
+                };
+            }
+            info.simulationTargetMassPresent =
+                bone.parsedSimulationMetadata.targetMassPresent;
+            info.simulationTargetMass = bone.parsedSimulationMetadata.targetMass;
+            info.simulatedInactive = info.simulationPhysicsActive && !info.active;
+            if (! bone.noParent()) {
+                info.parentSlot = static_cast<int>(bone.parent);
+                if (static_cast<size_t>(bone.parent) < mdl.puppet->bones.size()) {
+                    info.parentBoneName = mdl.puppet->bones[static_cast<size_t>(bone.parent)].name;
+                }
+            }
+        }
+        return info;
+    };
+
+    for (const auto& vertex : mdl.vertexs) {
+        const int slot = static_cast<int>(vertex.blend_indices[0]);
+        auto& info = ensureSlot(slot);
+        info.vertexCount += 1;
+        info.primaryVertexCount += 1;
+        primaryBounds[slot].add(vertex, 1.0);
+
+        std::unordered_set<int> weightedSlotsForVertex;
+        for (size_t i = 0; i < vertex.blend_indices.size() && i < vertex.weight.size(); ++i) {
+            if (vertex.weight[i] <= 1.0e-3f) {
+                continue;
+            }
+            const int weightedSlot = static_cast<int>(vertex.blend_indices[i]);
+            if (! weightedSlotsForVertex.insert(weightedSlot).second) {
+                continue;
+            }
+            auto& weightedInfo = ensureSlot(weightedSlot);
+            weightedInfo.weightedVertexCount += 1;
+            weightedInfo.weightedVertexWeightSum += vertex.weight[i];
+            weightedBounds[weightedSlot].add(vertex, vertex.weight[i]);
+        }
+    }
+
+    for (const auto& tri : mdl.indices) {
+        if (tri[0] >= mdl.vertexs.size() || tri[1] >= mdl.vertexs.size() || tri[2] >= mdl.vertexs.size()) {
+            continue;
+        }
+        const int a = static_cast<int>(mdl.vertexs[tri[0]].blend_indices[0]);
+        const int b = static_cast<int>(mdl.vertexs[tri[1]].blend_indices[0]);
+        const int c = static_cast<int>(mdl.vertexs[tri[2]].blend_indices[0]);
+        if (a == b && b == c) {
+            auto& info = ensureSlot(a);
+            info.triangleCount += 1;
+            info.primaryTriangleCount += 1;
+        }
+
+        std::unordered_set<int> weightedSlotsForTriangle;
+        for (const uint16_t vertexIndex : tri) {
+            const auto& vertex = mdl.vertexs[vertexIndex];
+            for (size_t i = 0; i < vertex.blend_indices.size() && i < vertex.weight.size(); ++i) {
+                if (vertex.weight[i] <= 1.0e-3f) {
+                    continue;
+                }
+                weightedSlotsForTriangle.insert(static_cast<int>(vertex.blend_indices[i]));
+            }
+        }
+        for (const int weightedSlot : weightedSlotsForTriangle) {
+            ensureSlot(weightedSlot).weightedTriangleCount += 1;
+        }
+    }
+
+    std::vector<wallpaper::debug::PuppetCutoutSlotCoverageInfo> out;
+    out.reserve(coverage.size());
+    for (auto& [_, info] : coverage) {
+        info.secondaryOnly = info.primaryVertexCount == 0 && info.weightedVertexCount > 0;
+        const auto weightedIt = weightedBounds.find(info.slot);
+        if (weightedIt != weightedBounds.end() && weightedIt->second.has) {
+            weightedIt->second.copyTo(info);
+        } else {
+            const auto primaryIt = primaryBounds.find(info.slot);
+            if (primaryIt != primaryBounds.end()) {
+                primaryIt->second.copyTo(info);
+            }
+        }
+        if (info.vertexCount > 0 || info.triangleCount > 0 ||
+            info.weightedVertexCount > 0 || info.weightedTriangleCount > 0 || info.active) {
+            out.push_back(info);
+        }
+    }
+    return out;
+}
+
 size_t SeedPuppetChannelMapBlendMapFromVisibleLayers(const wpscene::WPImageObject& imageObject,
                                                      const WPMdl&                  mdl,
                                                      std::vector<float>&           blendMap,
@@ -602,6 +857,48 @@ size_t SeedPuppetChannelMapBlendMapFromVisibleLayers(const wpscene::WPImageObjec
         }
     }
 
+    const std::vector<uint32_t> expandedActiveIndices =
+        WPMdlParser::ExpandPuppetActiveBlendSlots(mdl, activeIndices);
+    std::vector<uint32_t> finalActiveIndices;
+    finalActiveIndices.reserve(expandedActiveIndices.size());
+    const auto inheritedBlendValue = [&mdl, &blendMap](uint32_t slot) {
+        if (! mdl.puppet || slot >= mdl.puppet->bones.size()) {
+            return 0.0f;
+        }
+
+        std::vector<bool> visited(mdl.puppet->bones.size(), false);
+        uint32_t parent = mdl.puppet->bones[slot].parent;
+        while (parent < mdl.puppet->bones.size() && ! visited[parent]) {
+            if (parent < blendMap.size() && blendMap[parent] > kInactiveChannelMapBlendValue) {
+                return blendMap[parent];
+            }
+            visited[parent] = true;
+            if (mdl.puppet->bones[parent].noParent()) {
+                break;
+            }
+            parent = mdl.puppet->bones[parent].parent;
+        }
+        return 0.0f;
+    };
+
+    for (const uint32_t slot : expandedActiveIndices) {
+        if (slot >= blendMap.size()) {
+            continue;
+        }
+        if (blendMap[slot] <= kInactiveChannelMapBlendValue) {
+            const float inherited = inheritedBlendValue(slot);
+            blendMap[slot] = inherited > kInactiveChannelMapBlendValue
+                ? inherited
+                : kActiveChannelMapBlendValue;
+        }
+        if (std::find(finalActiveIndices.begin(), finalActiveIndices.end(), slot) ==
+            finalActiveIndices.end()) {
+            finalActiveIndices.push_back(slot);
+        }
+    }
+    activeIndices = std::move(finalActiveIndices);
+    activeBlendSlots = activeIndices.size();
+
     std::ostringstream activeIndicesStream;
     for (usize i = 0; i < activeIndices.size(); ++i) {
         if (i != 0) activeIndicesStream << ", ";
@@ -645,7 +942,9 @@ bool TryPreparePuppetChannelMapPrepass(const wpscene::WPImageObject& imageObject
                                        fs::VFS&                      vfs,
                                        wpscene::WPMaterial&          material,
                                        ShaderValueMap&               baseUniforms,
-                                       std::vector<uint32_t>*        activeBlendSlotsOut) {
+                                       std::vector<uint32_t>*        activeBlendSlotsOut,
+                                       std::string*                  prepassModeOut,
+                                       std::string*                  materialPathOut) {
     const bool sourceMaterialExplicitlyRequestsChannelMap =
         imageObject.material.shader == "puppettexturechannels" ||
         std::any_of(imageObject.material.textures.begin(),
@@ -654,6 +953,12 @@ bool TryPreparePuppetChannelMapPrepass(const wpscene::WPImageObject& imageObject
                         return textureName.find("_channelmap") != std::string::npos;
                     });
     const std::string channelMapMaterialPath = DerivePuppetChannelMapMaterialPath(imageObject.image);
+    if (prepassModeOut) {
+        prepassModeOut->clear();
+    }
+    if (materialPathOut) {
+        materialPathOut->clear();
+    }
     if (channelMapMaterialPath.empty()) {
         return false;
     }
@@ -662,18 +967,18 @@ bool TryPreparePuppetChannelMapPrepass(const wpscene::WPImageObject& imageObject
         return false; // channelmap is optional — many scenes don't have one
     }
 
+    if (! sourceMaterialExplicitlyRequestsChannelMap) {
+        LOG_INFO("native puppet channelmap prepass skipped because source material has no explicit channelmap route: image=%s shader=%s",
+                 imageObject.name.c_str(),
+                 imageObject.material.shader.c_str());
+        return false;
+    }
+
     nlohmann::json materialJson;
     wpscene::WPMaterial parsedMaterial;
     if (! PARSE_JSON(fs::GetFileContent(vfs, "/assets/" + channelMapMaterialPath), materialJson) ||
         ! parsedMaterial.FromJson(materialJson)) {
         LOG_ERROR("failed to load puppet channelmap material: %s", channelMapMaterialPath.c_str());
-        return false;
-    }
-
-    if (! sourceMaterialExplicitlyRequestsChannelMap) {
-        LOG_INFO("native puppet channelmap prepass skipped because source material has no explicit channelmap route: image=%s shader=%s",
-                 imageObject.name.c_str(),
-                 imageObject.material.shader.c_str());
         return false;
     }
 
@@ -695,11 +1000,21 @@ bool TryPreparePuppetChannelMapPrepass(const wpscene::WPImageObject& imageObject
 
     std::vector<float> blendMap(rowCount * 4u, 0.0f);
     const size_t       activeBlendSlots =
-        SeedPuppetChannelMapBlendMapFromVisibleLayers(imageObject, puppet, blendMap, activeBlendSlotsOut);
+        SeedPuppetChannelMapBlendMapFromVisibleLayers(imageObject,
+                                                      puppet,
+                                                      blendMap,
+                                                      activeBlendSlotsOut);
     baseUniforms["g_BlendMap"] = blendMap;
     LogPuppetChannelMapBlendIndexCoverage(imageObject, puppet, blendMap);
 
-    LOG_INFO("native puppet channelmap prepass enabled: image=%s material=%s rowCount=%u activeBlendSlots=%zu baseTexture=%s channelTexture=%s",
+    if (prepassModeOut) {
+        *prepassModeOut = "source-explicit";
+    }
+    if (materialPathOut) {
+        *materialPathOut = channelMapMaterialPath;
+    }
+
+    LOG_INFO("native puppet channelmap prepass enabled: image=%s material=%s mode=source-explicit rowCount=%u activeBlendSlots=%zu baseTexture=%s channelTexture=%s",
              imageObject.name.c_str(),
              channelMapMaterialPath.c_str(),
              rowCount,
@@ -2219,6 +2534,180 @@ void LoadConstvalue(SceneMaterial& material, const wpscene::WPMaterial& wpmat,
     }
 }
 
+std::vector<float> ShaderValueToVector(const ShaderValue& value) {
+    std::vector<float> result;
+    result.reserve(value.size());
+    for (size_t index = 0; index < value.size(); ++index) {
+        result.push_back(value[index]);
+    }
+    return result;
+}
+
+std::unordered_map<std::string, std::string>
+StringifyCombos(const std::unordered_map<std::string, int32_t>& combos) {
+    std::unordered_map<std::string, std::string> result;
+    for (const auto& entry : combos) {
+        result[entry.first] = std::to_string(entry.second);
+    }
+    return result;
+}
+
+std::unordered_map<std::string, std::string>
+StringifyCombos(const Combos& combos) {
+    std::unordered_map<std::string, std::string> result;
+    for (const auto& entry : combos) {
+        result[entry.first] = entry.second;
+    }
+    return result;
+}
+
+std::unordered_map<std::string, std::vector<float>>
+ShaderValuesToDebugMap(const ShaderValues& values) {
+    std::unordered_map<std::string, std::vector<float>> result;
+    for (const auto& entry : values) {
+        result[entry.first] = ShaderValueToVector(entry.second);
+    }
+    return result;
+}
+
+std::vector<wallpaper::debug::EffectCaptureTextureBindingInfo>
+BuildTextureBindings(const std::vector<std::string>& authored,
+                     const std::vector<std::string>& resolved) {
+    const size_t count = std::max(authored.size(), resolved.size());
+    std::vector<wallpaper::debug::EffectCaptureTextureBindingInfo> bindings;
+    bindings.reserve(count);
+    for (size_t index = 0; index < count; ++index) {
+        bindings.push_back({
+            .slot = static_cast<int>(index),
+            .authored = index < authored.size() ? authored[index] : std::string(),
+            .resolved = index < resolved.size() ? resolved[index] : std::string(),
+        });
+    }
+    return bindings;
+}
+
+std::vector<wallpaper::debug::EffectCaptureMaterialInfo>
+BuildAuthoredEffectMaterialDiagnostics(const std::vector<wpscene::WPImageEffect>& effects) {
+    std::vector<wallpaper::debug::EffectCaptureMaterialInfo> materials;
+    for (usize i_eff = 0; i_eff < effects.size(); ++i_eff) {
+        const auto& effect = effects.at(i_eff);
+        if (! effect.visible) {
+            continue;
+        }
+        for (usize i_mat = 0; i_mat < effect.materials.size(); ++i_mat) {
+            wpscene::WPMaterial material = effect.materials.at(i_mat);
+            std::string passTarget;
+            if (effect.passes.size() > i_mat) {
+                const auto& pass = effect.passes.at(i_mat);
+                material.MergePass(pass);
+                passTarget = pass.target;
+            }
+
+            wallpaper::debug::EffectCaptureMaterialInfo materialInfo;
+            materialInfo.effectIndex = static_cast<int>(i_eff + 1);
+            materialInfo.materialIndex = static_cast<int>(i_mat);
+            materialInfo.shader = material.shader;
+            materialInfo.authoredOutputRenderTarget = passTarget;
+            materialInfo.authoredTextures = material.textures;
+            materialInfo.textureBindings =
+                BuildTextureBindings(materialInfo.authoredTextures, {});
+            materialInfo.authoredCombos = StringifyCombos(material.combos);
+            materialInfo.materialValues = material.constantshadervalues;
+            materials.push_back(std::move(materialInfo));
+        }
+    }
+    return materials;
+}
+
+std::vector<wallpaper::debug::PuppetAnimationLayerInfo>
+BuildPuppetAnimationLayerDiagnostics(
+    const std::vector<WPPuppetLayer::AnimationLayer>& animationLayers,
+    const WPMdl* puppet) {
+    std::vector<wallpaper::debug::PuppetAnimationLayerInfo> layers;
+    layers.reserve(animationLayers.size());
+    for (const auto& animationLayer : animationLayers) {
+        wallpaper::debug::PuppetAnimationLayerInfo info {
+            .animationId = animationLayer.id,
+            .animationName = animationLayer.name,
+            .rate = animationLayer.rate,
+            .blend = animationLayer.blend,
+            .visible = animationLayer.visible,
+            .paused = animationLayer.paused,
+            .additive = animationLayer.additive,
+            .curTime = animationLayer.cur_time,
+        };
+
+        if (puppet && puppet->puppet) {
+            const auto animIt = std::find_if(
+                puppet->puppet->anims.begin(),
+                puppet->puppet->anims.end(),
+                [&animationLayer](const auto& anim) {
+                    return anim.id == animationLayer.id;
+                });
+            info.matchedAnimation = animIt != puppet->puppet->anims.end();
+            info.visibleAndWeighted =
+                info.matchedAnimation && animationLayer.visible && animationLayer.blend > 1.0e-6;
+            if (info.visibleAndWeighted) {
+                const size_t boneCount = animIt->bframes_array.size();
+                for (size_t boneIndex = 0; boneIndex < boneCount; ++boneIndex) {
+                    if (PuppetBoneFramesHaveMeaningfulDelta(animIt->bframes_array[boneIndex])) {
+                        info.activeBoneSlots.push_back(static_cast<int>(boneIndex));
+                    }
+                }
+            }
+        }
+
+        layers.push_back(std::move(info));
+    }
+    return layers;
+}
+
+void ApplyDebugPuppetAnimationLayerOverrides(
+    wpscene::WPImageObject& imageObject,
+    const std::vector<wallpaper::debug::PuppetAnimationLayerOverride>& overrides) {
+    if (overrides.empty() || imageObject.puppet_layers.empty()) {
+        return;
+    }
+
+    for (const auto& rule : overrides) {
+        if (rule.layerId != imageObject.id) {
+            continue;
+        }
+        for (auto& animationLayer : imageObject.puppet_layers) {
+            if (animationLayer.id != rule.animationId) {
+                continue;
+            }
+            if (rule.visible) {
+                animationLayer.visible = *rule.visible;
+            }
+            if (rule.paused) {
+                animationLayer.paused = *rule.paused;
+            }
+            if (rule.additive) {
+                animationLayer.additive = *rule.additive;
+            }
+            if (rule.blend) {
+                animationLayer.blend = *rule.blend;
+            }
+            if (rule.rate) {
+                animationLayer.rate = *rule.rate;
+            }
+            if (rule.curTime) {
+                animationLayer.cur_time = *rule.curTime;
+            }
+            LOG_INFO("debug puppet animation override applied: layer=%d animation=%d visible=%d paused=%d additive=%d blend=%.3f rate=%.3f curTime=%.3f",
+                     imageObject.id,
+                     animationLayer.id,
+                     animationLayer.visible ? 1 : 0,
+                     animationLayer.paused ? 1 : 0,
+                     animationLayer.additive ? 1 : 0,
+                     animationLayer.blend,
+                     animationLayer.rate,
+                     animationLayer.cur_time);
+        }
+    }
+}
+
 // parse
 
 void ParseCamera(ParseContext& context, const wpscene::WPScene& sc, bool useScenePerspectiveCamera) {
@@ -2371,6 +2860,11 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         }
     }
 
+    if (context.scene && context.scene->debugEffectCaptures.enabled()) {
+        ApplyDebugPuppetAnimationLayerOverrides(
+            wpimgobj, context.scene->debugEffectCaptures.puppetAnimationLayerOverrides);
+    }
+
     // Apply pending tint overlays to solid layers with default black color.
     // WE scenes use scripts to set solid layer colors from scene properties;
     // we statically resolve these by matching solid layers to detected
@@ -2521,8 +3015,22 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     effectCaptureInfo.keepLayer = puppetEffectDecision.keepLayer;
     effectCaptureInfo.keepEffects = puppetEffectDecision.keepEffects;
     effectCaptureInfo.strippedEffects = puppetEffectDecision.strippedEffects;
-    effectCaptureInfo.forceAlphaOne = puppetEffectDecision.forceAlphaOne;
     effectCaptureInfo.policyReason = std::string(puppetEffectDecision.reason);
+    effectCaptureInfo.puppetAnimationLayers =
+        BuildPuppetAnimationLayerDiagnostics(wpimgobj.puppet_layers, puppet.get());
+    if (puppet) {
+        std::vector<int> activePuppetCutoutSlots;
+        for (const auto& animationLayer : effectCaptureInfo.puppetAnimationLayers) {
+            for (const int slot : animationLayer.activeBoneSlots) {
+                if (std::find(activePuppetCutoutSlots.begin(), activePuppetCutoutSlots.end(), slot) ==
+                    activePuppetCutoutSlots.end()) {
+                    activePuppetCutoutSlots.push_back(slot);
+                }
+            }
+        }
+        effectCaptureInfo.publish.puppetCutoutSlotCoverage =
+            BuildPuppetCutoutSlotCoverage(*puppet, activePuppetCutoutSlots);
+    }
     for (const auto& effect : effectObjects) {
         effectCaptureInfo.effectNames.push_back(effect.name);
         for (const auto& material : effect.materials) {
@@ -2532,13 +3040,26 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     effectCaptureInfo.candidateFamilies = candidateClassification.candidateFamilies;
     effectCaptureInfo.candidateMixFamilies = candidateClassification.candidateMixFamilies;
     effectCaptureInfo.candidateChainShape = candidateClassification.candidateChainShape;
+    effectCaptureInfo.candidateEffectClass = candidateClassification.candidateEffectClass;
     effectCaptureInfo.candidateRisk = candidateClassification.candidateRisk;
     effectCaptureInfo.candidateBlockedReason = candidateClassification.candidateBlockedReason;
     effectCaptureInfo.candidateChecks = candidateClassification.candidateChecks;
+    auto refreshEffectCaptureEffectLists = [&]() {
+        effectCaptureInfo.effectNames.clear();
+        effectCaptureInfo.materialShaders.clear();
+        effectCaptureInfo.visibleEffectCount = count_eff;
+        for (const auto& effect : effectObjects) {
+            effectCaptureInfo.effectNames.push_back(effect.name);
+            for (const auto& material : effect.materials) {
+                effectCaptureInfo.materialShaders.push_back(material.shader);
+            }
+        }
+    };
     if (context.scene) {
         effectCaptureInfo.debugProbeRequested =
             context.scene->debugEffectCaptures.shouldProbeLayer(wpimgobj.id) ||
             context.scene->debugEffectCaptures.shouldProbeHighRiskLayer(wpimgobj.id);
+        wallpaper::debug::recordPuppetAnimationLayerInventory(*context.scene, effectCaptureInfo);
     }
     const std::string debugProbeReason =
         context.scene ? wallpaper::debug::strippedEffectProbeReason(
@@ -2551,8 +3072,127 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         effectCaptureInfo.debugProbeReason =
             debugProbeStrippedLayer ? debugProbeReason : "not-eligible";
     }
+    if (debugProbeStrippedLayer && context.scene &&
+        (context.scene->debugEffectCaptures.probeMaxEffects >= 0 ||
+         context.scene->debugEffectCaptures.puppetEffectRouteOnly)) {
+        const bool routeOnly = context.scene->debugEffectCaptures.puppetEffectRouteOnly;
+        const int maxEffects = routeOnly ? 0 : context.scene->debugEffectCaptures.probeMaxEffects >= 0
+            ? context.scene->debugEffectCaptures.probeMaxEffects
+            : count_eff;
+        const auto limitDecision =
+            wallpaper::debug::decideEffectProbeLimit(
+                count_eff,
+                maxEffects,
+                routeOnly);
+        effectCaptureInfo.debugProbeMaxEffects = maxEffects;
+        effectCaptureInfo.debugProbeOriginalVisibleEffectCount = count_eff;
+        effectCaptureInfo.debugProbeKeptVisibleEffectCount =
+            limitDecision.keptVisibleEffectCount;
+        effectCaptureInfo.debugProbeEffectLimitTruncated =
+            limitDecision.effectLimitTruncated;
+        effectCaptureInfo.debugProbeRouteOnly = limitDecision.routeOnly;
+    }
+    auto applyDebugProbeLimit = [&](const char* reason) {
+        if (! context.scene ||
+            (context.scene->debugEffectCaptures.probeMaxEffects < 0 &&
+             ! context.scene->debugEffectCaptures.puppetEffectRouteOnly)) {
+            return false;
+        }
+
+        const bool routeOnly =
+            context.scene->debugEffectCaptures.puppetEffectRouteOnly && puppet != nullptr;
+        const int maxEffects = routeOnly ? 0 : context.scene->debugEffectCaptures.probeMaxEffects >= 0
+            ? context.scene->debugEffectCaptures.probeMaxEffects
+            : count_eff;
+        const auto limitDecision =
+            wallpaper::debug::decideEffectProbeLimit(
+                count_eff,
+                maxEffects,
+                routeOnly);
+        std::vector<wpscene::WPImageEffect> limitedEffectObjects;
+        limitedEffectObjects.reserve(effectObjects.size());
+        int keptVisibleEffectCount = 0;
+        if (! limitDecision.routeOnly) {
+            for (const auto& effect : effectObjects) {
+                if (! effect.visible) {
+                    if (keptVisibleEffectCount < limitDecision.keptVisibleEffectCount) {
+                        limitedEffectObjects.push_back(effect);
+                    }
+                    continue;
+                }
+                if (keptVisibleEffectCount >= limitDecision.keptVisibleEffectCount) {
+                    break;
+                }
+                limitedEffectObjects.push_back(effect);
+                keptVisibleEffectCount++;
+            }
+        }
+        LOG_INFO("debug effect probe limiting layer: id=%d name=%s maxEffects=%d routeOnly=%d originalVisible=%d keptVisible=%d keepRoute=%d",
+                 wpimgobj.id,
+                 wpimgobj.name.c_str(),
+                 maxEffects,
+                 limitDecision.routeOnly ? 1 : 0,
+                 count_eff,
+                 limitDecision.keptVisibleEffectCount,
+                 limitDecision.keepEffectRouteActive ? 1 : 0);
+        effectObjects = std::move(limitedEffectObjects);
+        count_eff = limitDecision.keptVisibleEffectCount;
+        hasEffect = limitDecision.keepEffectRouteActive;
+        effectCaptureInfo.debugProbeReason = reason ? reason : "";
+        effectCaptureInfo.debugProbeMaxEffects = maxEffects;
+        effectCaptureInfo.debugProbeOriginalVisibleEffectCount =
+            limitDecision.routeOnly
+                ? effectCaptureInfo.visibleEffectCount
+                : std::max(effectCaptureInfo.visibleEffectCount,
+                           limitDecision.keptVisibleEffectCount);
+        effectCaptureInfo.debugProbeKeptVisibleEffectCount =
+            limitDecision.keptVisibleEffectCount;
+        effectCaptureInfo.debugProbeEffectLimitTruncated =
+            limitDecision.effectLimitTruncated;
+        effectCaptureInfo.debugProbeRouteOnly = limitDecision.routeOnly;
+        refreshEffectCaptureEffectLists();
+        return true;
+    };
+    if (! debugProbeStrippedLayer && context.scene &&
+        wallpaper::debug::shouldLimitRequestedEffectProbeLayer(
+            context.scene->debugEffectCaptures,
+            effectCaptureInfo)) {
+        const char* reason =
+            context.scene->debugEffectCaptures.shouldProbeHighRiskLayer(wpimgobj.id)
+                ? "high-risk-layer-id-probe"
+                : "layer-id-probe";
+        applyDebugProbeLimit(reason);
+    }
     if (puppetEffectDecision.reason == "puppet-alpha-strip") {
         if (context.scene && context.scene->debugEffectCaptures.enabled()) {
+            if (effectCaptureInfo.candidateChecks.isProtectedPuppetPath) {
+                effectCaptureInfo.effectMaterials =
+                    BuildAuthoredEffectMaterialDiagnostics(effectObjects);
+                effectCaptureInfo.publish.enabled = true;
+                effectCaptureInfo.publish.parentId = wpimgobj.parent;
+                effectCaptureInfo.publish.objectSize = {
+                    static_cast<float>(wpimgobj.size[0]),
+                    static_cast<float>(wpimgobj.size[1]),
+                };
+                effectCaptureInfo.publish.origin = {
+                    wpimgobj.origin[0],
+                    wpimgobj.origin[1],
+                    wpimgobj.origin[2],
+                };
+                effectCaptureInfo.publish.scale = {
+                    wpimgobj.scale[0],
+                    wpimgobj.scale[1],
+                    wpimgobj.scale[2],
+                };
+                effectCaptureInfo.publish.angles = {
+                    wpimgobj.angles[0],
+                    wpimgobj.angles[1],
+                    wpimgobj.angles[2],
+                };
+                effectCaptureInfo.publish.publishFinalOutput = true;
+                effectCaptureInfo.publish.finalPublishRenderTarget =
+                    std::string(SpecTex_Default);
+            }
             wallpaper::debug::recordStrippedEffectCandidate(*context.scene, effectCaptureInfo);
         }
         if (debugProbeStrippedLayer) {
@@ -2560,6 +3200,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                      wpimgobj.id,
                      wpimgobj.name.c_str(),
                      debugProbeReason.c_str());
+            applyDebugProbeLimit(debugProbeReason.c_str());
         } else {
             LOG_INFO("stripping %d effects from layer (alpha fix): name=%s",
                      count_eff, wpimgobj.name.c_str());
@@ -2568,17 +3209,19 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             effectObjects.clear();
             if (! puppetEffectDecision.keepLayer) return;
         }
-    } else if (puppetEffectDecision.reason == "essential-effect" &&
-               puppetEffectDecision.forceAlphaOne) {
-        wpimgobj.alpha = 1.0f;
     }
 
     bool                  usePuppetChannelMapPrepass { false };
     bool                  routePuppetPrepassThroughAuthoredEffects { false };
     bool                  useStandalonePuppetFinalDisplay { false };
     bool                  useStandalonePuppetBaseDisplay { false };
+    bool                  useDeferredPuppetFinalRoute { false };
     bool                  zeroSlotChannelMapFallback { false };
+    const std::string     puppetFinalMeshOverride =
+        context.scene ? context.scene->debugEffectCaptures.puppetFinalMeshOverride : std::string();
     std::vector<uint32_t> activePuppetChannelBlendSlots;
+    std::string           channelMapPrepassMode;
+    std::string           channelMapMaterialPath;
     std::vector<WPPuppetLayer::AnimationLayer> renderPuppetLayers = wpimgobj.puppet_layers;
     {
         if (! hasEffect) {
@@ -2619,12 +3262,16 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                                                   vfs,
                                                   sourceMaterial,
                                                   baseConstSvs,
-                                                  &activePuppetChannelBlendSlots);
+                                                  &activePuppetChannelBlendSlots,
+                                                  &channelMapPrepassMode,
+                                                  &channelMapMaterialPath);
             if (usePuppetChannelMapPrepass && activePuppetChannelBlendSlots.empty()) {
-                LOG_INFO("native puppet channelmap prepass disabled because no active visible blend slots remain: image=%s",
+                LOG_INFO("native puppet channelmap prepass disabled because no active blend slots remain: image=%s",
                          wpimgobj.name.c_str());
                 usePuppetChannelMapPrepass = false;
                 zeroSlotChannelMapFallback = true;
+                channelMapPrepassMode.clear();
+                channelMapMaterialPath.clear();
                 sourceMaterial             = wpimgobj.material;
                 svData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
                 WPMdlParser::AddPuppetShaderInfo(shaderInfo, *puppet);
@@ -2632,8 +3279,18 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                          wpimgobj.name.c_str(),
                          count_eff);
             } else if (! usePuppetChannelMapPrepass) {
+                const bool forceLegacyPuppetFinalRoute =
+                    puppetFinalMeshOverride == "layer-card" ||
+                    puppetFinalMeshOverride == "image-space";
+                useDeferredPuppetFinalRoute = ! forceLegacyPuppetFinalRoute;
                 svData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
-                WPMdlParser::AddPuppetShaderInfo(shaderInfo, *puppet);
+                if (useDeferredPuppetFinalRoute) {
+                    LOG_INFO("deferred puppet-final route enabled: image=%s authoredEffects=%d",
+                             wpimgobj.name.c_str(),
+                             count_eff);
+                } else {
+                    WPMdlParser::AddPuppetShaderInfo(shaderInfo, *puppet);
+                }
             }
         }
 
@@ -2676,14 +3333,27 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     SceneMesh effct_final_mesh {};
     auto      spMesh = std::make_shared<SceneMesh>();
     auto&     mesh   = *spMesh;
+    auto      effectViewport = wallpaper::policy::decideLayerEffectViewport({
+        .objectWidth = wpimgobj.size[0],
+        .objectHeight = wpimgobj.size[1],
+    });
+    wallpaper::debug::EffectCaptureMeshBoundsInfo effectInputMeshBoundsForViewport;
+    bool effectInputMeshBoundsCaptured { false };
+    std::array<float, 2> textureMapRate { 1.0f, 1.0f };
 
     {
         // deal with pow of 2
-        std::array<float, 2> mapRate { 1.0f, 1.0f };
         if (! wpimgobj.nopadding &&
             exists(material.customShader.constValues, WE_GLTEX_RESOLUTION_NAMES[0])) {
             const auto& r = material.customShader.constValues.at(WE_GLTEX_RESOLUTION_NAMES[0]);
-            mapRate       = { r[2] / r[0], r[3] / r[1] };
+            textureMapRate = { r[2] / r[0], r[3] / r[1] };
+            if (puppet && (std::abs(textureMapRate[0] - 1.0f) > 1.0e-6f ||
+                           std::abs(textureMapRate[1] - 1.0f) > 1.0e-6f)) {
+                LOG_INFO("native puppet texture map-rate applied: image=%s rate=(%.6f, %.6f)",
+                         wpimgobj.name.c_str(),
+                         textureMapRate[0],
+                         textureMapRate[1]);
+            }
         }
 
         if (puppet) {
@@ -2699,16 +3369,58 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     routePuppetPrepassThroughAuthoredEffects = true;
                     useStandalonePuppetFinalDisplay = true;
                     useStandalonePuppetBaseDisplay  = true;
+                } else if (useDeferredPuppetFinalRoute) {
+                    GenCardMesh(mesh,
+                                { static_cast<uint16_t>(wpimgobj.size[0]),
+                                  static_cast<uint16_t>(wpimgobj.size[1]) },
+                                textureMapRate);
+                    WPMdlParser::GenPuppetMesh(effct_final_mesh, *puppet, textureMapRate);
+                    routePuppetPrepassThroughAuthoredEffects = true;
+
+                    wpscene::WPImageEffect puppetEffect;
+                    puppetEffect.name = "yakkai_deferred_puppet_final";
+                    wpscene::WPMaterial puppetMaterial = wpimgobj.material;
+                    if (puppetMaterial.textures.empty()) {
+                        puppetMaterial.textures.push_back("");
+                    } else {
+                        puppetMaterial.textures[0].clear();
+                    }
+                    WPMdlParser::AddPuppetMatInfo(puppetMaterial, *puppet);
+                    puppetEffect.materials.push_back(std::move(puppetMaterial));
+                    effectObjects.push_back(std::move(puppetEffect));
+                    refreshEffectCaptureEffectLists();
+
+                    LOG_INFO("routing flat puppet source through authored effects before deferred puppet final mesh: image=%s authoredEffects=%d",
+                             wpimgobj.name.c_str(),
+                             count_eff);
                 } else {
                     svData.puppet_layer = WPPuppetLayer(puppet->puppet);
                     svData.puppet_layer.prepared(renderPuppetLayers);
-                    WPMdlParser::GenPuppetMesh(mesh, *puppet);
+                    WPMdlParser::GenPuppetMesh(mesh, *puppet, textureMapRate);
+                    effectInputMeshBoundsForViewport = DebugMeshBounds(mesh);
+                    effectInputMeshBoundsCaptured = true;
+                    if (effectInputMeshBoundsForViewport.positionMin.size() >= 2 &&
+                        effectInputMeshBoundsForViewport.positionMax.size() >= 2) {
+                        effectViewport = wallpaper::policy::decideLayerEffectViewport({
+                            .objectWidth = wpimgobj.size[0],
+                            .objectHeight = wpimgobj.size[1],
+                            .hasMeshBounds = true,
+                            .meshPositionMinX = effectInputMeshBoundsForViewport.positionMin[0],
+                            .meshPositionMinY = effectInputMeshBoundsForViewport.positionMin[1],
+                            .meshPositionMaxX = effectInputMeshBoundsForViewport.positionMax[0],
+                            .meshPositionMaxY = effectInputMeshBoundsForViewport.positionMax[1],
+                        });
+                    }
                     GenCardMesh(effct_final_mesh,
-                                { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] });
+                                { static_cast<uint16_t>(effectViewport.width),
+                                  static_cast<uint16_t>(effectViewport.height) });
                     useStandalonePuppetFinalDisplay = true;
-                    LOG_INFO("routing full puppet render through offscreen target before flat final effect publish: image=%s authoredEffects=%d",
+                    LOG_INFO("routing full puppet render through offscreen target before standalone puppet final publish: image=%s authoredEffects=%d viewport=%dx%d expanded=%d",
                              wpimgobj.name.c_str(),
-                             count_eff);
+                             count_eff,
+                             effectViewport.width,
+                             effectViewport.height,
+                             effectViewport.expandedToMeshBounds ? 1 : 0);
                 }
 
                 if (routePuppetPrepassThroughAuthoredEffects) {
@@ -2719,19 +3431,41 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             } else {
                 svData.puppet_layer = WPPuppetLayer(puppet->puppet);
                 svData.puppet_layer.prepared(renderPuppetLayers);
-                WPMdlParser::GenPuppetMesh(mesh, *puppet);
+                WPMdlParser::GenPuppetMesh(mesh, *puppet, textureMapRate);
             }
         }
         if (! puppet) {
-            GenCardMesh(mesh, { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] }, mapRate);
+            GenCardMesh(mesh,
+                        { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] },
+                        textureMapRate);
             GenCardMesh(effct_final_mesh,
                         { (uint16_t)wpimgobj.size[0], (uint16_t)wpimgobj.size[1] });
         }
     }
+    std::vector<int> activePuppetChannelBlendSlotIds;
+    activePuppetChannelBlendSlotIds.reserve(activePuppetChannelBlendSlots.size());
+    for (const uint32_t slot : activePuppetChannelBlendSlots) {
+        activePuppetChannelBlendSlotIds.push_back(static_cast<int>(slot));
+    }
+    const std::string effectivePuppetFinalMeshOverride =
+        useDeferredPuppetFinalRoute ? "deferred-puppet-final" : puppetFinalMeshOverride;
+    const auto puppetEffectRoutePlan = wallpaper::decidePuppetEffectRoutePlan({
+        .puppetLayer = puppet != nullptr,
+        .fullscreen = wpimgobj.fullscreen,
+        .composelayer = isCompose,
+        .effectRouteActive = hasEffect,
+        .usePuppetChannelMapPrepass = usePuppetChannelMapPrepass,
+        .routePuppetPrepassThroughAuthoredEffects = routePuppetPrepassThroughAuthoredEffects,
+        .debugRouteOnly = effectCaptureInfo.debugProbeRouteOnly,
+        .puppetFinalMeshOverride = effectivePuppetFinalMeshOverride,
+        .activeChannelBlendSlots = activePuppetChannelBlendSlotIds,
+    });
+    useStandalonePuppetFinalDisplay =
+        puppetEffectRoutePlan.useStandalonePuppetFinalDisplay;
     // material blendmode for last step to use
     auto imgBlendMode = material.blenmode;
     // disable img material blend, as it's the first effect node now
-    if (hasEffect) {
+    if (hasEffect && ! puppetEffectRoutePlan.effectInputMaterialPreservesLayerBlendMode) {
         material.blenmode = BlendMode::Normal;
     }
     mesh.AddMaterial(std::move(material));
@@ -2740,6 +3474,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     context.shader_updater->SetNodeData(spImgNode.get(), svData);
     SceneNode standaloneDisplayTransform;
     bool      hasStandaloneDisplayTransform = false;
+    std::vector<std::shared_ptr<SceneNode>> standaloneDisplayNodes;
     if (hasEffect) {
         auto& scene = *context.scene;
         // currently use addr for unique
@@ -2758,8 +3493,8 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             // Create per-layer effect camera. Positioned after CopyTrans
             // resets the node so the camera matches the node's post-reset
             // world position (parent chain only, no local offset).
-            i32 w = (i32)wpimgobj.size[0];
-            i32 h = (i32)wpimgobj.size[1];
+            i32 w = effectViewport.width;
+            i32 h = effectViewport.height;
             scene.cameras[nodeAddr] = std::make_shared<SceneCamera>(w, h, -1.0f, 1.0f);
             // Camera node positioning deferred to after CopyTrans below
         }
@@ -2767,20 +3502,26 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         std::string effect_ppong_a, effect_ppong_b;
         effect_ppong_a = WE_EFFECT_PPONG_PREFIX_A.data() + nodeAddr;
         effect_ppong_b = WE_EFFECT_PPONG_PREFIX_B.data() + nodeAddr;
+        const bool debugRouteOnlyCapture =
+            scene.debugEffectCaptures.puppetEffectRouteOnly &&
+            effectCaptureInfo.debugProbeRouteOnly &&
+            effectObjects.empty();
         const bool debugEffectCaptures =
-            scene.debugEffectCaptures.enabled() && ! effectObjects.empty();
+            scene.debugEffectCaptures.enabled() && (! effectObjects.empty() || debugRouteOnlyCapture);
         std::string debugEffectInputTarget;
         std::string debugEffectOutputSourceTarget;
         std::string debugEffectOutputTarget;
+        std::string debugDefaultBeforeEffectTarget;
+        std::string debugDefaultAfterEffectTarget;
         // set image effect
         auto imgEffectLayer = std::make_shared<SceneImageEffectLayer>(
-            spImgNode.get(), wpimgobj.size[0], wpimgobj.size[1], effect_ppong_a, effect_ppong_b);
+            spImgNode.get(), effectViewport.width, effectViewport.height, effect_ppong_a, effect_ppong_b);
         {
             imgEffectLayer->SetFinalBlend(imgBlendMode);
             if (wpimgobj.fullscreen || isCompose) {
                 imgEffectLayer->SetFullscreen(true);
             }
-            if (useStandalonePuppetFinalDisplay) {
+            if (! puppetEffectRoutePlan.publishFinalOutput) {
                 imgEffectLayer->SetPublishFinalOutput(false);
             }
             imgEffectLayer->FinalMesh().ChangeMeshDataFrom(effct_final_mesh);
@@ -2792,24 +3533,14 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             if (isCompose) {
             } else {
                 spImgNode->CopyTrans(SceneNode());
-                // Position effect camera at the parent container's world
-                // position. After CopyTrans reset, the node's local transform
-                // is identity, but the scene graph parent (attached later via
-                // AttachObjectNode) will shift the mesh. The camera must match.
-                // Note: Parent() is NULL here — node isn't attached yet — so
-                // we look up the parent from already-parsed object_nodes.
-                // The effect camera stays at (0,0,0) to match the node's
-                // post-reset position. The node has no parent during the base
-                // pass (AttachObjectNode runs later), so the mesh renders at
-                // local origin — the camera must be there too.
                 scene.cameras.at(nodeAddr)->AttatchNode(context.effect_camera_node);
             }
             scene.cameras.at(nodeAddr)->AttatchImgEffect(imgEffectLayer);
         }
         // set renderTarget for ping-pong operate
         {
-            uint16_t rtW = (uint16_t)wpimgobj.size[0];
-            uint16_t rtH = (uint16_t)wpimgobj.size[1];
+            uint16_t rtW = static_cast<uint16_t>(effectViewport.width);
+            uint16_t rtH = static_cast<uint16_t>(effectViewport.height);
             scene.renderTargets[effect_ppong_a] = {
                 .width      = rtW,
                 .height     = rtH,
@@ -2833,13 +3564,111 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     scene.renderTargets.at(
                         useStandalonePuppetFinalDisplay ? effect_ppong_a : debugEffectOutputSourceTarget);
                 scene.renderTargets[debugEffectOutputTarget].allowReuse = false;
+                effectCaptureInfo.publish.enabled = true;
+                effectCaptureInfo.publish.parentId = wpimgobj.parent;
+                effectCaptureInfo.publish.hasParsedParentNode =
+                    context.object_nodes.count(wpimgobj.parent) != 0;
+                effectCaptureInfo.publish.objectSize = {
+                    static_cast<float>(wpimgobj.size[0]),
+                    static_cast<float>(wpimgobj.size[1]),
+                };
+                effectCaptureInfo.publish.origin = {
+                    wpimgobj.origin[0],
+                    wpimgobj.origin[1],
+                    wpimgobj.origin[2],
+                };
+                effectCaptureInfo.publish.scale = {
+                    wpimgobj.scale[0],
+                    wpimgobj.scale[1],
+                    wpimgobj.scale[2],
+                };
+                effectCaptureInfo.publish.angles = {
+                    wpimgobj.angles[0],
+                    wpimgobj.angles[1],
+                    wpimgobj.angles[2],
+                };
+                effectCaptureInfo.publish.finalBlendMode = static_cast<int>(imgBlendMode);
+                effectCaptureInfo.publish.fullscreen = wpimgobj.fullscreen;
+                effectCaptureInfo.publish.composelayer = isCompose;
+                effectCaptureInfo.publish.puppetLayer = puppet != nullptr;
+                effectCaptureInfo.publish.effectInputViewportSize = {
+                    static_cast<float>(effectViewport.width),
+                    static_cast<float>(effectViewport.height),
+                };
+                effectCaptureInfo.publish.effectInputViewportExpanded =
+                    effectViewport.expandedToMeshBounds;
+                effectCaptureInfo.publish.standalonePuppetFinalDisplay = useStandalonePuppetFinalDisplay;
+                effectCaptureInfo.publish.publishFinalOutput =
+                    puppetEffectRoutePlan.publishFinalOutput;
+                effectCaptureInfo.publish.finalNodeUsesOriginalParent =
+                    ! wpimgobj.fullscreen && ! isCompose;
+                effectCaptureInfo.publish.effectInputNodeReset = ! isCompose;
+                effectCaptureInfo.publish.effectInputMaterialPreservesLayerBlendMode =
+                    puppetEffectRoutePlan.effectInputMaterialPreservesLayerBlendMode;
+                effectCaptureInfo.publish.effectInputMeshKind =
+                    puppetEffectRoutePlan.effectInputMeshKind;
+                effectCaptureInfo.publish.effectFinalMeshKind =
+                    puppetEffectRoutePlan.effectFinalMeshKind;
+                effectCaptureInfo.publish.standaloneFinalMeshKind =
+                    puppetEffectRoutePlan.standaloneFinalMeshKind;
+                effectCaptureInfo.publish.finalDisplayRoute =
+                    puppetEffectRoutePlan.finalDisplayRoute;
+                effectCaptureInfo.publish.standaloneDisplayAttachMode =
+                    puppetEffectRoutePlan.standaloneDisplayAttachMode;
+                effectCaptureInfo.publish.routeRisk = puppetEffectRoutePlan.routeRisk;
+                effectCaptureInfo.publish.effectInputRenderTarget = effect_ppong_a;
+                effectCaptureInfo.publish.effectPingPongA = effect_ppong_a;
+                effectCaptureInfo.publish.effectPingPongB = effect_ppong_b;
+                effectCaptureInfo.publish.effectOutputSourceTarget = debugEffectOutputSourceTarget;
+                effectCaptureInfo.publish.finalPublishRenderTarget = std::string(SpecTex_Default);
+                effectCaptureInfo.publish.materialOutputCaptureTiming =
+                    "effect-command-copy-after-layer-node";
+                effectCaptureInfo.publish.finalPublishCaptureTiming =
+                    "post-frame-render-target-dump";
+                effectCaptureInfo.publish.defaultRtBoundaryCaptureTiming =
+                    "effect-command-copy-around-effect-layer";
+                effectCaptureInfo.publish.channelMapPrepassMode = channelMapPrepassMode;
+                effectCaptureInfo.publish.channelMapMaterialPath = channelMapMaterialPath;
+                effectCaptureInfo.publish.activePuppetChannelBlendSlots.clear();
+                for (const uint32_t slot : activePuppetChannelBlendSlots) {
+                    effectCaptureInfo.publish.activePuppetChannelBlendSlots.push_back(
+                        static_cast<int>(slot));
+                }
+                effectCaptureInfo.publish.effectInputLocalTransform =
+                    DebugNodeTransform(*spImgNode);
+                if (hasStandaloneDisplayTransform) {
+                    effectCaptureInfo.publish.standaloneDisplayLocalTransform =
+                        DebugNodeTransform(standaloneDisplayTransform);
+                }
+                effectCaptureInfo.publish.standaloneDisplayParentId = wpimgobj.parent;
+                effectCaptureInfo.publish.standaloneDisplayHasParsedParentNode =
+                    context.object_nodes.count(wpimgobj.parent) != 0;
+                effectCaptureInfo.publish.standaloneFinalTexture =
+                    useStandalonePuppetFinalDisplay
+                        ? ResolveEffectPingPongFinalTarget(effect_ppong_a,
+                                                           effect_ppong_b,
+                                                           count_eff)
+                        : std::string();
+                effectCaptureInfo.publish.effectInputMeshBounds =
+                    effectInputMeshBoundsCaptured ? effectInputMeshBoundsForViewport : DebugMeshBounds(*spMesh);
+                effectCaptureInfo.publish.effectFinalMeshBounds = DebugMeshBounds(effct_final_mesh);
                 wallpaper::debug::registerEffectCapture(
                     scene, effectCaptureInfo, "effect-input", debugEffectInputTarget);
+                debugDefaultBeforeEffectTarget =
+                    wallpaper::debug::registerDefaultRtBoundaryCapture(scene,
+                                                                       effectCaptureInfo,
+                                                                       "default-before-effect",
+                                                                       nodeAddr);
                 wallpaper::debug::registerEffectCapture(
                     scene,
                     effectCaptureInfo,
                     "effect-output",
                     debugEffectOutputTarget);
+                debugDefaultAfterEffectTarget =
+                    wallpaper::debug::registerDefaultRtBoundaryCapture(scene,
+                                                                       effectCaptureInfo,
+                                                                       "default-after-effect",
+                                                                       nodeAddr);
                 wallpaper::debug::registerEffectCapture(
                     scene, effectCaptureInfo, "final-publish", SpecTex_Default);
             }
@@ -2877,8 +3706,8 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     } else {
                         // i+2 for not override object's rt
                         scene.renderTargets[rtname] = {
-                            .width      = (uint16_t)(wpimgobj.size[0] / (float)wpfbo.scale),
-                            .height     = (uint16_t)(wpimgobj.size[1] / (float)wpfbo.scale),
+                            .width      = (uint16_t)(effectViewport.width / (float)wpfbo.scale),
+                            .height     = (uint16_t)(effectViewport.height / (float)wpfbo.scale),
                             .allowReuse = true
                         };
                     }
@@ -2888,6 +3717,14 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             // load! effect commands
             {
                 if (debugEffectCaptures && i_eff == 0 && ! debugEffectInputTarget.empty()) {
+                    if (! debugDefaultBeforeEffectTarget.empty()) {
+                        imgEffect->commands.push_back({
+                            .cmd      = SceneImageEffect::CmdType::Copy,
+                            .dst      = debugDefaultBeforeEffectTarget,
+                            .src      = std::string(SpecTex_Default),
+                            .afterpos = 0,
+                        });
+                    }
                     imgEffect->commands.push_back({ .cmd      = SceneImageEffect::CmdType::Copy,
                                                     .dst      = debugEffectInputTarget,
                                                     .src      = inRT,
@@ -2912,6 +3749,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             }
 
             bool eff_mat_ok { true };
+            bool debugAddedMaterialOutputCapture { false };
 
             for (usize i_mat = 0; i_mat < wpeffobj.materials.size(); i_mat++) {
                 wpscene::WPMaterial wpmat = wpeffobj.materials.at(i_mat);
@@ -2946,6 +3784,12 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 if (wpmat.textures.at(0).empty()) {
                     wpmat.textures[0] = inRT;
                 }
+                if (puppet && useStandalonePuppetFinalDisplay &&
+                    !usePuppetChannelMapPrepass && ShouldPreservePuppetSourceAlphaForShader(wpmat.shader)) {
+                    // Keep this compatibility patch limited to shaders with
+                    // pass-boundary evidence proving WE preserves source alpha.
+                    wpmat.combos["YAKKAI_PRESERVE_SOURCE_ALPHA"] = 1;
+                }
                 auto         spEffNode  = std::make_shared<SceneNode>();
                 std::string  effmataddr = getAddr(spEffNode.get());
                 WPShaderInfo wpEffShaderInfo;
@@ -2969,6 +3813,107 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
 
                 // load glname from alias and load to constvalue
                 LoadConstvalue(material, wpmat, wpEffShaderInfo);
+                bool debugDuplicateFinalMaterialNode { false };
+                if (debugEffectCaptures) {
+                    wallpaper::debug::EffectCaptureMaterialInfo materialInfo;
+                    materialInfo.effectIndex = i_eff + 1;
+                    materialInfo.materialIndex = static_cast<int>(i_mat);
+                    materialInfo.shader = wpmat.shader;
+                    materialInfo.authoredTextures = wpmat.textures;
+                    materialInfo.resolvedTextures = material.textures;
+                    materialInfo.textureBindings =
+                        BuildTextureBindings(materialInfo.authoredTextures, materialInfo.resolvedTextures);
+                    materialInfo.authoredCombos = StringifyCombos(wpmat.combos);
+                    materialInfo.resolvedCombos = StringifyCombos(wpEffShaderInfo.combos);
+                    materialInfo.materialValues = wpmat.constantshadervalues;
+                    materialInfo.resolvedConstValues =
+                        ShaderValuesToDebugMap(material.customShader.constValues);
+                    materialInfo.defines = material.defines;
+                    materialInfo.authoredOutputRenderTarget = matOutRT;
+                    materialInfo.resolvedOutputRenderTarget = matOutRT;
+
+                    if (wpmat.shader.find("lut_loader") != std::string::npos) {
+                        const int effectIndex = i_eff + 1;
+                        const int materialIndex = static_cast<int>(i_mat);
+                        const bool isFinalPublishedMaterial =
+                            sstart_with(matOutRT, WE_EFFECT_PPONG_PREFIX_B) &&
+                            ! useStandalonePuppetFinalDisplay && i_eff == count_eff - 1 &&
+                            i_mat + 1 == wpeffobj.materials.size();
+                        const std::string debugFinalOutputSource =
+                            std::string(WE_DEBUG_EFFECT_FINAL_OUTPUT_PREFIX) + nodeAddr;
+                        std::string sourceRenderTarget = matOutRT;
+                        std::string commandSource = matOutRT;
+                        bool sourceFinalEffectOutput = false;
+                        materialInfo.finalPublishedMaterial = isFinalPublishedMaterial;
+                        if (sstart_with(matOutRT, WE_EFFECT_PPONG_PREFIX_B)) {
+                            sourceRenderTarget = effect_ppong_b;
+                            commandSource = debugFinalOutputSource;
+                            sourceFinalEffectOutput = true;
+                            if (isFinalPublishedMaterial && scene.renderTargets.count(effect_ppong_b) > 0) {
+                                const std::string debugLocalMaterialOutputTarget =
+                                    "_rt_debug_material_output_local_" + nodeAddr + "_" +
+                                    std::to_string(effectIndex) + "_" +
+                                    std::to_string(materialIndex);
+                                scene.renderTargets[debugLocalMaterialOutputTarget] =
+                                    scene.renderTargets.at(effect_ppong_b);
+                                scene.renderTargets[debugLocalMaterialOutputTarget].allowReuse = false;
+                                const std::string localMaterialOutputStage =
+                                    "material-output-local-" + std::to_string(effectIndex) + "-" +
+                                    std::to_string(materialIndex);
+                                materialInfo.localMaterialOutputCaptureStage = localMaterialOutputStage;
+                                wallpaper::debug::registerEffectCapture(scene,
+                                                                        effectCaptureInfo,
+                                                                        localMaterialOutputStage,
+                                                                        debugLocalMaterialOutputTarget);
+                                imgEffect->commands.push_back({
+                                    .cmd = SceneImageEffect::CmdType::Copy,
+                                    .dst = debugLocalMaterialOutputTarget,
+                                    .src = debugFinalOutputSource,
+                                    .afterpos = static_cast<i32>(i_mat + 1),
+                                    .srcFinalEffectOutput = true,
+                                });
+                                debugAddedMaterialOutputCapture = true;
+                                debugDuplicateFinalMaterialNode = true;
+                            }
+                            if (isFinalPublishedMaterial) {
+                                sourceRenderTarget = std::string(SpecTex_Default);
+                            }
+                        } else if (sstart_with(matOutRT, WE_EFFECT_PPONG_PREFIX_A)) {
+                            sourceRenderTarget = effect_ppong_a;
+                        }
+                        materialInfo.resolvedOutputRenderTarget = sourceRenderTarget;
+                        materialInfo.debugMaterialOutputSourceRenderTarget = sourceRenderTarget;
+                        materialInfo.debugMaterialOutputCommandSource = commandSource;
+                        materialInfo.debugSourceFinalEffectOutput = sourceFinalEffectOutput;
+
+                        if (scene.renderTargets.count(sourceRenderTarget) > 0) {
+                            const std::string debugMaterialOutputTarget =
+                                "_rt_debug_material_output_" + nodeAddr + "_" +
+                                std::to_string(effectIndex) + "_" + std::to_string(materialIndex);
+                            scene.renderTargets[debugMaterialOutputTarget] =
+                                scene.renderTargets.at(sourceRenderTarget);
+                            scene.renderTargets[debugMaterialOutputTarget].allowReuse = false;
+                            const std::string materialOutputStage =
+                                "material-output-" + std::to_string(effectIndex) + "-" +
+                                std::to_string(materialIndex);
+                            const i32 materialOutputCopyAfterPos = static_cast<i32>(
+                                i_mat + (debugDuplicateFinalMaterialNode ? 2 : 1));
+                            materialInfo.materialOutputCaptureStage = materialOutputStage;
+                            materialInfo.materialOutputCopyAfterPos = materialOutputCopyAfterPos;
+                            wallpaper::debug::registerEffectCapture(
+                                scene, effectCaptureInfo, materialOutputStage, debugMaterialOutputTarget);
+                            imgEffect->commands.push_back({
+                                .cmd = SceneImageEffect::CmdType::Copy,
+                                .dst = debugMaterialOutputTarget,
+                                .src = commandSource,
+                                .afterpos = materialOutputCopyAfterPos,
+                                .srcFinalEffectOutput = sourceFinalEffectOutput,
+                            });
+                            debugAddedMaterialOutputCapture = true;
+                        }
+                    }
+                    effectCaptureInfo.effectMaterials.push_back(std::move(materialInfo));
+                }
                 if (wpmat.shader == "genericimage4") {
                     LOG_INFO("effect stage material loaded: effectIndex=%d shader=%s usePuppet=%d tex0=%s combosSKINNING=%d combosBONECOUNT=%s",
                              i_eff + 1,
@@ -2985,7 +3930,8 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 }
                 auto spMesh = std::make_shared<SceneMesh>();
                 const bool preservePuppetMesh =
-                    routePuppetPrepassThroughAuthoredEffects && puppet && wpmat.use_puppet;
+                    puppetEffectRoutePlan.preservePuppetMeshForEffectPasses &&
+                    puppet && wpmat.use_puppet;
                 {
                     svData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
                     if (puppet && wpmat.use_puppet) {
@@ -2996,6 +3942,17 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 if (preservePuppetMesh) {
                     spMesh->ChangeMeshDataFrom(effct_final_mesh);
                 }
+                if (debugDuplicateFinalMaterialNode) {
+                    auto spLocalNode = std::make_shared<SceneNode>();
+                    auto spLocalMesh = std::make_shared<SceneMesh>();
+                    if (preservePuppetMesh) {
+                        spLocalMesh->ChangeMeshDataFrom(effct_final_mesh);
+                    }
+                    spLocalMesh->AddMaterial(SceneMaterial(material));
+                    spLocalNode->AddMesh(spLocalMesh);
+                    context.shader_updater->SetNodeData(spLocalNode.get(), svData);
+                    imgEffect->nodes.push_back({ matOutRT, spLocalNode, preservePuppetMesh });
+                }
                 spMesh->AddMaterial(std::move(material));
                 spEffNode->AddMesh(spMesh);
 
@@ -3003,13 +3960,36 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 imgEffect->nodes.push_back({ matOutRT, spEffNode, preservePuppetMesh });
             }
 
-            if (debugEffectCaptures && eff_mat_ok && i_eff == count_eff - 1 &&
+            const bool isAuthoredEffectOutputCapturePoint =
+                count_eff > 0 && i_eff == count_eff - 1;
+            const bool isDeferredRouteOnlyOutputCapturePoint =
+                count_eff == 0 &&
+                routePuppetPrepassThroughAuthoredEffects &&
+                i_eff == 0;
+            if (debugEffectCaptures && eff_mat_ok &&
+                (isAuthoredEffectOutputCapturePoint ||
+                 isDeferredRouteOnlyOutputCapturePoint) &&
                 ! debugEffectOutputTarget.empty() && ! debugEffectOutputSourceTarget.empty()) {
                 imgEffect->commands.push_back({ .cmd      = SceneImageEffect::CmdType::Copy,
                                                 .dst      = debugEffectOutputTarget,
                                                 .src      = debugEffectOutputSourceTarget,
                                                 .afterpos = static_cast<i32>(imgEffect->nodes.size()),
                                                 .srcFinalEffectOutput = useStandalonePuppetFinalDisplay });
+                if (! debugDefaultAfterEffectTarget.empty()) {
+                    imgEffect->commands.push_back({
+                        .cmd      = SceneImageEffect::CmdType::Copy,
+                        .dst      = debugDefaultAfterEffectTarget,
+                        .src      = std::string(SpecTex_Default),
+                        .afterpos = static_cast<i32>(imgEffect->nodes.size()),
+                    });
+                }
+            }
+            if (debugAddedMaterialOutputCapture) {
+                std::stable_sort(imgEffect->commands.begin(),
+                                 imgEffect->commands.end(),
+                                 [](const auto& left, const auto& right) {
+                                     return left.afterpos < right.afterpos;
+                                 });
             }
 
             if (eff_mat_ok)
@@ -3017,6 +3997,45 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             else {
                 LOG_ERROR("effect \'%s\' failed to load", wpeffobj.name.c_str());
             }
+        }
+        if (debugRouteOnlyCapture) {
+            auto imgEffect = std::make_shared<SceneImageEffect>();
+            if (! debugDefaultBeforeEffectTarget.empty()) {
+                imgEffect->commands.push_back({
+                    .cmd      = SceneImageEffect::CmdType::Copy,
+                    .dst      = debugDefaultBeforeEffectTarget,
+                    .src      = std::string(SpecTex_Default),
+                    .afterpos = 0,
+                });
+            }
+            if (! debugEffectInputTarget.empty()) {
+                imgEffect->commands.push_back({
+                    .cmd      = SceneImageEffect::CmdType::Copy,
+                    .dst      = debugEffectInputTarget,
+                    .src      = effect_ppong_a,
+                    .afterpos = 0,
+                });
+            }
+            if (! debugEffectOutputTarget.empty()) {
+                imgEffect->commands.push_back({
+                    .cmd      = SceneImageEffect::CmdType::Copy,
+                    .dst      = debugEffectOutputTarget,
+                    .src      = effect_ppong_a,
+                    .afterpos = 0,
+                });
+            }
+            if (! debugDefaultAfterEffectTarget.empty()) {
+                imgEffect->commands.push_back({
+                    .cmd      = SceneImageEffect::CmdType::Copy,
+                    .dst      = debugDefaultAfterEffectTarget,
+                    .src      = std::string(SpecTex_Default),
+                    .afterpos = 0,
+                });
+            }
+            imgEffectLayer->AddEffect(imgEffect);
+        }
+        if (debugEffectCaptures) {
+            wallpaper::debug::refreshEffectCaptureLayerInfo(scene, effectCaptureInfo);
         }
 
         if (useStandalonePuppetFinalDisplay && puppet) {
@@ -3055,14 +4074,14 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     baseSvData.puppet_layer.prepared(wpimgobj.puppet_layers);
 
                     auto spBaseMesh = std::make_shared<SceneMesh>();
-                    WPMdlParser::GenPuppetMesh(*spBaseMesh, *puppet);
+                    WPMdlParser::GenPuppetMesh(*spBaseMesh, *puppet, textureMapRate);
                     spBaseMesh->AddMaterial(std::move(baseMaterial));
                     spBaseNode->AddMesh(spBaseMesh);
                     if (hasStandaloneDisplayTransform) {
                         spBaseNode->CopyTrans(standaloneDisplayTransform);
                     }
                     context.shader_updater->SetNodeData(spBaseNode.get(), baseSvData);
-                    spImgNode->AppendChild(spBaseNode);
+                    standaloneDisplayNodes.push_back(spBaseNode);
 
                     LOG_INFO("native puppet standalone base display enabled: image=%s tex0=%s",
                              wpimgobj.name.c_str(),
@@ -3084,117 +4103,77 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 LOG_INFO("native puppet final overlay suppressed because all active channelmap layers are paused or hidden: image=%s",
                          wpimgobj.name.c_str());
             } else {
-                auto spFinalNode = std::make_shared<SceneNode>();
-
                 const std::string finalEffectTexture =
                     ResolveEffectPingPongFinalTarget(effect_ppong_a, effect_ppong_b, count_eff);
 
-                wpscene::WPMaterial finalSourceMaterial = wpimgobj.material;
-                if (finalSourceMaterial.textures.empty()) {
-                    finalSourceMaterial.textures.resize(1);
-                }
-                finalSourceMaterial.textures[0] = finalEffectTexture;
-                if (usePuppetChannelMapPrepass && ! sourceMaterial.textures.empty() &&
-                    ! sourceMaterial.textures[0].empty()) {
-                    finalSourceMaterial.textures.resize(std::max<usize>(finalSourceMaterial.textures.size(), 3));
-                    finalSourceMaterial.textures[1] = sourceMaterial.textures[0];
-                    if (sourceMaterial.textures.size() > 1 && ! sourceMaterial.textures[1].empty()) {
-                        finalSourceMaterial.textures[2] = sourceMaterial.textures[1];
-                    } else if (! wpimgobj.material.textures.empty()) {
-                        finalSourceMaterial.textures[2] = wpimgobj.material.textures[0];
-                    }
-                    finalSourceMaterial.combos["YAKKAI_CHANNELMAP_ALPHA_MASK"] = 1;
-                    LOG_INFO("native puppet final display applying channelmap/base alpha masks: image=%s channelMask=%s baseMask=%s",
-                             wpimgobj.name.c_str(),
-                             finalSourceMaterial.textures[1].c_str(),
-                             finalSourceMaterial.textures.size() > 2 ? finalSourceMaterial.textures[2].c_str() : "");
-                }
-                // Non-channelmap path: the effect chain output already has correct
-                // alpha from the puppet source render — no additional masking needed.
-                SceneMaterial     finalMaterial;
-                WPShaderValueData finalSvData;
-                WPShaderInfo      finalShaderInfo;
-                finalShaderInfo.baseConstSvs = baseConstSvs;
-                if (usePuppetChannelMapPrepass) {
-                    WPMdlParser::AddPuppetMatInfo(finalSourceMaterial, *puppet);
-                    WPMdlParser::AddPuppetShaderInfo(finalShaderInfo, *puppet);
-                }
-                if (! LoadMaterial(vfs,
-                                   finalSourceMaterial,
-                                   context.scene.get(),
-                                   spFinalNode.get(),
-                                   &finalMaterial,
-                                   &finalSvData,
-                                   &finalShaderInfo)) {
-                    LOG_ERROR("load standalone puppet final material failed: %s", wpimgobj.name.c_str());
-                } else {
-                    LoadConstvalue(finalMaterial, finalSourceMaterial, finalShaderInfo);
-                    // Force Translucent blend so the effect chain's alpha channel
-                    // correctly composites over the scene (transparent areas pass through).
-                    finalMaterial.blenmode = BlendMode::Translucent;
-                    finalSvData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
-                    if (usePuppetChannelMapPrepass) {
-                        finalSvData.puppet_layer = WPPuppetLayer(puppet->puppet);
-                        finalSvData.puppet_layer.prepared(wpimgobj.puppet_layers);
-                    }
+                wallpaper::PuppetFinalDisplayBuildInput finalDisplayInput;
+                finalDisplayInput.scene = &scene;
+                finalDisplayInput.effectCaptureInfo = &effectCaptureInfo;
+                finalDisplayInput.imageName = wpimgobj.name;
+                finalDisplayInput.imageParentId = wpimgobj.parent;
+                finalDisplayInput.imageParentParsed =
+                    context.object_nodes.count(wpimgobj.parent) != 0;
+                finalDisplayInput.nodeAddr = nodeAddr;
+                finalDisplayInput.existingStandaloneDisplayNodeCount =
+                    standaloneDisplayNodes.size();
+                finalDisplayInput.debugEffectCaptures = debugEffectCaptures;
+                finalDisplayInput.usePuppetChannelMapPrepass = usePuppetChannelMapPrepass;
+                finalDisplayInput.activePuppetChannelBlendSlots =
+                    activePuppetChannelBlendSlots;
+                finalDisplayInput.puppet = puppet.get();
+                finalDisplayInput.imageMaterial = wpimgobj.material;
+                finalDisplayInput.sourceMaterial = sourceMaterial;
+                finalDisplayInput.imageSize = { wpimgobj.size[0], wpimgobj.size[1] };
+                finalDisplayInput.effectViewport = effectViewport;
+                finalDisplayInput.routePlan = puppetEffectRoutePlan;
+                finalDisplayInput.standaloneDisplayTransform =
+                    hasStandaloneDisplayTransform ? &standaloneDisplayTransform : nullptr;
+                finalDisplayInput.baseConstSvs = baseConstSvs;
+                finalDisplayInput.parallaxDepth = {
+                    wpimgobj.parallaxDepth[0],
+                    wpimgobj.parallaxDepth[1],
+                };
+                finalDisplayInput.renderPuppetLayers = renderPuppetLayers;
+                finalDisplayInput.finalEffectTexture = finalEffectTexture;
+                finalDisplayInput.authoredEffectCount = count_eff;
+                finalDisplayInput.loadMaterial =
+                    [&](const wpscene::WPMaterial& material,
+                        SceneNode* node,
+                        SceneMaterial* sceneMaterial,
+                        WPShaderValueData* shaderValueData,
+                        WPShaderInfo* shaderInfo) {
+                        return LoadMaterial(vfs,
+                                            material,
+                                            context.scene.get(),
+                                            node,
+                                            sceneMaterial,
+                                            shaderValueData,
+                                            shaderInfo);
+                    };
+                finalDisplayInput.loadConstValues =
+                    [](SceneMaterial& material,
+                       const wpscene::WPMaterial& source,
+                       const WPShaderInfo& shaderInfo) {
+                        LoadConstvalue(material, source, shaderInfo);
+                    };
 
-                    auto spFinalMesh = std::make_shared<SceneMesh>();
-                    bool usingFilteredOverlayMesh = false;
-                    if (usePuppetChannelMapPrepass && ! activePuppetChannelBlendSlots.empty()) {
-                        usingFilteredOverlayMesh =
-                            WPMdlParser::GenPuppetImageSpaceMesh(*spFinalMesh,
-                                                                 *puppet,
-                                                                 { wpimgobj.size[0], wpimgobj.size[1] },
-                                                                 activePuppetChannelBlendSlots);
-                    }
-                    if (! usingFilteredOverlayMesh) {
-                        if (usePuppetChannelMapPrepass) {
-                            WPMdlParser::GenPuppetMesh(*spFinalMesh, *puppet);
-                        } else {
-                            spFinalMesh->ChangeMeshDataFrom(effct_final_mesh);
-                        }
-                    }
-                    spFinalMesh->AddMaterial(std::move(finalMaterial));
-                    spFinalNode->AddMesh(spFinalMesh);
-                    if (hasStandaloneDisplayTransform) {
-                        spFinalNode->CopyTrans(standaloneDisplayTransform);
-                    }
-                    context.shader_updater->SetNodeData(spFinalNode.get(), finalSvData);
-                    spImgNode->AppendChild(spFinalNode);
-
-                    LOG_INFO("native puppet standalone final display enabled: image=%s tex0=%s authoredEffects=%d",
-                             wpimgobj.name.c_str(),
-                             finalEffectTexture.c_str(),
-                             count_eff);
-                    if (usingFilteredOverlayMesh) {
-                        LOG_INFO("native puppet final stage using filtered image-space overlay mesh: image=%s size=%.1fx%.1f",
-                                 wpimgobj.name.c_str(),
-                                 wpimgobj.size[0],
-                                 wpimgobj.size[1]);
-                        std::ostringstream activeIndicesStream;
-                        for (size_t i = 0; i < activePuppetChannelBlendSlots.size(); ++i) {
-                            if (i != 0) activeIndicesStream << ", ";
-                            activeIndicesStream << activePuppetChannelBlendSlots[i];
-                        }
-                        LOG_INFO("native puppet final overlay restricted to active blend slots: image=%s indices=[%s]",
-                                 wpimgobj.name.c_str(),
-                                 activeIndicesStream.str().c_str());
-                    } else if (! usePuppetChannelMapPrepass) {
-                        LOG_INFO("native puppet final stage using flat effect card mesh: image=%s size=%.1fx%.1f",
-                                 wpimgobj.name.c_str(),
-                                 wpimgobj.size[0],
-                                 wpimgobj.size[1]);
-                    } else {
-                        LOG_INFO("native puppet final stage using authored puppet UV mesh: image=%s size=%.1fx%.1f",
-                                 wpimgobj.name.c_str(),
-                                 wpimgobj.size[0],
-                                 wpimgobj.size[1]);
-                    }
+                auto finalDisplayResult =
+                    wallpaper::buildPuppetFinalDisplay(finalDisplayInput);
+                if (finalDisplayResult.success) {
+                    context.shader_updater->SetNodeData(finalDisplayResult.node.get(),
+                                                        finalDisplayResult.shaderValueData);
+                    standaloneDisplayNodes.push_back(finalDisplayResult.node);
                 }
             }
         }
+        if (debugEffectCaptures) {
+            wallpaper::debug::refreshEffectCaptureLayerInfo(scene, effectCaptureInfo);
+        }
     }
     AttachObjectNode(context, spImgNode, wpimgobj.id, wpimgobj.parent);
+    for (const auto& standaloneDisplayNode : standaloneDisplayNodes) {
+        AttachObjectNode(context, standaloneDisplayNode, 0, wpimgobj.parent);
+    }
 }
 
 struct ParticleChildPtr {
@@ -3810,7 +4789,7 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
                             if (resolved) scriptCtx.setScriptProperty(spKey, dval);
                         }
                     }
-                    auto result = scriptCtx.evaluateLayerScript(script, origin, color, alpha);
+                    auto result = scriptCtx.evaluateLayerScript(script, origin, color, alpha, objId);
                     if (result.color) {
                         context.script_color_bindings[objId].color = *result.color;
                         context.script_color_bindings[objId].has_color = true;

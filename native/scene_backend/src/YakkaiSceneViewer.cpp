@@ -8,6 +8,8 @@
 #include <QtCore/QJsonObject>
 #include <QtCore/QJsonValue>
 
+#include <algorithm>
+
 #if YAKKAI_SCENE_USE_VENDORED_BACKEND
 #include "Policy/ModelFallbackPolicy.hpp"
 
@@ -375,6 +377,22 @@ void YakkaiSceneViewer::setDebugEffectCaptureCommand(const QString& value)
     emit debugEffectCaptureCommandChanged();
 }
 
+int YakkaiSceneViewer::debugEffectCaptureDelayMs() const
+{
+    return m_debugEffectCaptureDelayMs;
+}
+
+void YakkaiSceneViewer::setDebugEffectCaptureDelayMs(int value)
+{
+    const int normalized = std::max(0, value);
+    if (m_debugEffectCaptureDelayMs == normalized) {
+        return;
+    }
+
+    m_debugEffectCaptureDelayMs = normalized;
+    emit debugEffectCaptureDelayMsChanged();
+}
+
 QString YakkaiSceneViewer::debugEffectProbeLayers() const
 {
     return m_debugEffectProbeLayers;
@@ -403,6 +421,96 @@ void YakkaiSceneViewer::setDebugEffectProbeHighRiskLayers(const QString& value)
 
     m_debugEffectProbeHighRiskLayers = value;
     emit debugEffectProbeHighRiskLayersChanged();
+}
+
+QString YakkaiSceneViewer::debugEffectProbeChannelMapSlots() const
+{
+    return m_debugEffectProbeChannelMapSlots;
+}
+
+void YakkaiSceneViewer::setDebugEffectProbeChannelMapSlots(const QString& value)
+{
+    if (m_debugEffectProbeChannelMapSlots == value) {
+        return;
+    }
+
+    m_debugEffectProbeChannelMapSlots = value;
+    emit debugEffectProbeChannelMapSlotsChanged();
+}
+
+QString YakkaiSceneViewer::debugEffectProbeMaxEffects() const
+{
+    return m_debugEffectProbeMaxEffects;
+}
+
+void YakkaiSceneViewer::setDebugEffectProbeMaxEffects(const QString& value)
+{
+    if (m_debugEffectProbeMaxEffects == value) {
+        return;
+    }
+
+    m_debugEffectProbeMaxEffects = value;
+    emit debugEffectProbeMaxEffectsChanged();
+}
+
+QString YakkaiSceneViewer::debugPuppetEffectFinalMesh() const
+{
+    return m_debugPuppetEffectFinalMesh;
+}
+
+void YakkaiSceneViewer::setDebugPuppetEffectFinalMesh(const QString& value)
+{
+    if (m_debugPuppetEffectFinalMesh == value) {
+        return;
+    }
+
+    m_debugPuppetEffectFinalMesh = value;
+    emit debugPuppetEffectFinalMeshChanged();
+}
+
+bool YakkaiSceneViewer::debugPuppetEffectRouteOnly() const
+{
+    return m_debugPuppetEffectRouteOnly;
+}
+
+void YakkaiSceneViewer::setDebugPuppetEffectRouteOnly(bool value)
+{
+    if (m_debugPuppetEffectRouteOnly == value) {
+        return;
+    }
+
+    m_debugPuppetEffectRouteOnly = value;
+    emit debugPuppetEffectRouteOnlyChanged();
+}
+
+QString YakkaiSceneViewer::debugPuppetAnimationLayerOverrides() const
+{
+    return m_debugPuppetAnimationLayerOverrides;
+}
+
+void YakkaiSceneViewer::setDebugPuppetAnimationLayerOverrides(const QString& value)
+{
+    if (m_debugPuppetAnimationLayerOverrides == value) {
+        return;
+    }
+
+    m_debugPuppetAnimationLayerOverrides = value;
+    emit debugPuppetAnimationLayerOverridesChanged();
+}
+
+QString YakkaiSceneViewer::scenePropertiesJson() const
+{
+    return m_scenePropertiesJson;
+}
+
+void YakkaiSceneViewer::setScenePropertiesJson(const QString& value)
+{
+    if (m_scenePropertiesJson == value) {
+        return;
+    }
+
+    m_scenePropertiesJson = value;
+    emit scenePropertiesJsonChanged();
 }
 
 void YakkaiSceneViewer::requestGraphvizDump()

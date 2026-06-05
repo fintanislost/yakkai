@@ -1,17 +1,29 @@
 #pragma once
+#include <array>
 #include <cstdint>
 #include <vector>
 #include <string>
+#include <string_view>
 #include <memory>
 #include <span>
 #include <Eigen/Geometry>
 
 #include "Core/Literals.hpp"
+#include "Puppet/PuppetSimulation.hpp"
 
 namespace wallpaper
 {
 
 class WPPuppetLayer;
+
+enum class PuppetSimulationMode
+{
+    Off,
+    Diagnostic,
+    Runtime
+};
+
+PuppetSimulationMode ParsePuppetSimulationMode(std::string_view value);
 
 class WPPuppet {
 public:
@@ -22,8 +34,21 @@ public:
         Single
     };
     struct Bone {
+        struct SimulationMetadata {
+            bool present { false };
+            bool valid { false };
+            bool physicsActive { false };
+            bool targetPointPresent { false };
+            std::array<float, 3> targetPoint { 0.0f, 0.0f, 0.0f };
+            bool targetMassPresent { false };
+            float targetMass { 0.0f };
+        };
+
         Eigen::Affine3f transform { Eigen::Affine3f::Identity() };
         uint32_t        parent { 0xFFFFFFFFu };
+        std::string     name;
+        std::string     simulationMetadata;
+        SimulationMetadata parsedSimulationMetadata;
 
         bool noParent() const { return parent == 0xFFFFFFFFu; }
         // prepared
@@ -103,21 +128,38 @@ public:
 
     void updateInterpolation(double time) noexcept;
 
+    void setSimulationMode(PuppetSimulationMode mode) {
+        m_simulationMode = mode;
+        m_simulationModeExplicit = true;
+    }
+    PuppetSimulationMode simulationMode() const { return m_simulationMode; }
+    bool isBoneEligibleForSimulationForTests(size_t boneIndex) const;
+
 private:
     struct Layer {
         AnimationLayer                         anim_layer;
         double                                 blend;
         const WPPuppet::Animation*             anim { nullptr };
         WPPuppet::Animation::InterpolationInfo interp_info {};
+        std::vector<bool>                      authoredDeltaBones;
 
         operator bool() const noexcept { return anim != nullptr; };
     };
 
     double m_global_blend { 1.0 };
     double m_total_blend { 0.0 };
+    PuppetSimulationMode m_simulationMode { PuppetSimulationMode::Off };
+    bool m_simulationModeExplicit { false };
 
-    std::vector<Layer>        m_layers;
-    std::shared_ptr<WPPuppet> m_puppet;
+    void applySimulationForFrame(double dt,
+                                 const std::vector<WPPuppet::Bone>& bones,
+                                 std::vector<Eigen::Affine3f>& worldAffines);
+
+    std::vector<Layer>                     m_layers;
+    std::vector<PuppetSimulationBoneInput> m_simulationBones;
+    std::vector<bool>                      m_simulationAuthoredDeltaBones;
+    std::vector<PuppetSimulationBoneState> m_simulationStates;
+    std::shared_ptr<WPPuppet>              m_puppet;
 };
 
 } // namespace wallpaper

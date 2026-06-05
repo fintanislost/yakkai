@@ -131,6 +131,88 @@ def candidate_chain_shape(candidate):
     return str(shape) if shape else "unknown"
 
 
+def candidate_identity(candidate):
+    layer = candidate_layer(candidate)
+    return (
+        str(layer.get("layerId", "unknown")),
+        str(layer.get("layerName") or "unnamed"),
+        candidate_chain_shape(candidate),
+    )
+
+
+def candidate_effect_class(candidate):
+    layer = candidate_layer(candidate)
+    explicit = layer.get("candidateEffectClass")
+    if explicit:
+        return str(explicit)
+
+    shape = candidate_chain_shape(candidate)
+    families = candidate_high_risk_families(candidate)
+    has_blur = "blur" in families
+    has_lut = "lut" in families
+    has_color = "color-grade" in families
+    if not has_blur and not has_lut and not has_color:
+        return "none"
+    if has_blur and not has_lut and not has_color:
+        if shape == "protected-puppet-mixed":
+            return "protected-puppet-blur"
+        if shape == "puppet-mixed":
+            return "mixed-puppet-blur"
+        if "composelayer" in shape:
+            return "composelayer-blur"
+        if "utility" in shape:
+            return "utility-blur"
+        if "fullscreen" in shape:
+            return "fullscreen-blur"
+        if shape == "blur-only":
+            return "regular-blur-only"
+        return "mixed-blur"
+    if shape == "protected-puppet-mixed":
+        return "protected-puppet-lut" if has_lut else "protected-puppet-color-grade"
+    if shape == "puppet-mixed":
+        return "mixed-puppet-lut" if has_lut else "mixed-puppet-color-grade"
+    if "composelayer" in shape:
+        return "composelayer-color-grade" if has_color else "composelayer-lut"
+    if shape == "lut-only":
+        return "regular-lut-only"
+    if shape in {"color-grade-only", "color_grading-only"}:
+        return "regular-color-grade-only"
+    if has_lut and has_color:
+        return "mixed-lut-color-grade"
+    if has_lut:
+        return "mixed-lut"
+    return "mixed-color-grade"
+
+
+def is_lut_color_effect_class(effect_class):
+    return "lut" in effect_class or "color" in effect_class or "color-grade" in effect_class
+
+
+def candidate_debug_probe(candidate):
+    layer = candidate_layer(candidate)
+    probe = layer.get("debugProbe")
+    if isinstance(probe, dict):
+        return probe
+    probe = candidate.get("debugProbe") if isinstance(candidate, dict) else {}
+    return probe if isinstance(probe, dict) else {}
+
+
+def candidate_disposition(candidate, source):
+    effect_class = candidate_effect_class(candidate)
+    policy = candidate_layer(candidate).get("policy")
+    if not isinstance(policy, dict):
+        policy = {}
+    if effect_class.startswith("protected-puppet-"):
+        return "protected"
+    if candidate_debug_probe(candidate).get("overrodePolicy") is True:
+        return "probe-only"
+    if source == "capture" and policy.get("keepEffects") is not False:
+        return "allowed"
+    if policy.get("strippedEffects") is True or source == "stripped":
+        return "stripped"
+    return "unknown"
+
+
 def append_unique(values, value):
     if value not in values:
         values.append(value)
@@ -179,6 +261,95 @@ def is_allowed_simple_water_layer(layer):
     if not isinstance(policy, dict):
         return False
     return policy.get("keepEffects") is True and policy.get("strippedEffects") is not True
+
+
+def active_animation_ids(layer):
+    ids = []
+    for animation in as_list(layer.get("puppetAnimationLayers")):
+        if animation.get("visibleAndWeighted") is True:
+            ids.append(str(animation.get("animationId", "unknown")))
+    return ids
+
+
+def active_bone_slots(layer):
+    slots = []
+    for animation in as_list(layer.get("puppetAnimationLayers")):
+        if animation.get("visibleAndWeighted") is not True:
+            continue
+        for slot in as_list(animation.get("activeBoneSlots")):
+            text = str(slot)
+            if text not in slots:
+                slots.append(text)
+    return slots
+
+
+def slot_coverage_text(layer):
+    publish = layer.get("publish")
+    if not isinstance(publish, dict):
+        return "none"
+
+    def count(slot, field, legacy_field=None):
+        value = slot.get(field)
+        if value is None and legacy_field:
+            value = slot.get(legacy_field)
+        return value if value is not None else 0
+
+    def format_number(value):
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return str(value)
+        if number.is_integer():
+            return str(int(number))
+        return f"{number:.6g}"
+
+    def simulation_text(slot):
+        if slot.get("simulationMetadataPresent") is not True:
+            return ":sim=no"
+
+        parts = [":sim=yes"]
+        if "simulationMetadataValid" in slot:
+            parts.append(
+                ":simValid="
+                + ("yes" if slot.get("simulationMetadataValid") is True else "no")
+            )
+        if "simulationPhysicsActive" in slot:
+            parts.append(
+                ":simPhysics="
+                + ("yes" if slot.get("simulationPhysicsActive") is True else "no")
+            )
+        target_point = slot.get("simulationTargetPoint")
+        if slot.get("simulationTargetPointPresent") is True and isinstance(target_point, list):
+            parts.append(":simTp=" + "/".join(format_number(value) for value in target_point))
+        if slot.get("simulationTargetMassPresent") is True:
+            parts.append(":simTm=" + format_number(slot.get("simulationTargetMass")))
+        if slot.get("simulatedInactive") is True:
+            parts.append(":simInactive=yes")
+        return "".join(parts)
+
+    def slot_text(slot):
+        slot_id = slot.get("slot", "unknown")
+        marker = "*" if slot.get("active") is True else ""
+        name = str(slot.get("boneName") or "unnamed")
+        parent_name = str(slot.get("parentBoneName") or "none")
+        parent_slot = slot.get("parentSlot", "unknown")
+        primary_vertices = count(slot, "primaryVertexCount", "vertexCount")
+        primary_triangles = count(slot, "primaryTriangleCount", "triangleCount")
+        weighted_vertices = count(slot, "weightedVertexCount", "vertexCount")
+        weighted_triangles = count(slot, "weightedTriangleCount", "triangleCount")
+        secondary = ":secondary-only" if slot.get("secondaryOnly") is True else ""
+        return (
+            f"{slot_id}{marker}:{name}[{parent_name}#{parent_slot}]"
+            f":primary={primary_vertices}v/{primary_triangles}t"
+            f":weighted={weighted_vertices}v/{weighted_triangles}t"
+            f"{secondary}{simulation_text(slot)}"
+        )
+
+    parts = []
+    for slot in as_list(publish.get("puppetCutoutSlotCoverage")):
+        if isinstance(slot, dict):
+            parts.append(slot_text(slot))
+    return ",".join(parts) if parts else "none"
 
 
 def main():
@@ -333,6 +504,133 @@ def main():
             print(f"  - {layer_id}:{layer_name} reason={reason} risk={risk} shape={shape} families={families} mix={mix} effects={effects} shaders={shaders}")
         if len(stripped_candidates) > 10:
             print(f"  ... {len(stripped_candidates) - 10} more")
+
+    lut_color_entries = []
+    for layer in layers:
+        effect_class = candidate_effect_class(layer)
+        if is_lut_color_effect_class(effect_class):
+            lut_color_entries.append(("capture", layer, effect_class))
+    for candidate in stripped_candidates:
+        effect_class = candidate_effect_class(candidate)
+        if is_lut_color_effect_class(effect_class):
+            lut_color_entries.append(("stripped", candidate, effect_class))
+
+    if lut_color_entries:
+        class_counts = Counter(effect_class for _, _, effect_class in lut_color_entries)
+        disposition_counts = Counter(
+            candidate_disposition(candidate, source)
+            for source, candidate, _ in lut_color_entries
+        )
+        print("lut-color-class-counts:")
+        for effect_class, count in sorted(class_counts.items()):
+            print(f"  - {effect_class}: {count}")
+        print("lut-color-disposition-counts:")
+        for disposition, count in sorted(disposition_counts.items()):
+            print(f"  - {disposition}: {count}")
+        print("lut-color-layers:")
+        for source, candidate, effect_class in lut_color_entries[:12]:
+            layer = candidate_layer(candidate)
+            policy = layer.get("policy") if isinstance(layer.get("policy"), dict) else {}
+            layer_id = layer.get("layerId", "unknown")
+            layer_name = layer.get("layerName") or "unnamed"
+            disposition = candidate_disposition(candidate, source)
+            reason = str(policy.get("reason", layer.get("policyReason", "unknown")))
+            shape = candidate_chain_shape(candidate)
+            blocked = layer.get("candidateBlockedReason") or "none"
+            print(
+                f"  - {layer_id}:{layer_name} class={effect_class} "
+                f"disposition={disposition} reason={reason} shape={shape} blocked={blocked}"
+            )
+        if len(lut_color_entries) > 12:
+            print(f"  ... {len(lut_color_entries) - 12} more")
+
+    high_risk_entries = []
+    high_risk_seen = set()
+    for layer in layers:
+        families = candidate_high_risk_families(layer)
+        if families:
+            high_risk_seen.add(candidate_identity(layer))
+            high_risk_entries.append(("capture", layer, families, candidate_effect_class(layer)))
+    for candidate in stripped_candidates:
+        families = candidate_high_risk_families(candidate)
+        if families:
+            identity = candidate_identity(candidate)
+            if identity in high_risk_seen:
+                continue
+            high_risk_seen.add(identity)
+            high_risk_entries.append(("stripped", candidate, families, candidate_effect_class(candidate)))
+
+    if high_risk_entries:
+        disposition_counts = Counter(
+            candidate_disposition(candidate, source)
+            for source, candidate, _, _ in high_risk_entries
+        )
+        shape_counts = Counter(candidate_chain_shape(candidate)
+                               for _, candidate, _, _ in high_risk_entries)
+        print("high-risk-disposition-counts:")
+        for disposition, count in sorted(disposition_counts.items()):
+            print(f"  - {disposition}: {count}")
+        print("high-risk-shape-counts:")
+        for shape, count in sorted(shape_counts.items()):
+            print(f"  - {shape}: {count}")
+        print("high-risk-probe-layers:")
+        for source, candidate, families, effect_class in high_risk_entries[:12]:
+            layer = candidate_layer(candidate)
+            policy = layer.get("policy") if isinstance(layer.get("policy"), dict) else {}
+            layer_id = layer.get("layerId", "unknown")
+            layer_name = layer.get("layerName") or "unnamed"
+            disposition = candidate_disposition(candidate, source)
+            reason = str(policy.get("reason", layer.get("policyReason", "unknown")))
+            shape = candidate_chain_shape(candidate)
+            blocked = layer.get("candidateBlockedReason") or "none"
+            joined = ",".join(families) or "none"
+            print(
+                f"  - {layer_id}:{layer_name} families={joined} class={effect_class} "
+                f"disposition={disposition} reason={reason} shape={shape} blocked={blocked}"
+            )
+        if len(high_risk_entries) > 12:
+            print(f"  ... {len(high_risk_entries) - 12} more")
+
+    protected_rows = []
+    protected_seen = set()
+    for source, candidates in (
+        ("capture", layers),
+        ("stripped", stripped_candidates),
+        ("protected", as_list(manifest.get("protectedPuppetDiagnostics"))),
+    ):
+        for candidate in candidates:
+            layer = candidate_layer(candidate)
+            checks = layer.get("candidateChecks")
+            is_protected = isinstance(checks, dict) and checks.get("isProtectedPuppetPath") is True
+            if not is_protected and not str(layer.get("candidateChainShape", "")).startswith("protected-puppet"):
+                continue
+            key = (
+                source,
+                str(layer.get("layerId", "unknown")),
+                str(layer.get("candidateChainShape", "unknown")),
+            )
+            if key in protected_seen:
+                continue
+            protected_seen.add(key)
+            protected_rows.append((source, layer))
+
+    if protected_rows:
+        print(f"protected-puppet-cutout-inventory={len(protected_rows)}")
+        for source, layer in protected_rows[:20]:
+            print(
+                "  "
+                f"source={source} "
+                f"layer={layer.get('layerId', 'unknown')} "
+                f"name={str(layer.get('layerName') or 'unnamed')!r} "
+                f"policy={candidate_reason(layer)} "
+                f"class={candidate_effect_class(layer)} "
+                f"shape={candidate_chain_shape(layer)} "
+                f"activeAnimations={','.join(active_animation_ids(layer)) or 'none'} "
+                f"activeSlots={','.join(active_bone_slots(layer)) or 'none'} "
+                f"slotCoverage={slot_coverage_text(layer)}"
+            )
+        if len(protected_rows) > 20:
+            print(f"  ... {len(protected_rows) - 20} more")
 
     if layer_stage_counts:
         print("layer-stage-counts:")

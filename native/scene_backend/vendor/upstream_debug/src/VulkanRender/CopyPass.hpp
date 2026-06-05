@@ -10,6 +10,13 @@ namespace wallpaper
 namespace vulkan
 {
 
+struct CopyPassExtent {
+    VkExtent3D extent {};
+    bool       clamped { false };
+};
+
+CopyPassExtent chooseCopyPassExtent(VkExtent3D src, VkExtent3D dst);
+
 class CopyPass : public VulkanPass {
 public:
     struct Desc {

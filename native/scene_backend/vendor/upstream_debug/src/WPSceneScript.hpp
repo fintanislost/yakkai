@@ -1,5 +1,7 @@
 #pragma once
 #include <array>
+#include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -51,7 +53,8 @@ public:
     SceneScriptResult evaluateLayerScript(std::string_view script,
                                           const std::array<float, 3>& currentOrigin = {0,0,0},
                                           const std::array<float, 3>& currentColor = {1,1,1},
-                                          float currentAlpha = 1.0f);
+                                          float currentAlpha = 1.0f,
+                                          int32_t layerId = -1);
 
 private:
     struct Impl;

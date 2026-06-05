@@ -31,9 +31,45 @@ struct LayerEffectInput {
 struct LayerEffectDecision {
     bool keepLayer { true };
     bool keepEffects { true };
-    bool forceAlphaOne { false };
     bool strippedEffects { false };
     std::string_view reason { "keep" };
+};
+
+struct EffectPublishRouteInput {
+    bool puppetLayer { false };
+    bool fullscreen { false };
+    bool composelayer { false };
+    bool standalonePuppetFinalDisplay { false };
+    bool usePuppetChannelMapPrepass { false };
+    bool hasActivePuppetChannelBlendSlots { false };
+    std::string puppetFinalMeshOverride;
+};
+
+struct EffectPublishRouteDecision {
+    std::string effectInputMeshKind;
+    std::string effectFinalMeshKind;
+    std::string standaloneFinalMeshKind;
+    std::string finalDisplayRoute;
+    std::string standaloneDisplayAttachMode;
+    std::string routeRisk;
+    bool standaloneFinalMaterialUsesPuppetSkinning { false };
+    bool effectInputMaterialPreservesLayerBlendMode { false };
+};
+
+struct LayerEffectViewportInput {
+    float objectWidth { 0.0f };
+    float objectHeight { 0.0f };
+    bool  hasMeshBounds { false };
+    float meshPositionMinX { 0.0f };
+    float meshPositionMinY { 0.0f };
+    float meshPositionMaxX { 0.0f };
+    float meshPositionMaxY { 0.0f };
+};
+
+struct LayerEffectViewportDecision {
+    int  width { 1 };
+    int  height { 1 };
+    bool expandedToMeshBounds { false };
 };
 
 struct CandidateChecks {
@@ -53,6 +89,7 @@ struct CandidateClassification {
     std::vector<std::string> candidateFamilies;
     std::vector<std::string> candidateMixFamilies;
     std::string candidateChainShape { "non-water" };
+    std::string candidateEffectClass { "none" };
     std::string candidateRisk { "non-water" };
     std::string candidateBlockedReason { "no-water-effect-family" };
     CandidateChecks candidateChecks;
@@ -60,5 +97,7 @@ struct CandidateClassification {
 
 CandidateClassification classifyStrippedEffectCandidate(const LayerEffectInput& input);
 LayerEffectDecision decideLayerEffects(const LayerEffectInput& input);
+EffectPublishRouteDecision decideEffectPublishRoute(const EffectPublishRouteInput& input);
+LayerEffectViewportDecision decideLayerEffectViewport(const LayerEffectViewportInput& input);
 
 } // namespace wallpaper::policy

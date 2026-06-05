@@ -47,6 +47,10 @@ public:
     std::vector<wallpaper::debug::EffectCaptureRecord> debugEffectCaptureRecords;
     std::vector<wallpaper::debug::EffectPassState>     debugEffectPassStates;
     std::vector<wallpaper::debug::EffectCaptureLayerInfo> debugEffectStrippedCandidates;
+    std::vector<wallpaper::debug::EffectCaptureLayerInfo> debugEffectProtectedPuppetDiagnostics;
+    std::vector<wallpaper::debug::EffectCaptureLayerInfo> debugPuppetAnimationLayerInventory;
+    std::vector<wallpaper::debug::EffectCaptureFinalDisplayBoundaryHook>
+        debugEffectFinalDisplayBoundaryCaptures;
 
     SceneMesh default_effect_mesh;
 

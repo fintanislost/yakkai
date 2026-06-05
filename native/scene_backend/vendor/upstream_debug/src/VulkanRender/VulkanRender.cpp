@@ -333,7 +333,10 @@ void VulkanRender::Impl::drawFrame(Scene& scene) {
 }
 
 void VulkanRender::Impl::dumpDebugRenderTargets(Scene& scene) {
-    if (! scene.debugEffectCaptures.enabled()) {
+    if (!wallpaper::debug::shouldDumpEffectCaptures(
+            scene.debugEffectCaptures,
+            scene.elapsingTime,
+            scene.frameTime)) {
         return;
     }
 
@@ -482,8 +485,8 @@ void VulkanRender::Impl::drawFrameOffscreen(Scene& scene) {
 
     VVK_CHECK_VOID_RE(rr.fence_frame.Wait(vk_wait_time));
     VVK_CHECK_VOID_RE(rr.fence_frame.Reset());
-    dumpDebugRenderTargets(scene);
     m_ex_swapchain->renderFrame();
+    dumpDebugRenderTargets(scene);
 }
 
 void VulkanRender::Impl::setRenderTargetSize(Scene& scene, rg::RenderGraph& rg) {

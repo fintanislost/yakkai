@@ -3,6 +3,7 @@
 #include <QtGlobal>
 #include <QtCore/QObject>
 #include <QtCore/QDir>
+#include <QtCore/QPointer>
 #include <QtCore/QThread>
 
 #include <QtGui/QGuiApplication>
@@ -17,6 +18,7 @@
 #endif
 
 #include <clocale>
+#include <algorithm>
 #include <atomic>
 #include <array>
 #include <functional>
@@ -141,13 +143,20 @@ public:
         info.uuid               = m_glex.uuid();
         info.width              = w;
         info.height             = h;
-        info.redraw_callback    = [this]() {
-            Q_EMIT this->redraw();
+        QPointer<TextureNode> guard(this);
+        info.redraw_callback    = [guard]() {
+            if (guard == nullptr) {
+                return;
+            }
+            Q_EMIT guard->redraw();
         };
 
-        auto cb = std::make_shared<wallpaper::FirstFrameCallback>([this]() {
-            m_first_frame = true;
-            Q_EMIT this->redraw();
+        auto cb = std::make_shared<wallpaper::FirstFrameCallback>([guard]() {
+            if (guard == nullptr) {
+                return;
+            }
+            guard->m_first_frame = true;
+            Q_EMIT guard->redraw();
         });
         m_scene->setPropertyObject(wallpaper::PROPERTY_FIRST_FRAME_CALLBACK, cb);
         // this send to looper, not in this thread
@@ -372,8 +381,14 @@ QUrl SceneObject::assets() const { return m_assets; }
 QString SceneObject::scenePropertiesJson() const { return m_scenePropertiesJson; }
 QString SceneObject::debugEffectCapturesPath() const { return m_debugEffectCapturesPath; }
 QString SceneObject::debugEffectCaptureCommand() const { return m_debugEffectCaptureCommand; }
+int SceneObject::debugEffectCaptureDelayMs() const { return m_debugEffectCaptureDelayMs; }
 QString SceneObject::debugEffectProbeLayers() const { return m_debugEffectProbeLayers; }
 QString SceneObject::debugEffectProbeHighRiskLayers() const { return m_debugEffectProbeHighRiskLayers; }
+QString SceneObject::debugEffectProbeChannelMapSlots() const { return m_debugEffectProbeChannelMapSlots; }
+QString SceneObject::debugEffectProbeMaxEffects() const { return m_debugEffectProbeMaxEffects; }
+QString SceneObject::debugPuppetEffectFinalMesh() const { return m_debugPuppetEffectFinalMesh; }
+bool SceneObject::debugPuppetEffectRouteOnly() const { return m_debugPuppetEffectRouteOnly; }
+QString SceneObject::debugPuppetAnimationLayerOverrides() const { return m_debugPuppetAnimationLayerOverrides; }
 
 int   SceneObject::fps() const { return m_fps; }
 int   SceneObject::fillMode() const { return m_fillMode; }
@@ -421,6 +436,16 @@ void SceneObject::setDebugEffectCaptureCommand(const QString& value) {
     Q_EMIT debugEffectCaptureCommandChanged();
 }
 
+void SceneObject::setDebugEffectCaptureDelayMs(int value) {
+    const int normalized = std::max(0, value);
+    if (m_debugEffectCaptureDelayMs == normalized) return;
+    m_debugEffectCaptureDelayMs = normalized;
+    SET_PROPERTY(Int32,
+                 wallpaper::PROPERTY_DEBUG_EFFECT_CAPTURE_DELAY_MS,
+                 m_debugEffectCaptureDelayMs);
+    Q_EMIT debugEffectCaptureDelayMsChanged();
+}
+
 void SceneObject::setDebugEffectProbeLayers(const QString& value) {
     if (m_debugEffectProbeLayers == value) return;
     m_debugEffectProbeLayers = value;
@@ -437,6 +462,51 @@ void SceneObject::setDebugEffectProbeHighRiskLayers(const QString& value) {
                  wallpaper::PROPERTY_DEBUG_EFFECT_PROBE_HIGH_RISK_LAYERS,
                  m_debugEffectProbeHighRiskLayers.toStdString());
     Q_EMIT debugEffectProbeHighRiskLayersChanged();
+}
+
+void SceneObject::setDebugEffectProbeChannelMapSlots(const QString& value) {
+    if (m_debugEffectProbeChannelMapSlots == value) return;
+    m_debugEffectProbeChannelMapSlots = value;
+    SET_PROPERTY(String,
+                 wallpaper::PROPERTY_DEBUG_EFFECT_PROBE_CHANNELMAP_SLOTS,
+                 m_debugEffectProbeChannelMapSlots.toStdString());
+    Q_EMIT debugEffectProbeChannelMapSlotsChanged();
+}
+
+void SceneObject::setDebugEffectProbeMaxEffects(const QString& value) {
+    if (m_debugEffectProbeMaxEffects == value) return;
+    m_debugEffectProbeMaxEffects = value;
+    SET_PROPERTY(String,
+                 wallpaper::PROPERTY_DEBUG_EFFECT_PROBE_MAX_EFFECTS,
+                 m_debugEffectProbeMaxEffects.toStdString());
+    Q_EMIT debugEffectProbeMaxEffectsChanged();
+}
+
+void SceneObject::setDebugPuppetEffectFinalMesh(const QString& value) {
+    if (m_debugPuppetEffectFinalMesh == value) return;
+    m_debugPuppetEffectFinalMesh = value;
+    SET_PROPERTY(String,
+                 wallpaper::PROPERTY_DEBUG_PUPPET_EFFECT_FINAL_MESH,
+                 m_debugPuppetEffectFinalMesh.toStdString());
+    Q_EMIT debugPuppetEffectFinalMeshChanged();
+}
+
+void SceneObject::setDebugPuppetEffectRouteOnly(bool value) {
+    if (m_debugPuppetEffectRouteOnly == value) return;
+    m_debugPuppetEffectRouteOnly = value;
+    SET_PROPERTY(Bool,
+                 wallpaper::PROPERTY_DEBUG_PUPPET_EFFECT_ROUTE_ONLY,
+                 m_debugPuppetEffectRouteOnly);
+    Q_EMIT debugPuppetEffectRouteOnlyChanged();
+}
+
+void SceneObject::setDebugPuppetAnimationLayerOverrides(const QString& value) {
+    if (m_debugPuppetAnimationLayerOverrides == value) return;
+    m_debugPuppetAnimationLayerOverrides = value;
+    SET_PROPERTY(String,
+                 wallpaper::PROPERTY_DEBUG_PUPPET_ANIMATION_LAYER_OVERRIDES,
+                 m_debugPuppetAnimationLayerOverrides.toStdString());
+    Q_EMIT debugPuppetAnimationLayerOverridesChanged();
 }
 
 void SceneObject::setFps(int value) {

@@ -12,8 +12,15 @@ Item {
     property string backendStatus: "System SceneViewer backend"
     property string debugEffectCapturesPath: ""
     property string debugEffectCaptureCommand: ""
+    property int debugEffectCaptureDelayMs: 0
     property string debugEffectProbeLayers: ""
     property string debugEffectProbeHighRiskLayers: ""
+    property string debugEffectProbeChannelMapSlots: ""
+    property string debugEffectProbeMaxEffects: ""
+    property string debugPuppetEffectFinalMesh: ""
+    property bool debugPuppetEffectRouteOnly: false
+    property string debugPuppetAnimationLayerOverrides: ""
+    property string scenePropertiesJson: ""
 
     signal firstFrameReady()
 

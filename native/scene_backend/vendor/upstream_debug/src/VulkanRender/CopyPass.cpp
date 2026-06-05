@@ -5,7 +5,22 @@
 #include "Resource.hpp"
 #include "PassCommon.hpp"
 
+#include <algorithm>
+
 using namespace wallpaper::vulkan;
+
+CopyPassExtent wallpaper::vulkan::chooseCopyPassExtent(VkExtent3D src, VkExtent3D dst) {
+    VkExtent3D extent {
+        .width = std::min(src.width, dst.width),
+        .height = std::min(src.height, dst.height),
+        .depth = std::min(src.depth, dst.depth),
+    };
+    return {
+        .extent = extent,
+        .clamped = extent.width != src.width || extent.height != src.height ||
+                   extent.depth != src.depth,
+    };
+}
 
 CopyPass::CopyPass(const Desc& desc): m_desc(desc) {}
 
@@ -53,10 +68,32 @@ void CopyPass::execute(const Device& device, RenderingResources& rr) {
     auto& cmd = rr.command;
     auto& src = m_desc.vk_src;
     auto& dst = m_desc.vk_dst;
+    const auto copyExtent = chooseCopyPassExtent(src.extent, dst.extent);
 
     if (! (src.handle && dst.handle)) {
         assert(src.handle && dst.handle);
         return;
+    }
+    if (copyExtent.extent.width == 0 || copyExtent.extent.height == 0 ||
+        copyExtent.extent.depth == 0) {
+        LOG_ERROR("copy skipped because source or destination extent is empty: %s -> %s",
+                  m_desc.src.c_str(),
+                  m_desc.dst.c_str());
+        return;
+    }
+    if (copyExtent.clamped) {
+        LOG_INFO("copy extent clamped: %s %ux%ux%u -> %s %ux%ux%u using %ux%ux%u",
+                 m_desc.src.c_str(),
+                 src.extent.width,
+                 src.extent.height,
+                 src.extent.depth,
+                 m_desc.dst.c_str(),
+                 dst.extent.width,
+                 dst.extent.height,
+                 dst.extent.depth,
+                 copyExtent.extent.width,
+                 copyExtent.extent.height,
+                 copyExtent.extent.depth);
     }
 
     VkImageSubresourceRange srang {
@@ -82,7 +119,7 @@ void CopyPass::execute(const Device& device, RenderingResources& rr) {
                 .baseArrayLayer = 0,
                 .layerCount     = 1,
             },
-        .extent = { src.extent.width, src.extent.height, 1 },
+        .extent = copyExtent.extent,
     };
     {
         VkImageMemoryBarrier in_bar {

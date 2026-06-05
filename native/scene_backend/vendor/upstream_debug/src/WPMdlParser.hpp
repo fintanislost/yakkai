@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <string_view>
 #include <cstdint>
 #include <array>
 #include <vector>
@@ -65,15 +66,23 @@ class SceneMesh;
 class WPMdlParser {
 public:
     static bool Parse(std::string_view path, fs::VFS&, WPMdl&);
+    static WPPuppet::Bone::SimulationMetadata ParseBoneSimulationMetadata(std::string_view raw);
 
     static void AddPuppetShaderInfo(WPShaderInfo& info, const WPMdl& mdl);
     static void AddPuppetMatInfo(wpscene::WPMaterial& mat, const WPMdl& mdl);
+    static std::vector<uint32_t> ExpandPuppetActiveBlendSlots(
+        const WPMdl&                mdl,
+        std::span<const uint32_t>   activeBlendSlots);
 
     static void GenPuppetMesh(SceneMesh& mesh, const WPMdl& mdl);
+    static void GenPuppetMesh(SceneMesh&                  mesh,
+                              const WPMdl&                mdl,
+                              const std::array<float, 2>& textureMapRate);
     static bool GenPuppetMesh(SceneMesh&                    mesh,
                               const WPMdl&                  mdl,
                               std::span<const uint32_t>     activePrimaryBlendSlots,
-                              bool                          includeFullyActiveTriangles = true);
+                              bool                          includeFullyActiveTriangles = true,
+                              const std::array<float, 2>&   textureMapRate = { 1.0f, 1.0f });
     static void GenPuppetChannelMapMesh(SceneMesh& mesh, const WPMdl& mdl);
     static void GenPuppetChannelMapBaseUvMesh(SceneMesh&                  mesh,
                                               const WPMdl&                mdl,
@@ -83,7 +92,8 @@ public:
                                         std::span<const Eigen::Affine3f> bone_affines);
     static void GenPuppetMesh(SceneMesh& mesh,
                               const WPMdl::Submesh& mdl,
-                              const Eigen::Matrix3f& basis = Eigen::Matrix3f::Identity());
+                              const Eigen::Matrix3f& basis = Eigen::Matrix3f::Identity(),
+                              const std::array<float, 2>& textureMapRate = { 1.0f, 1.0f });
     static void GenPuppetImageSpaceMesh(SceneMesh&                    mesh,
                                         const WPMdl&                  mdl,
                                         const std::array<float, 2>&   imageSize);

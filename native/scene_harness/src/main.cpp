@@ -1,6 +1,7 @@
 #include <QtCore/QCommandLineOption>
 #include <QtCore/QCommandLineParser>
 #include <QtCore/QDir>
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QJsonDocument>
@@ -8,6 +9,7 @@
 #include <QtCore/QMetaObject>
 #include <QtCore/QPointer>
 #include <QtCore/QSize>
+#include <QtCore/QThread>
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
 #include <QtCore/QDebug>
@@ -18,6 +20,8 @@
 #include <QtQml/QQmlContext>
 
 #include "CaptureGate.hpp"
+#include "PuppetSimulationOption.hpp"
+#include "ScenePropertiesOption.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -32,6 +36,8 @@ constexpr int MaxCaptureSequenceFrames = 3600;
 constexpr int CaptureExitDrainMs = 500;
 constexpr int CaptureReadyPollMs = 50;
 constexpr int CaptureReadyTimeoutMs = 60000;
+constexpr int DebugEffectManifestWaitMs = 5000;
+constexpr int DebugEffectManifestPollMs = 50;
 
 struct CaptureRequest
 {
@@ -156,6 +162,36 @@ std::optional<QString> parsePositiveIdList(const QString& value)
     return normalized.join(QLatin1Char(','));
 }
 
+std::optional<QString> parseChannelMapSlotList(const QString& value)
+{
+    constexpr int kMaxDiagnosticChannelMapSlot = 63;
+
+    std::vector<int> channelSlots;
+    const QStringList parts = value.split(',', Qt::KeepEmptyParts);
+    for (const QString& rawPart : parts) {
+        const QString trimmed = rawPart.trimmed();
+        if (trimmed.isEmpty()) {
+            return std::nullopt;
+        }
+        const std::optional<int> parsed = parseNonNegativeInt(trimmed);
+        if (!parsed || *parsed > kMaxDiagnosticChannelMapSlot) {
+            return std::nullopt;
+        }
+        if (std::find(channelSlots.begin(), channelSlots.end(), *parsed) == channelSlots.end()) {
+            channelSlots.push_back(*parsed);
+        }
+    }
+    if (channelSlots.empty()) {
+        return std::nullopt;
+    }
+
+    QStringList normalized;
+    for (int slot : channelSlots) {
+        normalized.push_back(QString::number(slot));
+    }
+    return normalized.join(QLatin1Char(','));
+}
+
 CaptureStatus saveWindowCapture(QQuickWindow* window, const QString& absolutePath)
 {
     const QImage image = window->grabWindow();
@@ -173,6 +209,51 @@ CaptureStatus saveWindowCapture(QQuickWindow* window, const QString& absolutePat
     }
 
     return CaptureSuccess;
+}
+
+bool readDebugEffectManifestOk(const QString& manifestPath, QString* error)
+{
+    QFile manifestFile(manifestPath);
+    if (!manifestFile.open(QIODevice::ReadOnly)) {
+        if (error != nullptr) {
+            *error = QStringLiteral("debug effect manifest was not written");
+        }
+        return false;
+    }
+
+    const QJsonDocument manifest = QJsonDocument::fromJson(manifestFile.readAll());
+    if (!manifest.isObject()) {
+        if (error != nullptr) {
+            *error = QStringLiteral("debug effect manifest is not a JSON object");
+        }
+        return false;
+    }
+
+    const QString status = manifest.object().value(QStringLiteral("status")).toString();
+    if (status != QStringLiteral("ok")) {
+        if (error != nullptr) {
+            *error = QStringLiteral("debug effect manifest status is %1").arg(status);
+        }
+        return false;
+    }
+
+    return true;
+}
+
+bool waitForDebugEffectManifestOk(const QString& manifestPath)
+{
+    QString lastError;
+    QElapsedTimer timer;
+    timer.start();
+    do {
+        if (readDebugEffectManifestOk(manifestPath, &lastError)) {
+            return true;
+        }
+        QThread::msleep(DebugEffectManifestPollMs);
+    } while (timer.elapsed() < DebugEffectManifestWaitMs);
+
+    qWarning().noquote() << "yakkai_scene_harness:" << lastError << manifestPath;
+    return false;
 }
 
 void requestCaptureExit(QQuickWindow* window, int status)
@@ -396,6 +477,12 @@ int main(int argc, char* argv[])
         QStringLiteral("Write effect input/output/final-publish debug captures and manifest into the given directory. Only supported by --backend paper."),
         QStringLiteral("path")
     );
+    QCommandLineOption debugEffectCaptureDelayOption(
+        QStringList{QStringLiteral("debug-effect-capture-delay-ms")},
+        QStringLiteral("Wait for the requested scene time before dumping debug effect captures. Requires --debug-effect-captures."),
+        QStringLiteral("ms"),
+        QStringLiteral("0")
+    );
     QCommandLineOption debugEffectProbeLayersOption(
         QStringList{QStringLiteral("debug-effect-probe-layers")},
         QStringLiteral("Layer IDs whose stripped puppet mixed effect chains should be rendered only for debug capture. Requires --debug-effect-captures."),
@@ -405,6 +492,40 @@ int main(int argc, char* argv[])
         QStringList{QStringLiteral("debug-effect-probe-high-risk-layers")},
         QStringLiteral("Layer IDs whose stripped high-risk blur/LUT/color-grading effect chains should be rendered only for debug capture. Requires --debug-effect-captures."),
         QStringLiteral("ids")
+    );
+    QCommandLineOption debugEffectProbeChannelMapSlotsOption(
+        QStringList{QStringLiteral("debug-effect-probe-channelmap-slots")},
+        QStringLiteral("Channelmap blend slots to force active for stripped puppet layer debug captures. Requires --debug-effect-captures and --debug-effect-probe-layers."),
+        QStringLiteral("slots")
+    );
+    QCommandLineOption debugEffectProbeMaxEffectsOption(
+        QStringList{QStringLiteral("debug-effect-probe-max-effects")},
+        QStringLiteral("Limit forced debug-probe layers to their first N visible effects. Requires --debug-effect-captures and a probe layer list."),
+        QStringLiteral("count")
+    );
+    QCommandLineOption debugPuppetEffectFinalMeshOption(
+        QStringList{QStringLiteral("debug-puppet-effect-final-mesh")},
+        QStringLiteral("Harness-only puppet effect final mesh override: layer-card, image-space, or deferred-puppet-final. Requires --debug-effect-captures and a probe layer list."),
+        QStringLiteral("mode")
+    );
+    QCommandLineOption debugPuppetEffectRouteOnlyOption(
+        QStringList{QStringLiteral("debug-puppet-effect-route-only")},
+        QStringLiteral("Harness-only puppet effect diagnostic that keeps the offscreen puppet route active with no visible effect passes. Requires --debug-effect-captures and a probe layer list.")
+    );
+    QCommandLineOption debugPuppetAnimationLayerOverridesOption(
+        QStringList{QStringLiteral("debug-puppet-animation-layer-overrides")},
+        QStringLiteral("Semicolon-separated harness-only puppet animation layer overrides: layerId:animationId:key=value[,key=value]. Requires --debug-effect-captures."),
+        QStringLiteral("rules")
+    );
+    QCommandLineOption scenePropertiesJsonOption(
+        QStringList{QStringLiteral("scene-properties-json")},
+        QStringLiteral("Scene properties override JSON object forwarded to the paper backend."),
+        QStringLiteral("json")
+    );
+    QCommandLineOption puppetSimulationOption(
+        QStringList{QStringLiteral("puppet-simulation")},
+        QStringLiteral("Harness-only puppet simulation mode: off, diagnostic, or runtime."),
+        QStringLiteral("mode")
     );
 
     parser.addOption(backendOption);
@@ -421,8 +542,16 @@ int main(int argc, char* argv[])
     parser.addOption(captureTimesOption);
     parser.addOption(captureSequenceOption);
     parser.addOption(debugEffectCapturesOption);
+    parser.addOption(debugEffectCaptureDelayOption);
     parser.addOption(debugEffectProbeLayersOption);
     parser.addOption(debugEffectProbeHighRiskLayersOption);
+    parser.addOption(debugEffectProbeChannelMapSlotsOption);
+    parser.addOption(debugEffectProbeMaxEffectsOption);
+    parser.addOption(debugPuppetEffectFinalMeshOption);
+    parser.addOption(debugPuppetEffectRouteOnlyOption);
+    parser.addOption(debugPuppetAnimationLayerOverridesOption);
+    parser.addOption(scenePropertiesJsonOption);
+    parser.addOption(puppetSimulationOption);
     parser.process(app);
 
     const QString qmlDir = QStringLiteral(YAKKAI_SCENE_HARNESS_QML_DIR);
@@ -440,24 +569,66 @@ int main(int argc, char* argv[])
     const QString captureTimesValue = parser.value(captureTimesOption).trimmed();
     const QString captureSequenceValue = parser.value(captureSequenceOption).trimmed();
     const QString debugEffectCapturesPath = parser.value(debugEffectCapturesOption).trimmed();
+    const QString debugEffectCaptureDelayValue = parser.value(debugEffectCaptureDelayOption).trimmed();
     const QString debugEffectProbeLayersValue = parser.value(debugEffectProbeLayersOption).trimmed();
     const QString debugEffectProbeHighRiskLayersValue = parser.value(debugEffectProbeHighRiskLayersOption).trimmed();
+    const QString debugEffectProbeChannelMapSlotsValue = parser.value(debugEffectProbeChannelMapSlotsOption).trimmed();
+    const QString debugEffectProbeMaxEffectsValue = parser.value(debugEffectProbeMaxEffectsOption).trimmed();
+    const QString debugPuppetEffectFinalMeshValue =
+        parser.value(debugPuppetEffectFinalMeshOption).trimmed().toLower();
+    const QString debugPuppetAnimationLayerOverridesValue =
+        parser.value(debugPuppetAnimationLayerOverridesOption).trimmed();
+    const yakkai::harness::ScenePropertiesJsonOptionResult scenePropertiesJson =
+        yakkai::harness::validateScenePropertiesJsonOption(parser.value(scenePropertiesJsonOption));
+    const yakkai::harness::PuppetSimulationOptionResult puppetSimulation =
+        yakkai::harness::validatePuppetSimulationOption(parser.value(puppetSimulationOption));
     const bool debugEffectCapturesRequested = !debugEffectCapturesPath.isEmpty();
+    const bool debugEffectCaptureDelayRequested = parser.isSet(debugEffectCaptureDelayOption);
     const bool debugEffectProbeLayersRequested = !debugEffectProbeLayersValue.isEmpty();
     const bool debugEffectProbeHighRiskLayersRequested = !debugEffectProbeHighRiskLayersValue.isEmpty();
+    const bool debugEffectProbeChannelMapSlotsRequested = !debugEffectProbeChannelMapSlotsValue.isEmpty();
+    const bool debugEffectProbeMaxEffectsRequested = parser.isSet(debugEffectProbeMaxEffectsOption);
+    const bool debugPuppetEffectFinalMeshRequested =
+        parser.isSet(debugPuppetEffectFinalMeshOption);
+    const bool debugPuppetEffectRouteOnlyRequested =
+        parser.isSet(debugPuppetEffectRouteOnlyOption);
+    const bool debugPuppetAnimationLayerOverridesRequested =
+        !debugPuppetAnimationLayerOverridesValue.isEmpty();
     const QString debugEffectCapturesDir =
         debugEffectCapturesRequested ? QFileInfo(debugEffectCapturesPath).absoluteFilePath() : QString();
     const QString debugEffectCaptureCommand = app.arguments().join(QLatin1Char(' '));
+    const std::optional<int> debugEffectCaptureDelayMs =
+        debugEffectCaptureDelayRequested ? parseNonNegativeInt(debugEffectCaptureDelayValue) : std::optional<int>(0);
     const std::optional<QString> debugEffectProbeLayers =
         debugEffectProbeLayersRequested ? parsePositiveIdList(debugEffectProbeLayersValue) : std::optional<QString>(QString());
     const std::optional<QString> debugEffectProbeHighRiskLayers =
         debugEffectProbeHighRiskLayersRequested ? parsePositiveIdList(debugEffectProbeHighRiskLayersValue) : std::optional<QString>(QString());
+    const std::optional<QString> debugEffectProbeChannelMapSlots =
+        debugEffectProbeChannelMapSlotsRequested ? parseChannelMapSlotList(debugEffectProbeChannelMapSlotsValue) : std::optional<QString>(QString());
+    const std::optional<int> debugEffectProbeMaxEffects =
+        debugEffectProbeMaxEffectsRequested ? parseNonNegativeInt(debugEffectProbeMaxEffectsValue) : std::optional<int>(0);
+    const QString normalizedDebugEffectProbeMaxEffects =
+        debugEffectProbeMaxEffectsRequested && debugEffectProbeMaxEffects
+            ? QString::number(*debugEffectProbeMaxEffects)
+            : QString();
     const bool multiCaptureRequested = !captureDirPath.isEmpty() || !captureTimesValue.isEmpty() || !captureSequenceValue.isEmpty();
     std::optional<std::vector<CaptureRequest>> parsedCaptures;
     const std::optional<QSize> windowSize = parseWindowSize(windowSizeValue);
 
+    if (!scenePropertiesJson.valid) {
+        qWarning().noquote() << "yakkai_scene_harness:" << scenePropertiesJson.error;
+        return 2;
+    }
+    if (!puppetSimulation.valid) {
+        qWarning().noquote() << "yakkai_scene_harness:" << puppetSimulation.error;
+        return 2;
+    }
     if (debugEffectCapturesRequested && backend != QStringLiteral("paper")) {
         qWarning() << "yakkai_scene_harness: --debug-effect-captures requires --backend paper";
+        return 2;
+    }
+    if (debugEffectCaptureDelayRequested && !debugEffectCapturesRequested) {
+        qWarning() << "yakkai_scene_harness: --debug-effect-capture-delay-ms requires --debug-effect-captures";
         return 2;
     }
     if (debugEffectProbeLayersRequested && !debugEffectCapturesRequested) {
@@ -468,12 +639,77 @@ int main(int argc, char* argv[])
         qWarning() << "yakkai_scene_harness: --debug-effect-probe-high-risk-layers requires --debug-effect-captures";
         return 2;
     }
+    if (debugEffectProbeChannelMapSlotsRequested && !debugEffectCapturesRequested) {
+        qWarning() << "yakkai_scene_harness: --debug-effect-probe-channelmap-slots requires --debug-effect-captures";
+        return 2;
+    }
+    if (debugEffectProbeChannelMapSlotsRequested && !debugEffectProbeLayersRequested) {
+        qWarning() << "yakkai_scene_harness: --debug-effect-probe-channelmap-slots requires --debug-effect-probe-layers";
+        return 2;
+    }
+    if (debugEffectProbeChannelMapSlotsRequested) {
+        qWarning() << "yakkai_scene_harness: --debug-effect-probe-channelmap-slots is quarantined because the derived channelmap render path produces glitchy puppet fragments";
+        return 2;
+    }
+    if (debugEffectProbeMaxEffectsRequested && !debugEffectCapturesRequested) {
+        qWarning() << "yakkai_scene_harness: --debug-effect-probe-max-effects requires --debug-effect-captures";
+        return 2;
+    }
+    if (debugPuppetEffectFinalMeshRequested && !debugEffectCapturesRequested) {
+        qWarning() << "yakkai_scene_harness: --debug-puppet-effect-final-mesh requires --debug-effect-captures";
+        return 2;
+    }
+    if (debugPuppetEffectRouteOnlyRequested && !debugEffectCapturesRequested) {
+        qWarning() << "yakkai_scene_harness: --debug-puppet-effect-route-only requires --debug-effect-captures";
+        return 2;
+    }
+    if (debugPuppetAnimationLayerOverridesRequested && !debugEffectCapturesRequested) {
+        qWarning() << "yakkai_scene_harness: --debug-puppet-animation-layer-overrides requires --debug-effect-captures";
+        return 2;
+    }
+    if (debugEffectProbeMaxEffectsRequested &&
+        !debugEffectProbeLayersRequested &&
+        !debugEffectProbeHighRiskLayersRequested) {
+        qWarning() << "yakkai_scene_harness: --debug-effect-probe-max-effects requires --debug-effect-probe-layers or --debug-effect-probe-high-risk-layers";
+        return 2;
+    }
+    if (debugPuppetEffectFinalMeshRequested &&
+        !debugEffectProbeLayersRequested &&
+        !debugEffectProbeHighRiskLayersRequested) {
+        qWarning() << "yakkai_scene_harness: --debug-puppet-effect-final-mesh requires --debug-effect-probe-layers or --debug-effect-probe-high-risk-layers";
+        return 2;
+    }
+    if (debugPuppetEffectRouteOnlyRequested &&
+        !debugEffectProbeLayersRequested &&
+        !debugEffectProbeHighRiskLayersRequested) {
+        qWarning() << "yakkai_scene_harness: --debug-puppet-effect-route-only requires --debug-effect-probe-layers or --debug-effect-probe-high-risk-layers";
+        return 2;
+    }
+    if (debugPuppetEffectFinalMeshRequested &&
+        debugPuppetEffectFinalMeshValue != QStringLiteral("layer-card") &&
+        debugPuppetEffectFinalMeshValue != QStringLiteral("image-space") &&
+        debugPuppetEffectFinalMeshValue != QStringLiteral("deferred-puppet-final")) {
+        qWarning() << "yakkai_scene_harness: invalid --debug-puppet-effect-final-mesh value" << debugPuppetEffectFinalMeshValue;
+        return 2;
+    }
     if (!debugEffectProbeLayers) {
         qWarning() << "yakkai_scene_harness: invalid --debug-effect-probe-layers value" << debugEffectProbeLayersValue;
         return 2;
     }
     if (!debugEffectProbeHighRiskLayers) {
         qWarning() << "yakkai_scene_harness: invalid --debug-effect-probe-high-risk-layers value" << debugEffectProbeHighRiskLayersValue;
+        return 2;
+    }
+    if (!debugEffectProbeChannelMapSlots) {
+        qWarning() << "yakkai_scene_harness: invalid --debug-effect-probe-channelmap-slots value" << debugEffectProbeChannelMapSlotsValue;
+        return 2;
+    }
+    if (!debugEffectProbeMaxEffects) {
+        qWarning() << "yakkai_scene_harness: invalid --debug-effect-probe-max-effects value" << debugEffectProbeMaxEffectsValue;
+        return 2;
+    }
+    if (!debugEffectCaptureDelayMs) {
+        qWarning() << "yakkai_scene_harness: invalid --debug-effect-capture-delay-ms value" << debugEffectCaptureDelayValue;
         return 2;
     }
     if (debugEffectCapturesRequested && !QDir().mkpath(debugEffectCapturesDir)) {
@@ -510,6 +746,10 @@ int main(int argc, char* argv[])
         app.setQuitOnLastWindowClosed(false);
     }
 
+    if (!puppetSimulation.normalized.isEmpty()) {
+        qputenv("YAKKAI_PUPPET_SIMULATION", puppetSimulation.normalized.toUtf8());
+    }
+
     QQmlApplicationEngine engine;
     QObject::connect(&app, &QGuiApplication::aboutToQuit, []() {
         qInfo() << "yakkai_scene_harness: aboutToQuit";
@@ -536,8 +776,15 @@ int main(int argc, char* argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessQmlDir"), qmlDir);
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugEffectCapturesPath"), debugEffectCapturesDir);
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugEffectCaptureCommand"), debugEffectCaptureCommand);
+    engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugEffectCaptureDelayMs"), *debugEffectCaptureDelayMs);
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugEffectProbeLayers"), *debugEffectProbeLayers);
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugEffectProbeHighRiskLayers"), *debugEffectProbeHighRiskLayers);
+    engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugEffectProbeChannelMapSlots"), *debugEffectProbeChannelMapSlots);
+    engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugEffectProbeMaxEffects"), normalizedDebugEffectProbeMaxEffects);
+    engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugPuppetEffectFinalMesh"), debugPuppetEffectFinalMeshValue);
+    engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugPuppetEffectRouteOnly"), debugPuppetEffectRouteOnlyRequested);
+    engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugPuppetAnimationLayerOverrides"), debugPuppetAnimationLayerOverridesValue);
+    engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessScenePropertiesJson"), scenePropertiesJson.normalized);
 
     const QUrl mainQml = QUrl::fromLocalFile(QDir(qmlDir).filePath(QStringLiteral("Main.qml")));
     QObject::connect(
@@ -621,16 +868,7 @@ int main(int argc, char* argv[])
     }
 
     const QString manifestPath = QDir(debugEffectCapturesDir).filePath(QStringLiteral("manifest.json"));
-    QFile manifestFile(manifestPath);
-    if (!manifestFile.open(QIODevice::ReadOnly)) {
-        qWarning() << "yakkai_scene_harness: debug effect manifest was not written" << manifestPath;
-        return 6;
-    }
-
-    const QJsonDocument manifest = QJsonDocument::fromJson(manifestFile.readAll());
-    if (!manifest.isObject() ||
-        manifest.object().value(QStringLiteral("status")).toString() != QStringLiteral("ok")) {
-        qWarning() << "yakkai_scene_harness: debug effect manifest reports failure" << manifestPath;
+    if (!waitForDebugEffectManifestOk(manifestPath)) {
         return 6;
     }
 

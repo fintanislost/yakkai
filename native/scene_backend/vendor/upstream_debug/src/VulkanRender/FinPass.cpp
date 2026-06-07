@@ -92,6 +92,26 @@ void FinPass::setPresentLayout(VkImageLayout layout) { m_desc.present_layout = l
 void FinPass::setPresentFormat(VkFormat format) { m_desc.present_format = format; }
 void FinPass::setPresentQueueIndex(uint32_t i) { m_desc.present_queue_index = i; }
 
+FinPassTextureReadBarrier wallpaper::vulkan::finPassResultTextureReadBarrier(
+    VkImage image, VkImageSubresourceRange range) {
+    return {
+        .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        .barrier = VkImageMemoryBarrier {
+            .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .pNext            = nullptr,
+            .srcAccessMask    = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                                VK_ACCESS_TRANSFER_WRITE_BIT,
+            .dstAccessMask    = VK_ACCESS_SHADER_READ_BIT,
+            .oldLayout        = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .newLayout        = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .image            = image,
+            .subresourceRange = range,
+        },
+    };
+}
+
 void FinPass::prepare(Scene& scene, const Device& device, RenderingResources& rr) {
     LOG_INFO("finpass prepare: begin result=%s", std::string(m_desc.result).c_str());
     {
@@ -238,6 +258,13 @@ void FinPass::execute(const Device& device, RenderingResources& rr) {
             .pImageInfo      = &desc_img,
         };
         cmd.PushDescriptorSetKHR(VK_PIPELINE_BIND_POINT_GRAPHICS, *m_desc.pipeline.layout, 0, wset);
+    }
+    {
+        const auto sync = finPassResultTextureReadBarrier(m_desc.vk_result.handle, base_srang);
+        cmd.PipelineBarrier(sync.srcStageMask,
+                            sync.dstStageMask,
+                            VK_DEPENDENCY_BY_REGION_BIT,
+                            sync.barrier);
     }
 
     // do queue family transfer operation

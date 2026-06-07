@@ -63,8 +63,8 @@ references.
   `composelayer-water-only probe-only water-composelayer layer=239`. After the
   production predicate, fresh validation reports layer `239` allowed with
   reason `composelayer-water-effect`, final route
-  `effect-layer-composite-final-publish`, `publishFinalOutput=true`, empty
-  route risk, and water materials `effects/waterripple` plus
+  `effect-layer-node-final-publish`, `publishFinalOutput=true`, empty
+  route risk, local card final mesh, and water materials `effects/waterripple` plus
   `effects/waterflow`.
 - Tests: native policy tests cover stable water-composelayer and water-utility
   classification, explicit probe eligibility, the narrow composelayer water
@@ -212,16 +212,17 @@ references.
 - Evidence: baseline inventory originally classified the current fixture as
   `needs-high-risk-probe-route`. The high-risk probe then classified the same
   class as `human-visual-review-required`: it had composelayer checks,
-  color-grade plus blur materials, `effect-layer-composite-final-publish`,
-  `publishFinalOutput=true`, `effectFinalMeshKind=fullscreen-card`, and a
+  color-grade plus blur materials, the then-current
+  `effect-layer-composite-final-publish` route, `publishFinalOutput=true`,
+  `effectFinalMeshKind=fullscreen-card`, and a
   forced high-risk probe route. `tools/validate-scene.sh 3476236738 10000
   --probe-high-risk-layers 365` passed structurally and reported
   `baseline-vs-probe RMSE=0.0840355` and background sentinel mean RGB region
   deltas of `10.533` to `17.405`; those numbers proved broad frame mutation,
   not correctness. After the production predicate, fresh validation reports
   layer `365` allowed with reason `composelayer-color-grade-effect`; the
-  manifest contains five composelayer-color-grade captures through
-  `effect-layer-composite-final-publish`.
+  manifest contains five composelayer-color-grade captures through local
+  `effect-layer-node-final-publish`.
 - Tests: native policy tests assert the `composelayer-color-grade-effect` allow
   path for a composelayer blur/color-grade carrier.
   `tools/test_effect_candidate_inventory.py` covers baseline

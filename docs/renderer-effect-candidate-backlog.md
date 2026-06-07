@@ -246,7 +246,7 @@ The renderer-limitations C.2 slice promotes only the composelayer blur/color
 grade class after human visual approval. Fresh validation reports `3476236738`
 layer `365` as allowed with reason `composelayer-color-grade-effect`; the
 effect capture manifest includes five composelayer-color-grade captures through
-`effect-layer-composite-final-publish`. The inventory now reports three
+local `effect-layer-node-final-publish`. The inventory now reports three
 `production-allowed` visual-gate audit rows, 24 allowed records, and five
 stripped records. `tools/validate-scene.sh 3476236738 10000` passed the
 background sentinel with 11 effect passes and `tools/validate-scene.sh
@@ -268,7 +268,8 @@ emits `visual-gate-audits` for high-risk visual classes, initially
 `needs-high-risk-probe-route`; the fresh `3476236738` layer `365` probe reports
 `human-visual-review-required`,
 with route evidence showing a composelayer, color-grade plus blur materials, a
-fullscreen-card final mesh, and `effect-layer-composite-final-publish`. The
+fullscreen-card final mesh, and the then-current
+`effect-layer-composite-final-publish` route. The
 validator probe changed the frame materially (`baseline-vs-probe
 RMSE=0.0840355`) and moved configured background sentinel regions by mean RGB
 distances of `10.533` to `17.405` without triggering clear-color leakage. The
@@ -297,8 +298,9 @@ sequence frames and no smoke failures.
 The renderer-limitations W.2 slice promotes only the composelayer water-only
 class after human visual approval. Fresh validation reports Arona layer `239`
 as allowed with reason `composelayer-water-effect`; the route is
-`effect-layer-composite-final-publish`, publishes final output, has empty
-route risk, and uses `effects/waterripple` plus `effects/waterflow` materials.
+local `effect-layer-node-final-publish`, publishes final output, has empty
+route risk, and uses a card final mesh with `effects/waterripple` plus
+`effects/waterflow` materials.
 `tools/validate-scene.sh 3228578419 8000` passed with 23 effect passes, and
 `tools/validate-scene.sh 3476236738 10000` still passed the background
 sentinel. The combined inventory now reports 25 allowed records, one protected

@@ -512,6 +512,11 @@ bool shouldDumpEffectCaptures(const EffectCaptureConfig& config,
     return effectiveElapsedMs + 1.0e-3 >= static_cast<double>(config.captureDelayMs);
 }
 
+bool shouldRegisterMaterialOutputCaptureForShader(std::string_view shader)
+{
+    return !trimAsciiWhitespace(shader).empty();
+}
+
 EffectProbeLimitDecision decideEffectProbeLimit(int originalVisibleEffectCount,
                                                 int maxEffects,
                                                 bool routeOnly)

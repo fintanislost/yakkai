@@ -181,6 +181,7 @@ def coverage_bucket_summaries(matrix: dict[str, Any]) -> list[dict[str, Any]]:
 def validate_coverage_matrix(matrix: dict[str, Any], manifest: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     matrix_scene_ids: set[str] = set()
+    coverage_status_by_scene_id: dict[str, str] = {}
     bucket_ids: set[str] = set()
 
     for bucket in matrix.get("buckets", []):
@@ -205,12 +206,28 @@ def validate_coverage_matrix(matrix: dict[str, Any], manifest: dict[str, Any]) -
                 errors.append(f"bucket {bucket_id} has coverage entry without sceneId")
             if status not in COVERAGE_STATUS_ORDER:
                 errors.append(f"bucket {bucket_id} scene {scene_id} has unknown status {status}")
+            if scene_id and status in COVERAGE_STATUS_ORDER:
+                current_status = coverage_status_by_scene_id.get(scene_id, "missing")
+                if COVERAGE_STATUS_ORDER[status] > COVERAGE_STATUS_ORDER[current_status]:
+                    coverage_status_by_scene_id[scene_id] = status
 
     for scene in expand_manifest_scenes(manifest):
         scene_id = str(scene.get("id", ""))
         coverage_id = str(scene.get("sourceSceneId", scene_id))
         if coverage_id and coverage_id not in matrix_scene_ids:
             errors.append(f"active scene {scene_id} source scene {coverage_id} is missing from coverage matrix")
+
+    checked_active_sources: set[str] = set()
+    for scene in expand_manifest_scenes(manifest):
+        coverage_id = str(scene.get("sourceSceneId", scene.get("id", "")))
+        if not coverage_id or coverage_id in checked_active_sources:
+            continue
+        checked_active_sources.add(coverage_id)
+        best_status = coverage_status_by_scene_id.get(coverage_id, "missing")
+        if not coverage_status_meets(best_status, "active"):
+            errors.append(
+                f"active scene source {coverage_id} is present in smoke manifest but best coverage status is {best_status}"
+            )
 
     for summary in coverage_bucket_summaries(matrix):
         if not summary["satisfied"]:

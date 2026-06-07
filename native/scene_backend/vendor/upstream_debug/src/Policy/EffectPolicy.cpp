@@ -780,15 +780,12 @@ EffectPublishRouteDecision decideEffectPublishRoute(const EffectPublishRouteInpu
         }
     } else {
         route.effectInputMeshKind = "card";
-        route.effectFinalMeshKind =
-            (input.fullscreen || input.composelayer) ? "fullscreen-card" : "card";
+        route.effectFinalMeshKind = input.fullscreen ? "fullscreen-card" : "card";
     }
 
     if (input.standalonePuppetFinalDisplay) {
         route.finalDisplayRoute = "standalone-puppet-final-display";
         route.standaloneDisplayAttachMode = "original-parent-sibling";
-    } else if (input.composelayer) {
-        route.finalDisplayRoute = "effect-layer-composite-final-publish";
     } else if (input.fullscreen) {
         route.finalDisplayRoute = "effect-layer-fullscreen-final-publish";
     } else {

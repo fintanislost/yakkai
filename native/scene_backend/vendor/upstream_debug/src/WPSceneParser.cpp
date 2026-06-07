@@ -3518,7 +3518,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             spImgNode.get(), effectViewport.width, effectViewport.height, effect_ppong_a, effect_ppong_b);
         {
             imgEffectLayer->SetFinalBlend(imgBlendMode);
-            if (wpimgobj.fullscreen || isCompose) {
+            if (wpimgobj.fullscreen) {
                 imgEffectLayer->SetFullscreen(true);
             }
             if (! puppetEffectRoutePlan.publishFinalOutput) {
@@ -3601,7 +3601,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 effectCaptureInfo.publish.publishFinalOutput =
                     puppetEffectRoutePlan.publishFinalOutput;
                 effectCaptureInfo.publish.finalNodeUsesOriginalParent =
-                    ! wpimgobj.fullscreen && ! isCompose;
+                    ! wpimgobj.fullscreen;
                 effectCaptureInfo.publish.effectInputNodeReset = ! isCompose;
                 effectCaptureInfo.publish.effectInputMaterialPreservesLayerBlendMode =
                     puppetEffectRoutePlan.effectInputMaterialPreservesLayerBlendMode;
@@ -3832,9 +3832,11 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     materialInfo.authoredOutputRenderTarget = matOutRT;
                     materialInfo.resolvedOutputRenderTarget = matOutRT;
 
-                    if (wpmat.shader.find("lut_loader") != std::string::npos) {
+                    if (wallpaper::debug::shouldRegisterMaterialOutputCaptureForShader(wpmat.shader)) {
                         const int effectIndex = i_eff + 1;
                         const int materialIndex = static_cast<int>(i_mat);
+                        const bool isLutMaterial =
+                            wpmat.shader.find("lut_loader") != std::string::npos;
                         const bool isFinalPublishedMaterial =
                             sstart_with(matOutRT, WE_EFFECT_PPONG_PREFIX_B) &&
                             ! useStandalonePuppetFinalDisplay && i_eff == count_eff - 1 &&
@@ -3849,7 +3851,8 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                             sourceRenderTarget = effect_ppong_b;
                             commandSource = debugFinalOutputSource;
                             sourceFinalEffectOutput = true;
-                            if (isFinalPublishedMaterial && scene.renderTargets.count(effect_ppong_b) > 0) {
+                            if (isLutMaterial && isFinalPublishedMaterial &&
+                                scene.renderTargets.count(effect_ppong_b) > 0) {
                                 const std::string debugLocalMaterialOutputTarget =
                                     "_rt_debug_material_output_local_" + nodeAddr + "_" +
                                     std::to_string(effectIndex) + "_" +

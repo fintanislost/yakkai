@@ -1247,6 +1247,52 @@ class RunnerCoreTests(unittest.TestCase):
 
         self.assertEqual(runner.validate_coverage_matrix(matrix, manifest), [])
 
+    def test_validate_coverage_matrix_requires_active_status_for_manifest_sources(self):
+        matrix = {
+            "version": 1,
+            "buckets": [
+                {
+                    "id": "scene-script-bindings",
+                    "name": "SceneScript Bindings And Runtime",
+                    "minimumStatus": "candidate",
+                    "coverage": [
+                        {
+                            "sceneId": "3326873240",
+                            "status": "candidate",
+                            "source": "doc",
+                            "notes": "stale after manifest promotion",
+                        }
+                    ],
+                }
+            ],
+        }
+        manifest = {
+            "version": 1,
+            "paths": {},
+            "scenes": [
+                {
+                    "id": "3326873240",
+                    "name": "Elaina Template",
+                    "source": "${workshop}/3326873240/scene.pkg",
+                    "variants": [
+                        {
+                            "id": "3326873240-day",
+                            "name": "Day",
+                            "gates": ["deep"],
+                            "baselinePrefix": "3326873240-day",
+                        }
+                    ],
+                }
+            ],
+        }
+
+        self.assertEqual(
+            runner.validate_coverage_matrix(matrix, manifest),
+            [
+                "active scene source 3326873240 is present in smoke manifest but best coverage status is candidate"
+            ],
+        )
+
     def test_manifest_includes_elaina_time_variants_as_deep_candidates(self):
         manifest_path = Path(__file__).resolve().parent / "scenes.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -1283,6 +1329,32 @@ class RunnerCoreTests(unittest.TestCase):
                 "3326873240-dusk/stills/still-10000.png",
                 "3326873240-night/stills/still-10000.png",
                 "3326873240-gradient/stills/still-10000.png",
+            ],
+        )
+
+    def test_manifest_includes_fluorescent_beach_as_deep_overlay_video_fixture(self):
+        manifest_path = Path(__file__).resolve().parent / "scenes.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+        cases = runner.expand_manifest_scenes(manifest)
+        scene = next((case for case in cases if case.get("id") == "2788691565"), None)
+
+        self.assertIsNotNone(scene)
+        self.assertEqual(scene["name"], "Girl and Fluorescent Beach")
+        self.assertEqual(scene["gates"], ["deep"])
+        self.assertFalse(scene["required"])
+        self.assertEqual(scene["features"], ["overlay-video-texture", "water-effects", "particles"])
+        self.assertEqual(
+            scene["sequences"],
+            [
+                {
+                    "name": "motion-10000",
+                    "startMs": 10000,
+                    "frames": 60,
+                    "intervalMs": 33,
+                    "baselineDir": "2788691565/sequences/motion-10000",
+                    "temporalToleranceFrames": 4,
+                }
             ],
         )
 

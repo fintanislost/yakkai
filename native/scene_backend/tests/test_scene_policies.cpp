@@ -12,11 +12,15 @@
 #include "Puppet/PuppetSimulation.hpp"
 #include "Shader/ShaderCompatPatches.hpp"
 #include "SpecTexs.hpp"
+#include "VulkanRender/CustomShaderPass.hpp"
 #include "VulkanRender/CopyPass.hpp"
+#include "VulkanRender/FinPass.hpp"
 #include "VulkanRender/PassCommon.hpp"
 #include "WPMdlParser.hpp"
 #include "WPSceneScript.hpp"
 #include "WPShaderParser.hpp"
+#include "WPTexImageParser.hpp"
+#include "Fs/PhysicalFs.h"
 #include "Fs/VFS.h"
 
 #include <nlohmann/json.hpp>
@@ -24,6 +28,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -111,6 +117,70 @@ std::array<float, 2> readTexCoord(const wallpaper::SceneVertexArray& vertex,
 bool nearFloat(float actual, float expected)
 {
     return std::abs(actual - expected) < 1.0e-6f;
+}
+
+void appendI32(std::vector<uint8_t>& bytes, int32_t value)
+{
+    uint8_t raw[sizeof(value)];
+    std::memcpy(raw, &value, sizeof(value));
+    bytes.insert(bytes.end(), std::begin(raw), std::end(raw));
+}
+
+void appendF32(std::vector<uint8_t>& bytes, float value)
+{
+    uint8_t raw[sizeof(value)];
+    std::memcpy(raw, &value, sizeof(value));
+    bytes.insert(bytes.end(), std::begin(raw), std::end(raw));
+}
+
+void appendTexVersion(std::vector<uint8_t>& bytes, const char* prefix, int version)
+{
+    char raw[9] {};
+    std::snprintf(raw, sizeof(raw), "%.4s%.4d", prefix, version);
+    bytes.insert(bytes.end(), raw, raw + sizeof(raw));
+}
+
+std::vector<uint8_t> makeTexbV4SpriteFixture()
+{
+    std::vector<uint8_t> bytes;
+    appendTexVersion(bytes, "TEXV", 5);
+    appendTexVersion(bytes, "TEXI", 1);
+    appendI32(bytes, 9); // R8
+    appendI32(bytes, 1 << 2); // sprite
+    appendI32(bytes, 1024);
+    appendI32(bytes, 1024);
+    appendI32(bytes, 4);
+    appendI32(bytes, 4);
+    appendI32(bytes, static_cast<int32_t>(0xff000000u));
+    appendTexVersion(bytes, "TEXB", 4);
+    appendI32(bytes, 1); // one image slot
+
+    // TEXB v4 flat image record. The old ParseHeader() path treated this as
+    // a v1-v3 mipmap loop. With width=height=1024 and lz4=1, the misaligned
+    // first frame id became 0x01000004.
+    appendI32(bytes, -1);
+    appendI32(bytes, 0);
+    appendI32(bytes, 1);
+    appendI32(bytes, 1024);
+    appendI32(bytes, 1024);
+    appendI32(bytes, 1);
+    appendI32(bytes, 4096);
+    appendI32(bytes, 4);
+    bytes.insert(bytes.end(), {0xff, 0xff, 0xff, 0xff});
+
+    appendTexVersion(bytes, "TEXS", 3);
+    appendI32(bytes, 1); // one sprite frame
+    appendI32(bytes, 204);
+    appendI32(bytes, 102);
+    appendI32(bytes, 0); // image slot id
+    appendF32(bytes, 0.02f);
+    appendF32(bytes, 0.0f);
+    appendF32(bytes, 0.0f);
+    appendF32(bytes, 204.0f);
+    appendF32(bytes, 0.0f);
+    appendF32(bytes, 0.0f);
+    appendF32(bytes, 102.0f);
+    return bytes;
 }
 
 void checkDecisionStableAfterClassification(const wallpaper::policy::LayerEffectInput& input,
@@ -283,6 +353,62 @@ void testCopyPassExtentClampsToOverlappingRegion()
     check(!unclamped.clamped, "copy pass extent does not clamp equal extents");
     check(unclamped.extent.width == sameSize.width && unclamped.extent.height == sameSize.height,
           "copy pass extent preserves equal extents");
+}
+
+void testCustomShaderPassSynchronizesPreviousTargetWrites()
+{
+    const auto dependency = wallpaper::vulkan::customShaderPassExternalDependency(false);
+    check((dependency.srcStageMask & VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT) != 0,
+          "custom shader pass waits for prior color-attachment writes");
+    check((dependency.srcStageMask & VK_PIPELINE_STAGE_TRANSFER_BIT) != 0,
+          "custom shader pass waits for prior transfer writes");
+    check((dependency.dstStageMask & VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT) != 0,
+          "custom shader pass dependency covers shader sampling");
+    check((dependency.srcAccessMask & VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT) != 0,
+          "custom shader pass makes prior color writes available");
+    check((dependency.srcAccessMask & VK_ACCESS_TRANSFER_WRITE_BIT) != 0,
+          "custom shader pass makes prior transfer writes available");
+    check((dependency.dstAccessMask & VK_ACCESS_SHADER_READ_BIT) != 0,
+          "custom shader pass makes writes visible to shader reads");
+
+    const VkImageSubresourceRange range {
+        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel = 0,
+        .levelCount = 1,
+        .baseArrayLayer = 0,
+        .layerCount = 1,
+    };
+    const auto barrier = wallpaper::vulkan::customShaderPassTextureReadBarrier({}, range);
+    check((barrier.srcAccessMask & VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT) != 0,
+          "custom shader texture-read barrier includes prior color writes");
+    check((barrier.srcAccessMask & VK_ACCESS_TRANSFER_WRITE_BIT) != 0,
+          "custom shader texture-read barrier includes prior transfer writes");
+    check((barrier.dstAccessMask & VK_ACCESS_SHADER_READ_BIT) != 0,
+          "custom shader texture-read barrier publishes to shader reads");
+}
+
+void testFinPassSynchronizesFinalRenderTargetRead()
+{
+    const VkImageSubresourceRange range {
+        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel = 0,
+        .levelCount = 1,
+        .baseArrayLayer = 0,
+        .layerCount = 1,
+    };
+    const auto sync = wallpaper::vulkan::finPassResultTextureReadBarrier({}, range);
+    check((sync.srcStageMask & VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT) != 0,
+          "fin pass waits for previous color-attachment writes");
+    check((sync.srcStageMask & VK_PIPELINE_STAGE_TRANSFER_BIT) != 0,
+          "fin pass waits for previous transfer writes");
+    check((sync.dstStageMask & VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT) != 0,
+          "fin pass publishes result texture to fragment sampling");
+    check((sync.barrier.srcAccessMask & VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT) != 0,
+          "fin pass result barrier includes prior color writes");
+    check((sync.barrier.srcAccessMask & VK_ACCESS_TRANSFER_WRITE_BIT) != 0,
+          "fin pass result barrier includes prior transfer writes");
+    check((sync.barrier.dstAccessMask & VK_ACCESS_SHADER_READ_BIT) != 0,
+          "fin pass result barrier makes final target visible to shader reads");
 }
 
 void testEffectSourceUsesLocalSpaceWhileFinalOutputKeepsParent()
@@ -1520,6 +1646,20 @@ void testEffectCaptureDebug()
     }
 
     {
+        check(wallpaper::debug::shouldRegisterMaterialOutputCaptureForShader(
+                  "workshop/3165346237/effects/lut_loader"),
+              "LUT effect materials stay eligible for material-output captures");
+        check(wallpaper::debug::shouldRegisterMaterialOutputCaptureForShader(
+                  "effects/godrays_cast"),
+              "godrays effect materials are eligible for material-output captures");
+        check(wallpaper::debug::shouldRegisterMaterialOutputCaptureForShader(
+                  "effects/pulse"),
+              "pulse effect materials are eligible for material-output captures");
+        check(!wallpaper::debug::shouldRegisterMaterialOutputCaptureForShader(""),
+              "empty material shader names are not eligible for material-output captures");
+    }
+
+    {
         const auto outDir =
             std::filesystem::temp_directory_path() / "yakkai-effect-material-policy-test";
         std::filesystem::remove_all(outDir);
@@ -2182,6 +2322,30 @@ void testEffectPublishRoutePolicy()
               "flat crop-sheet puppet effect input uses normal offscreen composition");
         check(route.routeRisk.empty(),
               "non-channelmap puppet deferred route has no standalone flat-card route risk");
+    }
+
+    {
+        const auto route = wallpaper::policy::decideEffectPublishRoute({
+            .fullscreen = false,
+            .composelayer = true,
+        });
+        check(route.effectInputMeshKind == "card",
+              "non-fullscreen composelayers render from a local card input");
+        check(route.effectFinalMeshKind == "card",
+              "non-fullscreen composelayers publish through the authored layer card");
+        check(route.finalDisplayRoute == "effect-layer-node-final-publish",
+              "non-fullscreen composelayers use local effect-layer final publish");
+    }
+
+    {
+        const auto route = wallpaper::policy::decideEffectPublishRoute({
+            .fullscreen = true,
+            .composelayer = false,
+        });
+        check(route.effectFinalMeshKind == "fullscreen-card",
+              "fullscreen image effects still publish through a fullscreen card");
+        check(route.finalDisplayRoute == "effect-layer-fullscreen-final-publish",
+              "fullscreen image effects keep fullscreen final publish");
     }
 
     {
@@ -3354,6 +3518,48 @@ void testPuppetSourceAlphaPreserveShaderPolicy()
           "puppet source-alpha patch does not match nested waterwaves shader paths");
 }
 
+void testTexbV4SpriteHeaderPolicy()
+{
+    const auto root =
+        std::filesystem::temp_directory_path() / "yakkai-texb-v4-sprite-header-test";
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root / "materials/particle");
+
+    const auto fixture = makeTexbV4SpriteFixture();
+    {
+        std::ofstream out(root / "materials/particle/v4_sprite.tex", std::ios::binary);
+        out.write(reinterpret_cast<const char*>(fixture.data()),
+                  static_cast<std::streamsize>(fixture.size()));
+    }
+
+    wallpaper::fs::VFS vfs;
+    check(vfs.Mount("/assets", wallpaper::fs::CreatePhysicalFs(root.string())),
+          "test VFS mounts TEXB v4 sprite fixture");
+
+    wallpaper::WPTexImageParser parser(&vfs);
+    wallpaper::ImageHeader header;
+    bool threw = false;
+    try {
+        header = parser.ParseHeader("particle/v4_sprite");
+    } catch (const std::exception&) {
+        threw = true;
+    }
+
+    check(!threw,
+          "TEXB v4 sprite headers skip flat image records before reading frame ids");
+    if (threw) {
+        return;
+    }
+
+    check(header.isSprite, "TEXB v4 sprite fixture remains marked as sprite");
+    check(header.extraHeader.at("texb").val == 4, "TEXB v4 fixture records texb version");
+    check(header.spriteAnim.numFrames() == 1, "TEXB v4 sprite fixture parses one frame");
+    if (header.spriteAnim.numFrames() == 1) {
+        const auto& frame = header.spriteAnim.GetCurFrame();
+        check(frame.imageId == 0, "TEXB v4 sprite frame keeps image slot zero");
+    }
+}
+
 void testShaderCompatPolicy()
 {
     wallpaper::fs::VFS vfs;
@@ -3404,6 +3610,8 @@ int main()
     testEffectFinalOutputDebugPlaceholderTracksPublishedOutput();
     testEffectFinalOutputDebugPlaceholderOnlyTracksFinalNode();
     testCopyPassExtentClampsToOverlappingRegion();
+    testCustomShaderPassSynchronizesPreviousTargetWrites();
+    testFinPassSynchronizesFinalRenderTargetRead();
     testEffectSourceUsesLocalSpaceWhileFinalOutputKeepsParent();
     testEffectCandidateClassification();
     testEffectPolicy();
@@ -3431,6 +3639,7 @@ int main()
     testPremultipliedTranslucentBlendUsesStoredColor();
     testSourceAlphaPreservePatch();
     testPuppetSourceAlphaPreserveShaderPolicy();
+    testTexbV4SpriteHeaderPolicy();
     testShaderCompatPolicy();
     if (g_failures != 0) {
         return EXIT_FAILURE;

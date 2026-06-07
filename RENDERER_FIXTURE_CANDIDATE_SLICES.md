@@ -11,6 +11,9 @@ these slices before they are added to `smoke-tests/scenes.json`.
 | --- | --- | --- | --- |
 | 3228578419 | Sleeping Arona | quick, deep, release | Puppet, flare/lens, particles, alpha-sensitive composition, effect stripping constraints |
 | 3327063360 | Shiroko Night Video | quick, deep, release | Main embedded video texture, particles, effect chain, decoder timing tolerance |
+| 1591277437 | Spider-Verse Godrays | deep | Godrays, shake, pulse, stale final-presentation artifact replay |
+| 3326873240 | Elaina Day Night Gradient | deep | Non-puppet SceneScript, day-night tint/property behavior, time-mode variants |
+| 2788691565 | Girl and Fluorescent Beach | deep | Overlay video texture, water-effect motion, particles |
 
 ## Candidate Intake Rules
 
@@ -39,8 +42,8 @@ Do not add a candidate directly to `release`.
   - Add one still around 8000-10000ms and one short motion sequence if particles/effects move.
   - Review godray placement, brightness, visible character/background composition, and effect intensity.
 - Future phase fit: Phase 3, per-layer effect alpha and effect-family re-enable work.
-- Add to gate: optional `deep` after baseline promotion.
-- Phase 1 status: locally present on 2026-05-27; structural validation passed with one composelayer warning; visual review found a bottom-right-to-center diagonal godray/artifact that must be compared against Wallpaper Engine before baseline promotion; coverage tracked in `smoke-tests/coverage-matrix.json`.
+- Add to gate: promoted to optional `deep`.
+- Phase 1 status: promoted to active deep coverage on 2026-06-07 after the generic render-target synchronization fix removed the Yakkai-only diagonal godray/final-presentation artifact and human review approved the fixed contact sheet.
 
 ### Slice B: Alya Clock And Date SceneScript Candidate
 
@@ -56,7 +59,7 @@ Do not add a candidate directly to `release`.
   - Review whether clock/date elements render, text placement is stable, and scripts do not produce fatal errors.
 - Future phase fit: Phase 6, persistent SceneScript runtime and update lifecycle.
 - Add to gate: optional `deep` after baseline promotion.
-- Phase 1 status: locally present on 2026-05-27; structural validation passed with one composelayer warning; validator reported no QuickJS bindings, so script coverage needs visual review before baseline promotion; coverage tracked in `smoke-tests/coverage-matrix.json`.
+- Phase 1 status: reviewed on 2026-06-07 and kept as candidate; blocker is validator reports no QuickJS bindings and human review found a shoulder artifact.
 
 ### Slice C: Elaina Day-Night Script Candidate
 
@@ -71,7 +74,7 @@ Do not add a candidate directly to `release`.
   - Review tint/color balance, layer visibility, and whether script-driven changes are visible.
 - Future phase fit: Phase 6, SceneScript runtime; possibly Phase 2 script boundary refactor.
 - Add to gate: optional `deep` after baseline promotion.
-- Phase 1 status: locally present on 2026-05-27; structural validation passed with effect/composelayer warnings and 23 QuickJS bindings resolved; coverage tracked in `smoke-tests/coverage-matrix.json`.
+- Phase 1 status: promoted to active deep coverage on 2026-06-06 after human review of Morning/Day/Dusk/Night/Day Night Gradient stills. Repeated deep smoke passed with the scene-specific review threshold widened for expected animated sky/video phase drift. Keep out of `release` until repeated strict runs are stable and the SceneScript/media-integration gaps are better understood.
 
 ### Slice D: Embedded Overlay Video Texture Candidate
 
@@ -87,7 +90,7 @@ Do not add a candidate directly to `release`.
   - Record whether this is main-video-like or overlay-video-like before promoting.
 - Future phase fit: Phase 4, video texture fidelity and decoder budget policy.
 - Add to gate: optional `deep` after baseline promotion.
-- Phase 1 status: locally present on 2026-05-27; structural validation passed with one composelayer warning; coverage tracked in `smoke-tests/coverage-matrix.json`.
+- Phase 1 status: promoted to active deep coverage on 2026-06-07 after human review of still and motion artifacts under `/tmp/yakkai-phase1-candidates/2788691565`.
 
 ### Slice E: Static Model And Lighting Candidate
 
@@ -101,8 +104,8 @@ Do not add a candidate directly to `release`.
   - Capture a still after startup and inspect framing before any baseline promotion.
   - Review camera angle, model orientation, visible foreground/background elements, light balance, and material fidelity.
 - Future phase fit: Phase 5, static model, material, and lighting fidelity.
-- Add to gate: optional `deep` after baseline promotion.
-- Phase 1 status: locally present on 2026-05-27; structural validation passed with material-loading warnings that need review before baseline promotion; coverage tracked in `smoke-tests/coverage-matrix.json`.
+- Add to gate: promoted to optional `deep`.
+- Phase 1 status: promoted to active deep coverage on 2026-06-07 after TEXB v4 sprite-header parsing and local composelayer publishing fixes cleared material warnings, structural validation passed, and human review approved the still capture.
 
 ### Slice F: WE Web Harness Candidate
 

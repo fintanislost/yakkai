@@ -37,9 +37,9 @@
       "coverage": [
         {
           "sceneId": "1591277437",
-          "status": "candidate",
-          "source": "RENDERER_FIXTURE_CANDIDATE_SLICES.md",
-          "notes": "Spider-Verse candidate covers godrays, shake, pulse, and a prior visual regression class. Local probe on 2026-05-27 found the Workshop item installed and structural validation passed with one composelayer warning; visual review found a bottom-right-to-center diagonal godray/artifact that must be compared against Wallpaper Engine before baseline promotion."
+          "status": "active",
+          "source": "smoke-tests/scenes.json",
+          "notes": "Spider-Verse covers godrays, shake, pulse, and a prior stale _rt_default presentation artifact. Local probe on 2026-05-27 found the Workshop item installed and structural validation passed with one composelayer warning. Windows WE comparison on 2026-06-07 confirmed the bottom-right-to-center diagonal godray/artifact was absent from Windows reference frames but present in Yakkai; after the generic render-target synchronization fix, human review approved promotion to active deep still coverage."
         }
       ]
     },
@@ -53,13 +53,13 @@
           "sceneId": "3301291394",
           "status": "candidate",
           "source": "RENDERER_FIXTURE_CANDIDATE_SLICES.md",
-          "notes": "Alya Clock and Date covers clock/date script bindings and user property toggles. Local probe on 2026-05-27 found the Workshop item installed and structural validation passed with one composelayer warning; validator reported no QuickJS bindings, so script coverage must be visually reviewed before baseline promotion."
+          "notes": "Alya Clock and Date covers clock/date script bindings and user property toggles. Local probe on 2026-05-27 found the Workshop item installed and structural validation passed with one composelayer warning. Human review on 2026-06-07 kept it as candidate because validator reported no QuickJS bindings and a shoulder artifact was visible."
         },
         {
           "sceneId": "3326873240",
-          "status": "candidate",
-          "source": "RENDERER_FIXTURE_CANDIDATE_SLICES.md",
-          "notes": "Elaina Day Night Gradient covers non-puppet SceneScript and day-night tint/property behavior. Local probe on 2026-05-27 found the Workshop item installed and structural validation passed with effect/composelayer warnings; validator reported 23 QuickJS bindings resolved."
+          "status": "active",
+          "source": "smoke-tests/scenes.json",
+          "notes": "Elaina Day Night Gradient covers non-puppet SceneScript and day-night tint/property behavior with active deep-only Morning, Day, Dusk, Night, and Day Night Gradient smoke variants. Local visual review approved the promoted still baselines; repeated deep smoke passed with expected animated sky/video phase drift covered by the scene threshold."
         }
       ]
     },
@@ -71,9 +71,9 @@
       "coverage": [
         {
           "sceneId": "2788691565",
-          "status": "candidate",
-          "source": "RENDERER_FIXTURE_CANDIDATE_SLICES.md",
-          "notes": "Girl and Fluorescent Beach covers embedded mp4 references inside a scene package. Local probe on 2026-05-27 found the Workshop item installed and structural validation passed with one composelayer warning."
+          "status": "active",
+          "source": "smoke-tests/scenes.json",
+          "notes": "Girl and Fluorescent Beach covers embedded mp4 references inside a scene package with active deep-only motion sequence coverage for overlay video/water-effect behavior. Local probe on 2026-05-27 found the Workshop item installed and structural validation passed with one composelayer warning. Human review on 2026-06-07 approved still and motion artifacts for deep baseline promotion."
         }
       ]
     },
@@ -85,9 +85,9 @@
       "coverage": [
         {
           "sceneId": "1576514332",
-          "status": "candidate",
-          "source": "RENDERER_FIXTURE_CANDIDATE_SLICES.md",
-          "notes": "Cyber City Parkour covers non-puppet models, camera framing, material fallback, composelayers, and lights. Local probe on 2026-05-27 found the Workshop item installed and structural validation passed with material-loading warnings that need review before baseline promotion."
+          "status": "active",
+          "source": "smoke-tests/scenes.json",
+          "notes": "Cyber City Parkour covers non-puppet models, camera framing, material fallback, composelayers, particle sprite materials, and lights with active deep-only still coverage. Local structural validation now passes with no material-loading warnings after TEXB v4 sprite-header parsing and local composelayer publishing fixes. Human review on 2026-06-07 approved the promoted still baseline."
         }
       ]
     },

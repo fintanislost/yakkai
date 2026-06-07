@@ -16,6 +16,10 @@ namespace wallpaper
 namespace vulkan
 {
 
+VkSubpassDependency customShaderPassExternalDependency(bool useDepth);
+VkImageMemoryBarrier customShaderPassTextureReadBarrier(VkImage image,
+                                                        VkImageSubresourceRange range);
+
 class CustomShaderPass : public VulkanPass {
 public:
     struct Desc {

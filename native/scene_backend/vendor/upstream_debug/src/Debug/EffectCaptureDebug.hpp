@@ -265,6 +265,8 @@ bool shouldDumpEffectCaptures(const EffectCaptureConfig& config,
                               double elapsedSeconds,
                               double frameTimeSeconds);
 
+bool shouldRegisterMaterialOutputCaptureForShader(std::string_view shader);
+
 struct EffectProbeLimitDecision {
     int  keptVisibleEffectCount { 0 };
     bool keepEffectRouteActive { false };

@@ -14,6 +14,15 @@ namespace wallpaper
 namespace vulkan
 {
 
+struct FinPassTextureReadBarrier {
+    VkPipelineStageFlags srcStageMask;
+    VkPipelineStageFlags dstStageMask;
+    VkImageMemoryBarrier barrier;
+};
+
+FinPassTextureReadBarrier finPassResultTextureReadBarrier(VkImage image,
+                                                          VkImageSubresourceRange range);
+
 class FinPass : public VulkanPass {
 public:
     struct Desc {

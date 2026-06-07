@@ -38,6 +38,13 @@ the registered render targets. For shader-output oracles, use the manifest's
 requested threshold, while `effectiveCaptureTimeSeconds` records the readiness
 check including the current frame time.
 
+When `--debug-effect-captures` is enabled, the harness records generic
+`material-output` captures for preserved effect material passes. Use these
+captures to inspect multi-pass effects stage by stage before changing shader
+preprocessing, blend modes, render target sizing, or final-publish routing.
+The manifest records layer id, effect index, pass index, material name, output
+target, and texture bindings for each material-output capture.
+
 **Structural checks:**
 - Scene type detection (Puppet/Video/Standard)
 - Shader compilation success/failure count

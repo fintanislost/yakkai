@@ -16,10 +16,10 @@ Coverage buckets track source Workshop ids. Smoke variants use case-specific ids
 | --- | --- | --- | --- | --- | --- |
 | puppet-effects-alpha | Puppet Effects And Alpha | active | active | yes | 3228578419 |
 | main-video-texture | Main Embedded Video Texture | active | active | yes | 3327063360 |
-| effect-chain-regression | Effect Chain Regression Replay | candidate | candidate | yes | 1591277437 |
-| scene-script-bindings | SceneScript Bindings And Runtime | candidate | candidate | yes | 3301291394, 3326873240 |
-| overlay-video-texture | Overlay Or Small Embedded Video Texture | candidate | candidate | yes | 2788691565 |
-| static-model-material-lighting | Static Model, Material, And Lighting | candidate | candidate | yes | 1576514332 |
+| effect-chain-regression | Effect Chain Regression Replay | candidate | active | yes | 1591277437 |
+| scene-script-bindings | SceneScript Bindings And Runtime | candidate | active | yes | 3301291394, 3326873240 |
+| overlay-video-texture | Overlay Or Small Embedded Video Texture | candidate | active | yes | 2788691565 |
+| static-model-material-lighting | Static Model, Material, And Lighting | candidate | active | yes | 1576514332 |
 | we-web-wallpaper | Wallpaper Engine Web Project | requiresHarness | requiresHarness | yes | 1509243786 |
 | we-video-wallpaper | Wallpaper Engine Video Project | requiresHarness | requiresHarness | yes | 2478419118 |
 
@@ -27,22 +27,22 @@ Coverage buckets track source Workshop ids. Smoke variants use case-specific ids
 
 - `3228578419` Sleeping Arona: puppet, flare/lens, particles, alpha-sensitive composition.
 - `3327063360` Shiroko Night Video: main embedded video texture, particles, effect chain.
+- `1591277437` Spider-Verse: deep-only godrays, shake, pulse, and stale final-presentation artifact replay.
+- `3326873240` Elaina Day Night Gradient: non-puppet SceneScript, day-night tint/property behavior, and deep-only Morning/Day/Dusk/Night/Day Night Gradient variants.
+- `2788691565` Girl and Fluorescent Beach: deep-only overlay video/water-effect motion sequence.
+- `1576514332` Cyber City Parkour: deep-only static model/material/light/composelayer still coverage.
 
 ## Candidate Fixtures
 
-- `1591277437` Spider-Verse: effect-chain regression replay for godrays, shake, and pulse.
-- `3301291394` Alya Clock and Date: SceneScript clock/date candidate and user properties; current validator coverage is stronger for effect-chain behavior than script binding behavior.
-- `3326873240` Elaina Day Night Gradient: non-puppet SceneScript and tint/property behavior; first script-runtime review fixture with deep-only Morning/Day/Dusk/Night/Day Night Gradient variants.
-- `2788691565` Girl and Fluorescent Beach: small or overlay embedded video texture policy.
-- `1576514332` Cyber City Parkour: static models, material fallback, camera framing, composelayers, and lights.
+- `3301291394` Alya Clock and Date: SceneScript clock/date candidate and user properties; kept as candidate because validator reports no QuickJS bindings and human review found a shoulder artifact.
 
 ## Phase 1 Probe Notes
 
-- `1591277437`: local structural validation passed, but visual review found a bottom-right-to-center diagonal godray/artifact that needs Wallpaper Engine comparison before promotion.
-- `3301291394`: local structural validation passed, but the validator reported no QuickJS bindings despite the candidate's script purpose; visual review is required before promotion.
-- `3326873240`: local structural validation passed and reported 23 QuickJS binding events, 20 binding layers, 20 unsupported media-integration layers, and 44 SceneScript/runtime gaps. Time-mode smoke review artifacts for Morning/Day/Dusk/Night/Day Night Gradient rendered successfully with no hard failures; they remain candidate review cases, not active baselines.
-- `2788691565`: local structural validation passed; use later frame-sequence review to decide whether embedded video regions should be static or animated.
-- `1576514332`: local structural validation passed with material-loading warnings; review model/material fidelity before promotion.
+- `1591277437`: local structural validation passed. Windows WE comparison on 2026-06-07 confirmed the bottom-right-to-center diagonal godray/artifact was absent from Windows reference frames but present in Yakkai still and motion captures. After the generic render-target synchronization fix removed the no-debug artifact, human review approved promotion to active deep still coverage.
+- `3301291394`: local structural validation passed, but the validator reported no QuickJS bindings despite the candidate's script purpose, and human review found an artifact on the character's shoulder.
+- `3326873240`: local structural validation passed and reported 23 QuickJS binding events, 20 binding layers, 20 unsupported media-integration layers, and 44 SceneScript/runtime gaps. Human review approved Morning/Day/Dusk/Night/Day Night Gradient stills, and deep smoke passed after promoting variant baselines with an Elaina-specific review threshold for expected animated sky/video phase drift.
+- `2788691565`: local structural validation passed with one composelayer warning; still and motion artifacts under `/tmp/yakkai-phase1-candidates/2788691565` were human-reviewed and promoted as deep-only motion sequence coverage.
+- `1576514332`: local structural validation now passes with no material-loading warnings after TEXB v4 sprite-header parsing and local composelayer publishing fixes. Human review approved the deep-only still capture on 2026-06-07 and the baseline was promoted.
 
 ## Harness Gaps
 

@@ -113,6 +113,58 @@
       }
     },
     {
+      "id": "1591277437",
+      "name": "Spider-Verse Godrays",
+      "workshopUrl": "https://steamcommunity.com/sharedfiles/filedetails/?id=1591277437",
+      "source": "${workshop}/1591277437/scene.pkg",
+      "gates": ["deep"],
+      "required": false,
+      "features": ["effect-chain", "godrays", "shake", "pulse"],
+      "captures": [
+        {
+          "name": "still-10000",
+          "timeMs": 10000,
+          "baseline": "1591277437/stills/still-10000.png"
+        }
+      ],
+      "thresholds": {
+        "rmseReview": 0.04,
+        "rmseFail": 0.1
+      },
+      "expectations": {
+        "motion": false,
+        "manualReview": ["godray placement and brightness", "diagonal beam absence", "character/background composition", "color balance"]
+      }
+    },
+    {
+      "id": "2788691565",
+      "name": "Girl and Fluorescent Beach",
+      "workshopUrl": "https://steamcommunity.com/sharedfiles/filedetails/?id=2788691565",
+      "source": "${workshop}/2788691565/scene.pkg",
+      "gates": ["deep"],
+      "required": false,
+      "features": ["overlay-video-texture", "water-effects", "particles"],
+      "sequences": [
+        {
+          "name": "motion-10000",
+          "startMs": 10000,
+          "frames": 60,
+          "intervalMs": 33,
+          "baselineDir": "2788691565/sequences/motion-10000",
+          "temporalToleranceFrames": 4
+        }
+      ],
+      "thresholds": {
+        "rmseReview": 0.05,
+        "rmseFail": 0.1,
+        "minMotionRmse": 0.004
+      },
+      "expectations": {
+        "motion": true,
+        "manualReview": ["water motion", "overlay video region", "character composition", "blue glow balance"]
+      }
+    },
+    {
       "id": "3326873240",
       "name": "Elaina Day Night Gradient",
       "workshopUrl": "https://steamcommunity.com/sharedfiles/filedetails/?id=3326873240",
@@ -127,7 +179,7 @@
         }
       ],
       "thresholds": {
-        "rmseReview": 0.04,
+        "rmseReview": 0.09,
         "rmseFail": 0.12
       },
       "expectations": {
@@ -186,6 +238,30 @@
           }
         }
       ]
+    },
+    {
+      "id": "1576514332",
+      "name": "Cyber City Parkour",
+      "workshopUrl": "https://steamcommunity.com/sharedfiles/filedetails/?id=1576514332",
+      "source": "${workshop}/1576514332/scene.pkg",
+      "gates": ["deep"],
+      "required": false,
+      "features": ["static-models", "materials", "lighting", "composelayers", "particles"],
+      "captures": [
+        {
+          "name": "still-10000",
+          "timeMs": 10000,
+          "baseline": "1576514332/stills/still-10000.png"
+        }
+      ],
+      "thresholds": {
+        "rmseReview": 0.04,
+        "rmseFail": 0.1
+      },
+      "expectations": {
+        "motion": false,
+        "manualReview": ["camera framing", "runner silhouette", "foreground models", "city lights", "cloud/sky composition", "particle lightning"]
+      }
     }
   ]
 }

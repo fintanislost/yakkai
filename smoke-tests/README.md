@@ -2,7 +2,7 @@
 
 The smoke-test harness is the local visual regression gate for Wallpaper Engine scene rendering.
 
-`quick` and `release` keep stable required coverage. `deep` can include additional visual variants for renderer-risk states. Arona is split into deterministic Day/Sunset/Night variants so LUT changes are tested without depending on the local clock. Elaina `3326873240` is split into deep-only Morning/Day/Dusk/Night/Day Night Gradient candidates for SceneScript and time-mode review.
+`quick` and `release` keep stable required coverage. `deep` can include additional visual variants for renderer-risk states. Arona is split into deterministic Day/Sunset/Night variants so LUT changes are tested without depending on the local clock. Spider-Verse `1591277437` is a deep-only still fixture for godrays, shake, pulse, and stale final-presentation artifact replay. Elaina `3326873240` is split into deep-only Morning/Day/Dusk/Night/Day Night Gradient candidates for SceneScript and time-mode review, with a wider review threshold for expected animated sky/video phase drift in still captures. Girl and Fluorescent Beach `2788691565` is a deep-only sequence fixture for overlay video texture, water-effect motion, and particle coverage. Cyber City Parkour `1576514332` is a deep-only still fixture for static model, material, lighting, composelayer, and particle sprite coverage.
 
 ## Commands
 

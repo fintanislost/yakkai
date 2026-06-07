@@ -294,6 +294,28 @@ void LoadHeader(fs::IBinaryStream& file, ImageHeader& header) {
     if (header.extraHeader["texb"].val == 3) header.type = static_cast<ImageType>(file.ReadInt32());
 }
 
+struct TexbV4PayloadHeader {
+    i32  format { 0 };
+    i32  width { 0 };
+    i32  height { 0 };
+    bool lz4Compressed { false };
+    i32  decompressedSize { 0 };
+    i32  sourceSize { 0 };
+};
+
+TexbV4PayloadHeader ReadTexbV4PayloadHeader(fs::IBinaryStream& file) {
+    TexbV4PayloadHeader header;
+    file.ReadInt32(); // unknown (0xFFFFFFFF)
+    file.ReadInt32(); // unknown (0)
+    header.format = file.ReadInt32();
+    header.width  = file.ReadInt32();
+    header.height = file.ReadInt32();
+    header.lz4Compressed = file.ReadInt32() == 1;
+    header.decompressedSize = file.ReadInt32();
+    header.sourceSize = file.ReadInt32();
+    return header;
+}
+
 void SetHeaderPow2(ImageHeader& header, i32 mip_0_w, i32 mip_0_h) {
     header.mipmap_pow2   = algorism::IsPowOfTwo((u32)mip_0_w) || algorism::IsPowOfTwo((u32)mip_0_h);
     header.mipmap_larger = mip_0_w * mip_0_h > header.mapWidth * header.mapHeight;
@@ -470,38 +492,34 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
 
         if (isTexbV4) {
             // TEXB v4 flat format
-            file.ReadInt32(); // unknown (0xFFFFFFFF)
-            file.ReadInt32(); // unknown (0)
-            i32 v4_format = file.ReadInt32();
-            i32 v4_width  = file.ReadInt32();
-            i32 v4_height = file.ReadInt32();
-            LZ4_compressed    = file.ReadInt32() == 1;
-            decompressed_size = file.ReadInt32();
-            src_size          = file.ReadInt32();
+            const TexbV4PayloadHeader v4 = ReadTexbV4PayloadHeader(file);
+            LZ4_compressed    = v4.lz4Compressed;
+            decompressed_size = v4.decompressedSize;
+            src_size          = v4.sourceSize;
 
             mipmaps.resize(1);
             auto& mipmap  = mipmaps[0];
-            mipmap.width  = v4_width;
-            mipmap.height = v4_height;
-            img_slot.width  = v4_width;
-            img_slot.height = v4_height;
-            SetHeaderPow2(img.header, v4_width, v4_height);
+            mipmap.width  = v4.width;
+            mipmap.height = v4.height;
+            img_slot.width  = v4.width;
+            img_slot.height = v4.height;
+            SetHeaderPow2(img.header, v4.width, v4.height);
 
             // TEXB v4 format IDs differ from TEXI. When the data size doesn't
             // match the TEXI format, trust the v4 format and data size.
             // Known v4 format IDs: 1=RGBA8, 5=BC7
             {
                 i32 dataBytes = LZ4_compressed ? decompressed_size : src_size;
-                i32 expectedRgba = v4_width * v4_height * 4;
+                i32 expectedRgba = v4.width * v4.height * 4;
                 if (img.header.format == TextureFormat::RGBA8 && dataBytes > 0 && dataBytes < expectedRgba) {
                     // Data is smaller than RGBA8 — must be compressed
-                    if (v4_format == 5) {
+                    if (v4.format == 5) {
                         img.header.format = TextureFormat::BC7;
                     }
                 }
             }
 
-            if (src_size <= 0 || v4_width <= 0 || v4_height <= 0)
+            if (src_size <= 0 || v4.width <= 0 || v4.height <= 0)
                 return nullptr;
         } else {
             // TEXB v1-v3 mipmap loop
@@ -684,9 +702,21 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
 
     // load sprite info
     if (header.isSprite) {
+        const bool isTexbV4 = header.extraHeader["texb"].val >= 4;
         // bypass image data, store width and height
         std::vector<std::vector<float>> imageDatas(image_count);
         for (usize i_image = 0; i_image < image_count; i_image++) {
+            if (isTexbV4) {
+                const TexbV4PayloadHeader v4 = ReadTexbV4PayloadHeader(file);
+                if (v4.sourceSize <= 0 || v4.width <= 0 || v4.height <= 0) {
+                    return header;
+                }
+                imageDatas.at(i_image) = { (float)v4.width, (float)v4.height };
+                SetHeaderPow2(header, v4.width, v4.height);
+                file.SeekCur(v4.sourceSize);
+                continue;
+            }
+
             int mipmap_count = file.ReadInt32();
             for (int32_t i_mipmap = 0; i_mipmap < mipmap_count; i_mipmap++) {
                 int32_t width  = file.ReadInt32();
@@ -753,10 +783,18 @@ ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
             header.spriteAnim.AppendFrame(sf);
         }
     } else {
-        i32 mipmap_count = file.ReadInt32();
-        (void)mipmap_count;
-        i32 width  = file.ReadInt32();
-        i32 height = file.ReadInt32();
+        i32 width = 0;
+        i32 height = 0;
+        if (header.extraHeader["texb"].val >= 4) {
+            const TexbV4PayloadHeader v4 = ReadTexbV4PayloadHeader(file);
+            width = v4.width;
+            height = v4.height;
+        } else {
+            i32 mipmap_count = file.ReadInt32();
+            (void)mipmap_count;
+            width  = file.ReadInt32();
+            height = file.ReadInt32();
+        }
         SetHeaderPow2(header, width, height);
     }
     return header;

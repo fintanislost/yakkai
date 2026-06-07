@@ -155,9 +155,11 @@ SceneScriptResult SceneScriptContext::evaluateLayerScript(
             << "    if (typeof __initRet === 'object') thisLayer.origin = __initRet;"
             << "  }"
             << "} catch(e) {} }\n";
+    wrapper << "globalThis.__sceneScriptReturn = undefined;\n";
     wrapper << "if (typeof update === 'function') {\n"
             << "  var __ret = update(__val);\n"
-            << "  if (__ret) { thisLayer.origin = __ret; }\n"
+            << "  globalThis.__sceneScriptReturn = __ret;\n"
+            << "  if (__ret && typeof __ret === 'object') { thisLayer.origin = __ret; }\n"
             << "}\n"
             << "if (typeof scriptProperties !== 'undefined' && typeof scriptProperties === 'object') {\n"
             << "  if ('color' in scriptProperties) {\n"
@@ -264,6 +266,17 @@ SceneScriptResult SceneScriptContext::evaluateLayerScript(
         JS_FreeValue(ctx, jorigin);
     }
     JS_FreeValue(ctx, thisLayer);
+
+    JSValue jreturn = JS_GetPropertyStr(ctx, global, "__sceneScriptReturn");
+    if (JS_IsString(jreturn)) {
+        size_t textLen = 0;
+        const char* text = JS_ToCStringLen(ctx, &textLen, jreturn);
+        if (text) {
+            result.text = std::string(text, textLen);
+            JS_FreeCString(ctx, text);
+        }
+    }
+    JS_FreeValue(ctx, jreturn);
     JS_FreeValue(ctx, global);
 
     return result;

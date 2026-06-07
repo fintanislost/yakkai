@@ -48,6 +48,31 @@ class SceneScriptLogSummaryTests(unittest.TestCase):
         self.assertIn("  - 175 class=media-runtime-only api=MediaPlaybackEvent count=1", output)
         self.assertIn("unsupported-media-integration-layers=1", output)
 
+    def test_counts_text_bindings_by_property(self):
+        with tempfile.TemporaryDirectory() as temp:
+            log_path = Path(temp) / "validate.log"
+            log_path.write_text(
+                "\n".join(
+                    [
+                        "INFO QuickJS binding: id=101 text=12:34",
+                        "INFO QuickJS binding: id=102 text=June 7",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            completed = subprocess.run(
+                [sys.executable, "tools/scene-script-log-summary.py", str(log_path)],
+                cwd=Path(__file__).resolve().parents[1],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+        output = completed.stdout
+        self.assertIn("scene-script-bindings=2", output)
+        self.assertIn("  - text: 2", output)
+
 
 if __name__ == "__main__":
     unittest.main()

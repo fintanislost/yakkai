@@ -240,6 +240,30 @@
       ]
     },
     {
+      "id": "3301291394",
+      "name": "Alya Clock and Date",
+      "workshopUrl": "https://steamcommunity.com/sharedfiles/filedetails/?id=3301291394",
+      "source": "${workshop}/3301291394/scene.pkg",
+      "gates": ["deep"],
+      "required": false,
+      "features": ["scene-script", "generated-text", "user-properties"],
+      "captures": [
+        {
+          "name": "still-10000",
+          "timeMs": 10000,
+          "baseline": "3301291394/stills/still-10000.png"
+        }
+      ],
+      "thresholds": {
+        "rmseReview": 0.04,
+        "rmseFail": 0.1
+      },
+      "expectations": {
+        "motion": false,
+        "manualReview": ["clock/date generated text logs", "shoulder artifact absence", "character/background composition", "sunset color balance"]
+      }
+    },
+    {
       "id": "1576514332",
       "name": "Cyber City Parkour",
       "workshopUrl": "https://steamcommunity.com/sharedfiles/filedetails/?id=1576514332",

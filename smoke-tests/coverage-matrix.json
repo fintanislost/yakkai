@@ -51,9 +51,9 @@
       "coverage": [
         {
           "sceneId": "3301291394",
-          "status": "candidate",
-          "source": "RENDERER_FIXTURE_CANDIDATE_SLICES.md",
-          "notes": "Alya Clock and Date covers clock/date script bindings and user property toggles. Local probe on 2026-05-27 found the Workshop item installed and structural validation passed with one composelayer warning. Human review on 2026-06-07 kept it as candidate because validator reported no QuickJS bindings and a shoulder artifact was visible."
+          "status": "active",
+          "source": "smoke-tests/scenes.json",
+          "notes": "Alya Clock and Date covers Clock/Date text SceneScript bindings, script property resolution, generated text-layer representation, and user property gating. Local validation now resolves two script-bound text layers with no SceneScript gaps, and human review on 2026-06-07 approved the shoulder/character composition for deep still coverage."
         },
         {
           "sceneId": "3326873240",

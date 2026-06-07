@@ -124,7 +124,11 @@ runtime gaps are validator warnings; harmless and media/runtime-only gaps are
 kept as triage evidence. If a non-fatal script gap belongs to a layer already
 suppressed as unsupported media integration, the helper reclassifies that gap as
 media-runtime-only so deferred media widgets do not mask the remaining visible
-SceneScript work.
+SceneScript work. The summary preserves the top-level unique layer binding
+count and also prints per-property binding counts. Generated text bindings are
+counted separately as `text` when validator logs contain
+`QuickJS binding: ... text=...`, distinct from transform, color, and alpha
+bindings.
 
 ### `smoke-tests/run.sh`
 

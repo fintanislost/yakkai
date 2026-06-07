@@ -765,9 +765,9 @@ Current diagnostic state:
   QuickJS binding layers and reports visible runtime gaps plus media-only
   placeholders. It now has deep-only Morning, Day, Dusk, Night, and Day Night
   Gradient smoke variants for visual time-mode review.
-- `3301291394` remains a weaker script fixture for now because local
-  validation reports no QuickJS bindings, despite its clock/date candidate
-  purpose.
+- `3301291394` is now active deep text SceneScript coverage: local validation
+  resolves Clock/Date text bindings, reports per-property `origin` and `text`
+  binding counts, and logs generated text-layer representation.
 
 Scope:
 

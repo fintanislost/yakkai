@@ -17,9 +17,11 @@
 #include "VulkanRender/FinPass.hpp"
 #include "VulkanRender/PassCommon.hpp"
 #include "WPMdlParser.hpp"
+#include "WPSceneParser.hpp"
 #include "WPSceneScript.hpp"
 #include "WPShaderParser.hpp"
 #include "WPTexImageParser.hpp"
+#include "Audio/SoundManager.h"
 #include "Fs/PhysicalFs.h"
 #include "Fs/VFS.h"
 
@@ -117,6 +119,26 @@ std::array<float, 2> readTexCoord(const wallpaper::SceneVertexArray& vertex,
 bool nearFloat(float actual, float expected)
 {
     return std::abs(actual - expected) < 1.0e-6f;
+}
+
+wallpaper::SceneNode* findNodeByTranslate(wallpaper::SceneNode* node,
+                                          const std::array<float, 3>& translate)
+{
+    if (!node) {
+        return nullptr;
+    }
+    const auto& nodeTranslate = node->Translate();
+    if (nearFloat(nodeTranslate.x(), translate[0]) &&
+        nearFloat(nodeTranslate.y(), translate[1]) &&
+        nearFloat(nodeTranslate.z(), translate[2])) {
+        return node;
+    }
+    for (const auto& child : node->GetChildren()) {
+        if (auto* match = findNodeByTranslate(child.get(), translate)) {
+            return match;
+        }
+    }
+    return nullptr;
 }
 
 void appendI32(std::vector<uint8_t>& bytes, int32_t value)
@@ -2954,6 +2976,106 @@ void testSceneScriptEvaluatorRuntimeStubs()
                   "SceneScript combo default option updates x");
         }
     }
+
+    {
+        wallpaper::SceneScriptContext textCtx;
+        textCtx.setUserProperties({
+            {"clock", {{"type", "bool"}, {"value", true}}}
+        });
+        textCtx.setScriptProperty("showTime", 1.0);
+
+        const std::string script = R"(
+            export var scriptProperties = createScriptProperties()
+                .addCheckbox({
+                    name: 'showTime',
+                    value: false
+                })
+                .finish();
+
+            export function update(value) {
+                if (scriptProperties.showTime) {
+                    return '12:34';
+                }
+                return value;
+            }
+        )";
+
+        const auto result = textCtx.evaluateLayerScript(script, {0.0f, 0.0f, 0.0f});
+        check(result.text.has_value(),
+              "SceneScript evaluator captures string return values for text objects");
+        if (result.text) {
+            check(*result.text == "12:34",
+                  "SceneScript text result uses script property override");
+        }
+    }
+}
+
+void testTextSceneScriptOriginBindingAppliesToTextNode()
+{
+    const auto root =
+        std::filesystem::temp_directory_path() / "yakkai-text-scenescript-origin-test";
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root);
+
+    wallpaper::fs::VFS vfs;
+    check(vfs.Mount("/assets", wallpaper::fs::CreatePhysicalFs(root.string())),
+          "test VFS mounts text SceneScript fixture");
+
+    const std::string script = R"(
+        export function update(value) {
+            thisLayer.origin = new Vec3(12, 34, 0);
+            return 'scripted text';
+        }
+    )";
+
+    nlohmann::json sceneJson = {
+        {"camera", {
+            {"center", "0 0 0"},
+            {"eye", "0 0 1"},
+            {"up", "0 1 0"}
+        }},
+        {"general", {
+            {"ambientcolor", "0.2 0.2 0.2"},
+            {"skylightcolor", "0.3 0.3 0.3"},
+            {"clearcolor", "0 0 0"},
+            {"cameraparallax", false},
+            {"cameraparallaxamount", 0.0},
+            {"cameraparallaxdelay", 0.0},
+            {"cameraparallaxmouseinfluence", 0.0},
+            {"orthogonalprojection", {
+                {"width", 1280},
+                {"height", 720}
+            }}
+        }},
+        {"objects", nlohmann::json::array({
+            {
+                {"id", 101},
+                {"name", "ScriptedText"},
+                {"origin", "1 2 0"},
+                {"scale", "1 1 1"},
+                {"angles", "0 0 0"},
+                {"size", "256 64"},
+                {"visible", true},
+                {"text", {
+                    {"value", "fallback"},
+                    {"script", script}
+                }}
+            }
+        })}
+    };
+
+    wallpaper::audio::SoundManager soundManager;
+    wallpaper::WPSceneParser parser;
+    const auto scene = parser.Parse("text_scenescript_origin_test", sceneJson.dump(), vfs, soundManager);
+    check(scene != nullptr, "text SceneScript fixture parses");
+    if (!scene || !scene->sceneGraph) {
+        return;
+    }
+
+    check(findNodeByTranslate(scene->sceneGraph.get(), {12.0f, 34.0f, 0.0f}) != nullptr,
+          "text SceneScript origin binding moves the generated text node");
+    check(findNodeByTranslate(scene->sceneGraph.get(), {1.0f, 2.0f, 0.0f}) == nullptr,
+          "text node does not keep authored origin after script origin binding resolves");
 }
 
 void testPuppetMeshTexcoordsApplyTextureMapRate()
@@ -3623,6 +3745,7 @@ int main()
     testModelFallbackPolicy();
     testSceneScriptRuntimePolicy();
     testSceneScriptEvaluatorRuntimeStubs();
+    testTextSceneScriptOriginBindingAppliesToTextNode();
     testPuppetMeshTexcoordsApplyTextureMapRate();
     testPuppetFilteredMeshIncludesSecondaryOnlyWeightedChildren();
     testPuppetSimulationModeParser();

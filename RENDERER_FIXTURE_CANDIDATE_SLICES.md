@@ -13,6 +13,7 @@ these slices before they are added to `smoke-tests/scenes.json`.
 | 3327063360 | Shiroko Night Video | quick, deep, release | Main embedded video texture, particles, effect chain, decoder timing tolerance |
 | 1591277437 | Spider-Verse Godrays | deep | Godrays, shake, pulse, stale final-presentation artifact replay |
 | 3326873240 | Elaina Day Night Gradient | deep | Non-puppet SceneScript, day-night tint/property behavior, time-mode variants |
+| 3301291394 | Alya Clock and Date | deep | Clock/Date text SceneScript bindings, generated text-layer representation, user property gating |
 | 2788691565 | Girl and Fluorescent Beach | deep | Overlay video texture, water-effect motion, particles |
 
 ## Candidate Intake Rules
@@ -59,7 +60,7 @@ Do not add a candidate directly to `release`.
   - Review whether clock/date elements render, text placement is stable, and scripts do not produce fatal errors.
 - Future phase fit: Phase 6, persistent SceneScript runtime and update lifecycle.
 - Add to gate: optional `deep` after baseline promotion.
-- Phase 1 status: reviewed on 2026-06-07 and kept as candidate; blocker is validator reports no QuickJS bindings and human review found a shoulder artifact.
+- Phase 1 status: promoted to active deep coverage on 2026-06-07 after generic text-return SceneScript binding support resolved Clock/Date scripts, generated text layers were represented in scene graph/logs, and human review approved the shoulder/character composition.
 
 ### Slice C: Elaina Day-Night Script Candidate
 

@@ -29,17 +29,18 @@ Coverage buckets track source Workshop ids. Smoke variants use case-specific ids
 - `3327063360` Shiroko Night Video: main embedded video texture, particles, effect chain.
 - `1591277437` Spider-Verse: deep-only godrays, shake, pulse, and stale final-presentation artifact replay.
 - `3326873240` Elaina Day Night Gradient: non-puppet SceneScript, day-night tint/property behavior, and deep-only Morning/Day/Dusk/Night/Day Night Gradient variants.
+- `3301291394` Alya Clock and Date: deep-only Clock/Date text SceneScript bindings, generated text-layer representation, and user property gating.
 - `2788691565` Girl and Fluorescent Beach: deep-only overlay video/water-effect motion sequence.
 - `1576514332` Cyber City Parkour: deep-only static model/material/light/composelayer still coverage.
 
 ## Candidate Fixtures
 
-- `3301291394` Alya Clock and Date: SceneScript clock/date candidate and user properties; kept as candidate because validator reports no QuickJS bindings and human review found a shoulder artifact.
+No local scene-package candidates are currently waiting for deep promotion.
 
 ## Phase 1 Probe Notes
 
 - `1591277437`: local structural validation passed. Windows WE comparison on 2026-06-07 confirmed the bottom-right-to-center diagonal godray/artifact was absent from Windows reference frames but present in Yakkai still and motion captures. After the generic render-target synchronization fix removed the no-debug artifact, human review approved promotion to active deep still coverage.
-- `3301291394`: local structural validation passed, but the validator reported no QuickJS bindings despite the candidate's script purpose, and human review found an artifact on the character's shoulder.
+- `3301291394`: local structural validation now resolves Clock/Date text SceneScript bindings with property counts for `origin` and `text`, generated text layers are represented in the scene graph/logs, and human review approved the character/shoulder composition for deep baseline promotion.
 - `3326873240`: local structural validation passed and reported 23 QuickJS binding events, 20 binding layers, 20 unsupported media-integration layers, and 44 SceneScript/runtime gaps. Human review approved Morning/Day/Dusk/Night/Day Night Gradient stills, and deep smoke passed after promoting variant baselines with an Elaina-specific review threshold for expected animated sky/video phase drift.
 - `2788691565`: local structural validation passed with one composelayer warning; still and motion artifacts under `/tmp/yakkai-phase1-candidates/2788691565` were human-reviewed and promoted as deep-only motion sequence coverage.
 - `1576514332`: local structural validation now passes with no material-loading warnings after TEXB v4 sprite-header parsing and local composelayer publishing fixes. Human review approved the deep-only still capture on 2026-06-07 and the baseline was promoted.

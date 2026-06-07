@@ -29,11 +29,12 @@ class ScriptGap:
     message: str
 
 
-def parse_log(path: Path) -> tuple[list[ScriptGap], int, int]:
+def parse_log(path: Path) -> tuple[list[ScriptGap], int, Counter[str], int]:
     raw_script_gaps: list[ScriptGap] = []
     media_layer_gaps: list[ScriptGap] = []
     media_layer_ids: set[str] = set()
     binding_layers: set[str] = set()
+    binding_properties: Counter[str] = Counter()
     media_layer_count = 0
 
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -63,6 +64,7 @@ def parse_log(path: Path) -> tuple[list[ScriptGap], int, int]:
             continue
         if match := BINDING_RE.search(line):
             binding_layers.add(match.group("layer"))
+            binding_properties[match.group("property")] += 1
 
     gaps: list[ScriptGap] = []
     for gap in raw_script_gaps:
@@ -80,12 +82,16 @@ def parse_log(path: Path) -> tuple[list[ScriptGap], int, int]:
             gaps.append(gap)
     gaps.extend(media_layer_gaps)
 
-    return gaps, len(binding_layers), media_layer_count
+    return gaps, len(binding_layers), binding_properties, media_layer_count
 
 
 def print_summary(path: Path) -> int:
-    gaps, binding_count, media_layer_count = parse_log(path)
+    gaps, binding_count, binding_properties, media_layer_count = parse_log(path)
     print(f"scene-script-bindings={binding_count}")
+    if binding_properties:
+        print("scene-script-binding-properties:")
+        for property_name, count in sorted(binding_properties.items()):
+            print(f"  - {property_name}: {count}")
     print(f"unsupported-media-integration-layers={media_layer_count}")
     print(f"scene-script-gaps-total={len(gaps)}")
 

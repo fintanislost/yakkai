@@ -26,6 +26,7 @@ struct SceneScriptResult {
     std::optional<float>                alpha;
     std::optional<bool>                 visible;
     std::optional<std::array<float, 3>> origin;
+    std::optional<std::string>          text;
 };
 
 class SceneScriptContext {

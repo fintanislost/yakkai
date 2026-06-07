@@ -1358,6 +1358,29 @@ class RunnerCoreTests(unittest.TestCase):
             ],
         )
 
+    def test_manifest_includes_alya_as_deep_scene_script_text_fixture(self):
+        manifest_path = Path(__file__).resolve().parent / "scenes.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+        cases = runner.expand_manifest_scenes(manifest)
+        scene = next((case for case in cases if case.get("id") == "3301291394"), None)
+
+        self.assertIsNotNone(scene)
+        self.assertEqual(scene["name"], "Alya Clock and Date")
+        self.assertEqual(scene["gates"], ["deep"])
+        self.assertFalse(scene["required"])
+        self.assertEqual(scene["features"], ["scene-script", "generated-text", "user-properties"])
+        self.assertEqual(
+            scene["captures"],
+            [
+                {
+                    "name": "still-10000",
+                    "timeMs": 10000,
+                    "baseline": "3301291394/stills/still-10000.png",
+                }
+            ],
+        )
+
     def test_coverage_bucket_summary_accepts_candidate_for_phase_one(self):
         matrix = {
             "version": 1,

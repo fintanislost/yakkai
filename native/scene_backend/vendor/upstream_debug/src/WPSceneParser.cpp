@@ -58,6 +58,31 @@ using namespace Eigen;
 
 std::string getAddr(void* p) { return std::to_string(reinterpret_cast<intptr_t>(p)); }
 
+std::string EscapeSceneScriptLogText(const std::string& text)
+{
+    std::string escaped;
+    escaped.reserve(text.size());
+    constexpr char hex[] = "0123456789ABCDEF";
+    for (unsigned char ch : text) {
+        switch (ch) {
+        case '\0': escaped += "\\0"; break;
+        case '\n': escaped += "\\n"; break;
+        case '\r': escaped += "\\r"; break;
+        case '\t': escaped += "\\t"; break;
+        default:
+            if (ch < 0x20 || ch == 0x7f) {
+                escaped += "\\x";
+                escaped.push_back(hex[(ch >> 4) & 0x0f]);
+                escaped.push_back(hex[ch & 0x0f]);
+            } else {
+                escaped.push_back(static_cast<char>(ch));
+            }
+            break;
+        }
+    }
+    return escaped;
+}
+
 std::vector<float> DebugVec3(const Eigen::Vector3f& value)
 {
     return {value.x(), value.y(), value.z()};
@@ -178,8 +203,8 @@ struct ParseContext {
     // script-driven color tinting of grayscale textures.
     std::array<float, 3> composite_tint { 1.0f, 1.0f, 1.0f };
 
-    // Script-resolved color/alpha bindings per object ID.
-    // Populated by pre-scanning scene JSON for thisLayer.color/alpha scripts.
+    // Script-resolved layer-property bindings per object ID.
+    // Populated by pre-scanning scene JSON for thisLayer color/alpha/origin scripts.
     struct ScriptColorBinding {
         std::array<float, 3> color { 1.0f, 1.0f, 1.0f };
         float                alpha { 1.0f };
@@ -189,6 +214,12 @@ struct ParseContext {
         bool                 has_origin { false };
     };
     std::unordered_map<int32_t, ScriptColorBinding> script_color_bindings;
+
+    struct ScriptTextBinding {
+        std::string text;
+        bool        has_text { false };
+    };
+    std::unordered_map<int32_t, ScriptTextBinding> script_text_bindings;
 
     // Container objects (no image/particle) whose conditional visibility is false.
     // Child objects with a parent in this set should be hidden.
@@ -218,9 +249,51 @@ struct WPSolidAnchorObject {
     bool                 visible { true };
 };
 
+struct WPTextObject {
+    bool FromJson(const nlohmann::json& json, fs::VFS&) {
+        GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
+        GET_JSON_NAME_VALUE_NOWARN(json, "parent", parent);
+        GET_JSON_NAME_VALUE_NOWARN(json, "name", name);
+        GET_JSON_NAME_VALUE_NOWARN(json, "origin", origin);
+        GET_JSON_NAME_VALUE_NOWARN(json, "angles", angles);
+        GET_JSON_NAME_VALUE_NOWARN(json, "scale", scale);
+        GET_JSON_NAME_VALUE_NOWARN(json, "size", size);
+        if (json.contains("visible")) {
+            const auto& visibleField = json.at("visible");
+            if (visibleField.is_boolean()) {
+                visible = visibleField.get<bool>();
+            } else if (auto resolved = ResolveConditionalProperty(visibleField)) {
+                if (resolved->is_boolean()) {
+                    visible = resolved->get<bool>();
+                }
+            }
+        }
+        if (json.contains("text")) {
+            const auto& textNode = json.at("text");
+            if (textNode.is_string()) {
+                text = textNode.get<std::string>();
+            } else if (textNode.is_object()) {
+                GET_JSON_NAME_VALUE_NOWARN(textNode, "value", text);
+            }
+        }
+        return true;
+    }
+
+    int32_t              id { 0 };
+    int32_t              parent { 0 };
+    std::string          name;
+    std::string          text;
+    std::array<float, 3> origin { 0.0f, 0.0f, 0.0f };
+    std::array<float, 3> scale { 1.0f, 1.0f, 1.0f };
+    std::array<float, 3> angles { 0.0f, 0.0f, 0.0f };
+    std::array<float, 2> size { 256.0f, 64.0f };
+    bool                 visible { true };
+};
+
 using WPObjectVar = std::variant<wpscene::WPImageObject, wpscene::WPParticleObject,
                                  wpscene::WPSoundObject, wpscene::WPLightObject,
-                                 wpscene::WPModelObject, WPSolidAnchorObject>;
+                                 wpscene::WPModelObject, WPSolidAnchorObject,
+                                 WPTextObject>;
 
 namespace
 {
@@ -4389,6 +4462,32 @@ void ParseSolidAnchorObj(ParseContext& context, WPSolidAnchorObject& solid_obj) 
     AttachObjectNode(context, node, solid_obj.id, solid_obj.parent);
 }
 
+void ParseTextObj(ParseContext& context, WPTextObject& text_obj) {
+    if (! text_obj.visible) return;
+    if (text_obj.parent > 0 && context.hidden_containers.count(text_obj.parent)) return;
+
+    auto it = context.script_text_bindings.find(text_obj.id);
+    if (it != context.script_text_bindings.end() && it->second.has_text) {
+        text_obj.text = it->second.text;
+    }
+    auto originIt = context.script_color_bindings.find(text_obj.id);
+    if (originIt != context.script_color_bindings.end() && originIt->second.has_origin) {
+        text_obj.origin = originIt->second.origin;
+    }
+
+    auto node = std::make_shared<SceneNode>(Vector3f(text_obj.origin.data()),
+                                            Vector3f(text_obj.scale.data()),
+                                            Vector3f(text_obj.angles.data()));
+    node->ID() = text_obj.id;
+    AttachObjectNode(context, node, text_obj.id, text_obj.parent);
+
+    const std::string logText = EscapeSceneScriptLogText(text_obj.text);
+    LOG_INFO("generated text layer: id=%d name=%s text=%s",
+             text_obj.id,
+             text_obj.name.c_str(),
+             logText.c_str());
+}
+
 void ParseLightObj(ParseContext& context, wpscene::WPLightObject& light_obj) {
     auto node = std::make_shared<SceneNode>(Vector3f(light_obj.origin.data()),
                                             Vector3f(light_obj.scale.data()),
@@ -4810,6 +4909,12 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
                         LOG_INFO("QuickJS binding: id=%d origin=(%.0f,%.0f,%.0f)",
                                  objId, (*result.origin)[0], (*result.origin)[1], (*result.origin)[2]);
                     }
+                    if (result.text) {
+                        context.script_text_bindings[objId].text = *result.text;
+                        context.script_text_bindings[objId].has_text = true;
+                        const std::string logText = EscapeSceneScriptLogText(*result.text);
+                        LOG_INFO("QuickJS binding: id=%d text=%s", objId, logText.c_str());
+                    }
                 } else if (node.is_object()) {
                     for (const auto& [k, v] : node.items()) scanForScripts(v);
                 } else if (node.is_array()) {
@@ -4818,9 +4923,16 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
             };
             scanForScripts(obj);
         }
-        if (! context.script_color_bindings.empty()) {
+        std::unordered_set<int32_t> resolvedScriptBindingLayers;
+        for (const auto& entry : context.script_color_bindings) {
+            resolvedScriptBindingLayers.insert(entry.first);
+        }
+        for (const auto& entry : context.script_text_bindings) {
+            resolvedScriptBindingLayers.insert(entry.first);
+        }
+        if (! resolvedScriptBindingLayers.empty()) {
             LOG_INFO("QuickJS resolved %zu script bindings from scene JSON",
-                     context.script_color_bindings.size());
+                     resolvedScriptBindingLayers.size());
         }
     }
 
@@ -4861,6 +4973,8 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
         } else if (obj.contains("model") && ! obj.at("model").is_null()) {
             AddWPObject<wpscene::WPModelObject>(wp_objs, obj, vfs);
             ++modelObjectCount;
+        } else if (obj.contains("text") || obj.contains("font")) {
+            AddWPObject<WPTextObject>(wp_objs, obj, vfs);
         } else if (IsTransformAnchorObject(obj)) {
             AddWPObject<WPSolidAnchorObject>(wp_objs, obj, vfs);
         }
@@ -4956,6 +5070,9 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
                        },
                        [&context](WPSolidAnchorObject& obj) {
                            ParseSolidAnchorObj(context, obj);
+                       },
+                       [&context](WPTextObject& obj) {
+                           ParseTextObj(context, obj);
                        },
                    },
                    obj);

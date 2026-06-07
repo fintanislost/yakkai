@@ -209,7 +209,7 @@ The release suite contains the currently baselined required scenes. Add optional
 
 Use the coverage command before renderer phase work to confirm the limitation has an active baseline or candidate fixture. It performs no rendering and does not promote candidates into active smoke suites.
 
-`tools/validate-scene.sh <scene_id>` also summarizes SceneScript/runtime gaps from the harness log. Visible runtime gaps are reported as validator warnings, while harmless and media/runtime-only gaps are counted for triage. Script gaps on layers already suppressed as unsupported media integration are grouped as media-runtime-only so deferred media widgets stay separate from visible SceneScript work. For per-layer API detail after a validation run:
+`tools/validate-scene.sh <scene_id>` also summarizes SceneScript/runtime gaps from the harness log. Visible runtime gaps are reported as validator warnings, while harmless and media/runtime-only gaps are counted for triage. Script gaps on layers already suppressed as unsupported media integration are grouped as media-runtime-only so deferred media widgets stay separate from visible SceneScript work. SceneScript summaries preserve the unique layer binding count and also count binding properties separately; generated text bindings appear under `text` when `QuickJS binding: ... text=...` is present, separate from transform, color, and alpha bindings. Generated text objects are represented structurally in the scene graph with their script-resolved origin when SceneScript moves the layer. For per-layer API detail after a validation run:
 
 ```bash
 tools/scene-script-log-summary.py /tmp/yakkai-debug/validate-3326873240.log
@@ -476,7 +476,7 @@ QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner \
 │   ├── color-lab/           # Interactive color debugging web tool
 │   ├── effect-capture-summary.py # Summarize harness effect-capture manifests
 │   ├── effect_route_guards.py # Structural guards for effect-route manifests
-│   ├── scene-script-log-summary.py # Summarize SceneScript runtime gaps by class/API/layer
+│   ├── scene-script-log-summary.py # Summarize SceneScript bindings and runtime gaps
 │   ├── tst_config_persistence.qml # QML regression test for settings persistence
 │   └── validate-scene.sh    # Automated render validator
 ├── scripts/                 # Local install and package validation helpers
@@ -509,7 +509,7 @@ The native backend supports:
 - **Puppets**: MDL bone animation with additive layer blending, UTF-8 names, and mapped-area UV scaling for padded WE texture storage
 - **Shaders**: GLSL 150 preprocessing, authored combo preservation, HLSL `clip(x)` fragment-discard translation, `inverse()` polyfill stripping, varying type mismatch fix, `#require LightingV1` injection, ENABLEMASK/MASK combo mapping
 - **Effects**: Composelayer support, selective effect stripping for alpha compositing, no-op skip for stripped fullscreen/composelayer effect carriers, colorkey preservation, flare/lens detection via colorBlendMode, script-resolved zero-alpha flares preserved as hidden
-- **Scripts**: QuickJS-based SceneScript evaluation with WE API stubs (thisLayer, thisScene/scene layer lookup, layer transform helpers, Vec3/WEMath helpers, createScriptProperties override/default resolution, localStorage, engine.registerAudioBuffers, engine.timeOfDay, etc.)
+- **Scripts**: QuickJS-based SceneScript evaluation with WE API stubs (thisLayer, thisScene/scene layer lookup, layer transform helpers, Vec3/WEMath helpers, createScriptProperties override/default resolution, generated text return capture, localStorage, engine.registerAudioBuffers, engine.timeOfDay, etc.)
 - **Properties**: Conditional user property resolution, animation curve evaluation (alpha/color/origin), time-of-day mapping for day-night cycles, container visibility inheritance
 - **Particles**: Conditional visibility, parent container hiding
 
@@ -521,7 +521,7 @@ The native backend supports:
 - Small embedded video textures are decoded as static first frames to keep CPU use bounded. Continuous decode is enabled only for large/main videos when FFmpeg is available at build time.
 - Static model scenes use an experimental fallback for basis correction, camera framing, and material selection.
 - Material/lighting fidelity is partial: generic materials and point lights are supported, but full Wallpaper Engine PBR, shadow, and reflection parity is not.
-- SceneScript support is partial: Yakkai evaluates simple layer bindings (origin/color/alpha/visible) with generic layer/scene stubs, not the full Wallpaper Engine runtime. Media integration callbacks and unsupported object APIs are still diagnostics. Validator logs classify missing runtime APIs as visible, harmless, or media/runtime-only diagnostics so candidate fixtures can be triaged before adding new API stubs.
+- SceneScript support is partial: Yakkai evaluates simple layer bindings (origin/color/alpha/visible and generated text returns) with generic layer/scene stubs, not the full Wallpaper Engine runtime. Text objects are represented structurally at their script-resolved transform and logged for validation, but full glyph rendering is not implemented yet. Media integration callbacks and unsupported object APIs are still diagnostics. Validator logs classify missing runtime APIs as visible, harmless, or media/runtime-only diagnostics so candidate fixtures can be triaged before adding new API stubs.
 
 ## Remove
 

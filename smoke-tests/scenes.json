@@ -80,6 +80,9 @@
           "baselinePrefix": "3228578419-night",
           "scenePropertyOverrides": {
             "timeofday": "3"
+          },
+          "thresholds": {
+            "rmseReview": 0.04
           }
         }
       ]

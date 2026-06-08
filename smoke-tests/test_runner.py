@@ -1332,6 +1332,17 @@ class RunnerCoreTests(unittest.TestCase):
             ],
         )
 
+    def test_manifest_scopes_arona_night_review_threshold_to_variant(self):
+        manifest_path = Path(__file__).resolve().parent / "scenes.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+        cases = runner.expand_manifest_scenes(manifest)
+        day = next(case for case in cases if case.get("id") == "3228578419-day")
+        night = next(case for case in cases if case.get("id") == "3228578419-night")
+
+        self.assertEqual(day["thresholds"]["rmseReview"], 0.035)
+        self.assertEqual(night["thresholds"]["rmseReview"], 0.04)
+
     def test_manifest_includes_fluorescent_beach_as_deep_overlay_video_fixture(self):
         manifest_path = Path(__file__).resolve().parent / "scenes.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

@@ -114,6 +114,36 @@ Latest source artifacts used for this revision:
   `/tmp/yakkai-layer405-default-delta-locator/summary.json`,
   `/tmp/yakkai-layer405-default-delta-locator/summary.md`, and
   `/tmp/yakkai-layer405-default-delta-locator/locator-crops/`.
+- Arona 2026-06-11 layer-405 isolated final-publish boundary diagnostics:
+  `/tmp/yakkai-arona-boundary-day/effect-captures/3228578419/405_ARONA_CROP_SHEET/manifest.json`,
+  `/tmp/yakkai-arona-final-publish-boundary-run3/summary.json`,
+  `/tmp/yakkai-layer405-final-publish-boundary-compare/summary.json`, and
+  `/tmp/yakkai-layer405-final-publish-boundary-compare/summary.md`.
+- Arona 2026-06-11 layer-405 isolated final-publish output parity:
+  `/tmp/yakkai-layer405-isolated-publish-parity/summary.json`,
+  `/tmp/yakkai-layer405-isolated-publish-parity/summary.md`, and
+  `/tmp/yakkai-layer405-isolated-publish-parity/isolated-publish-crops/`.
+- Arona 2026-06-11 layer-405 content-stage attribution:
+  `/tmp/yakkai-layer405-content-stage-attribution/summary.json`,
+  `/tmp/yakkai-layer405-content-stage-attribution/summary.md`, and
+  `/tmp/yakkai-layer405-content-stage-attribution/content-stage-crops/`.
+- Arona 2026-06-11 layer-405 content-transition attribution:
+  `/tmp/yakkai-layer405-content-transition-attribution/summary.json`,
+  `/tmp/yakkai-layer405-content-transition-attribution/summary.md`, and
+  `/tmp/yakkai-layer405-content-transition-attribution/content-transition-crops/`.
+- Arona 2026-06-11 layer-405 content-range attribution:
+  `/tmp/yakkai-layer405-content-range-attribution/summary.json`,
+  `/tmp/yakkai-layer405-content-range-attribution/summary.md`, and
+  `/tmp/yakkai-layer405-content-range-attribution/content-range-crops/`.
+- Arona 2026-06-11 layer-405 middle-block microscope:
+  `/tmp/yakkai-layer405-middle-block-microscope/summary.json`,
+  `/tmp/yakkai-layer405-middle-block-microscope/summary.md`, and
+  `/tmp/yakkai-layer405-middle-block-microscope/middle-block-crops/`.
+- Arona 2026-06-11 layer-405 selected-step metadata and Windows ask:
+  `/tmp/yakkai-layer405-selected-step-metadata/summary.json`,
+  `/tmp/yakkai-layer405-selected-step-metadata/summary.md`,
+  `/tmp/yakkai-layer405-selected-step-metadata/selected-step-crops/`, and
+  `/tmp/yakkai-layer405-selected-step-metadata/middle-block-windows-request.md`.
 
 Those artifacts are generated diagnostics and are not committed baselines. If
 they are missing, regenerate them with `--debug-effect-captures` before changing
@@ -169,8 +199,14 @@ Immediate class-level reading:
   which makes later LUT work a shader/color parity problem rather than a
   missing final-publish route evidence problem.
 - `protected-puppet-lut` is represented by Arona layer `405` with active slot
-  `2`; next work remains generic protected puppet route/composition, not
-  another layer enablement.
+  `2`. Fresh Layer 405 content-stage attribution now shows raw `effect-input`
+  is nearly exact, `prefix-3` is close, and `prefix-7`/`final-publish-input`
+  diverge before final publish. Next work should target the later layer-local
+  visible-effect progression, not another layer enablement, layer-loading
+  change, final-publish RGB color-mask patch, or Windows capture-label request.
+  The follow-up transition attribution narrows the worst checkpoint block to
+  `prefix-3 -> prefix-7` for Day/Sunset/Night; the later
+  `prefix-7 -> final-publish-input` transition is near zero.
 - `regular-blur-only` has one allowed non-carrier candidate
   (`3476236738` layer `137`) under the strict `regular-blur-only-effect`
   predicate.
@@ -393,18 +429,23 @@ narrow predicate and passes visual review.
 
 ## Recommended Follow-Up Order
 
-1. Arona layer `405` final-publish registration diagnostics: the fresh Windows
-   intake under `yakkai_arona/layer405_final_publish_composite_fresh.zip`
-   provides authoritative capture-session-labeled Day/Sunset/Night
-   final-publish evidence. All variants use final-publish blend
-   `color=(SrcAlpha Add InvSrcAlpha)`, `alpha=(SrcAlpha Add InvSrcAlpha)`,
-   `writeMask=7` (RGB-only) while sampling `4160x2923` layer output into the
-   `2560x1440` swapchain target. The Yakkai debug manifest now exposes
-   `colorMaskBits`, and the fresh comparator classifies the rebuilt Yakkai pass
-   as `yakkai-final-publish-rgb-mask`. The active follow-up is stronger
-   pixel-history/default-delta registration keyed to known final-publish sample
-   points; no additional Windows capture is currently required for the color-mask
-   question.
+1. Arona layer `405` middle visible-effect block internals before final publish:
+   fresh Windows intake under
+   `yakkai_arona/layer405_final_publish_composite_fresh.zip` provides
+   authoritative capture-session-labeled Day/Sunset/Night final-publish
+   evidence. The color-mask, default-delta, and isolated boundary questions are
+   closed for now: Yakkai classifies as `yakkai-final-publish-rgb-mask`,
+   `/tmp/yakkai-layer405-final-publish-boundary-compare` shows the isolated
+   `final-display-before -> final-display-after` boundary changes the expected
+   Windows sample points, and
+   `/tmp/yakkai-layer405-isolated-publish-parity` classifies Day/Night as
+   `isolated-publish-mismatch` plus Sunset as `isolated-publish-mixed`. The
+   content-stage, transition, and range attribution passes all point at the
+   Windows `prefix-3 -> prefix-7` checkpoint block. The range pass rules out a
+   simple adjacent-vs-cumulative Yakkai stage-selection mistake, and the
+   middle-block microscope narrows the next useful target to finer evidence or
+   shader/effect-internal work around the first post-pulse material step and
+   later waterwaves segment.
 2. Blur/LUT renderer parity for other scenes or non-regular classes: only after
    the harness can compare enough frames to detect washed-out output and
    alpha/load regressions.
@@ -982,6 +1023,63 @@ Acceptance:
   a generic debug capture timing/final-publish boundary investigation around
   layer `405`, not color-mask parity, not projection/source-coordinate mapping,
   not registration threshold tuning, and not another Windows capture request.
+- the final-publish boundary follow-up is now complete. Effect-layer final
+  publish nodes register debug-only `final-display-before` and
+  `final-display-after` captures around the actual final material node. The real
+  run in `/tmp/yakkai-arona-final-publish-boundary-run3` and comparator output
+  in `/tmp/yakkai-layer405-final-publish-boundary-compare` still show
+  `default-before-effect -> default-after-effect` as `missing-default-delta`,
+  but `layerFinalPublishBoundary` is `delta-at-windows-sample` for
+  Day/Sunset/Night. That resolves the old miss as a capture-timing artifact and
+  leaves the next candidate as isolated final-publish output parity versus
+  Windows, not another route/color-mask/source-coordinate patch.
+- the isolated final-publish output parity follow-up is now complete. The real
+  run in `/tmp/yakkai-layer405-isolated-publish-parity` classifies Day/Night as
+  `isolated-publish-mismatch` and Sunset as `isolated-publish-mixed` using
+  `final-display-before -> final-display-after`. Lower-ribbon samples mismatch
+  in all variants with negative delta cosine, while only Sunset's
+  transparent-edge sample is a directional match. That moves the next candidate
+  to layer `405` content-stage attribution before final publish, not
+  final-publish routing, color masks, source-coordinate mapping, or another
+  Windows capture request for this question.
+- the content-stage attribution follow-up is now complete. The real run in
+  `/tmp/yakkai-layer405-content-stage-attribution` classifies Day/Sunset/Night
+  as `content-stage-mismatch`. Raw `effect-input` is near-exact and `prefix-3`
+  is close, but `prefix-7` and `final-publish-input` diverge for all variants.
+  That moves the next candidate to the later layer-local visible-effect
+  progression before final publish, not layer loading, final-publish routing,
+  color masks, source-coordinate mapping, or another Windows capture request for
+  this question.
+- the content-transition attribution follow-up is now complete. The real run in
+  `/tmp/yakkai-layer405-content-transition-attribution` classifies
+  Day/Sunset/Night as `content-transition-mismatch`, with
+  `prefix-3-to-prefix-7` as the worst transition for every variant. That moves
+  the next candidate to the middle layer-local visible-effect block before final
+  publish, not the later final-publish input transition.
+- the content-range attribution follow-up is now complete. The real run in
+  `/tmp/yakkai-layer405-content-range-attribution` classifies Day/Sunset/Night
+  as `content-range-mismatch`. Day still chooses the single
+  `material-output-5-0 -> material-output-6-0` waterwaves step, Night chooses
+  `material-output-1-0 -> material-output-3-0` (`pulse -> pulse -> lut`), and
+  Sunset only gets closest by spanning `effect-input -> material-output-12-0`
+  across nearly the full chain. That rules out a simple adjacent-vs-cumulative
+  range attribution mistake for the Windows `prefix-3 -> prefix-7` block.
+- the middle-block microscope follow-up is now complete. The real run in
+  `/tmp/yakkai-layer405-middle-block-microscope` classifies Day/Sunset/Night as
+  `middle-block-incomplete-progress`. Day's selected first waterwaves step
+  `material-output-2-0 -> material-output-3-0` moves away from Windows
+  `prefix-7`, Sunset's same step moves slightly toward but remains far off, and
+  Night's large helpful LUT step is followed by a smaller waterwaves regression
+  at `material-output-4-0 -> material-output-5-0`.
+- the selected-step metadata follow-up is now complete. The real run in
+  `/tmp/yakkai-layer405-selected-step-metadata` preserves the shader/material
+  state for Day `2 -> 3` (`pulse -> waterwaves`), Sunset `2 -> 3`
+  (`pulse -> lut_loader`), Night `2 -> 3` (`pulse -> lut_loader`), and Night
+  `4 -> 5` (`waterwaves -> waterwaves`). It also writes
+  `middle-block-windows-request.md`, which is the current precise Windows-side
+  ask for every internal pass output between Windows `prefix-3` and `prefix-7`
+  with event ids, SRV/RTV bindings, constants, blend state, and full-resolution
+  pass PNGs.
 - no additional Windows capture is currently required for the color-mask
   question. No renderer behavior change was made and no Arona-specific
   production logic was added. Any future color-mask or blend-mode renderer

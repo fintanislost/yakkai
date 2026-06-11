@@ -204,6 +204,53 @@ def write_yakkai_effect_manifest(path, before_path, after_path):
     path.write_text(json.dumps(manifest), encoding="utf-8")
 
 
+def add_yakkai_capture(manifest_path, stage, path):
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["captures"].append(
+        {
+            "stage": stage,
+            "path": str(path),
+            "layer": {"layerId": 405, "name": "ARONA_CROP_SHEET"},
+            "completed": True,
+        }
+    )
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+
+def add_yakkai_material_capture(
+    manifest_path,
+    stage,
+    path,
+    shader,
+    effect_index,
+    final_published=False,
+    material_extra=None,
+):
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    material = {
+        "effectIndex": effect_index,
+        "materialIndex": 0,
+        "shader": shader,
+        "materialOutputCaptureStage": stage,
+        "finalPublishedMaterial": final_published,
+    }
+    if material_extra:
+        material.update(material_extra)
+    manifest["captures"].append(
+        {
+            "stage": stage,
+            "path": str(path),
+            "layer": {
+                "layerId": 405,
+                "name": "ARONA_CROP_SHEET",
+                "effectMaterials": [material],
+            },
+            "completed": True,
+        }
+    )
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+
 def write_yakkai_summary(root, before_path, after_path, variants=("day", "sunset", "night")):
     summary_variants = []
     for variant in variants:
@@ -547,6 +594,25 @@ class FreshPublishArchiveTests(unittest.TestCase):
             self.assertEqual(variants["day"]["captures"]["default-before-effect"], str(before))
             self.assertEqual(variants["day"]["captures"]["default-after-effect"], str(after))
 
+    def test_load_yakkai_variant_manifests_includes_final_display_boundary_when_present(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            before = root / "before.png"
+            after = root / "after.png"
+            final_before = root / "final_before.png"
+            final_after = root / "final_after.png"
+            for path in (before, after, final_before, final_after):
+                Image.new("RGBA", (4, 4), (10, 20, 30, 255)).save(path)
+            write_yakkai_summary(root, before, after)
+            manifest_path = root / "day" / "effect-captures" / "manifest.json"
+            add_yakkai_capture(manifest_path, "final-display-before", final_before)
+            add_yakkai_capture(manifest_path, "final-display-after", final_after)
+
+            variants = compare.load_yakkai_variant_manifests(root)
+
+            self.assertEqual(variants["day"]["captures"]["final-display-before"], str(final_before))
+            self.assertEqual(variants["day"]["captures"]["final-display-after"], str(final_after))
+
     def test_load_yakkai_variant_manifests_rejects_missing_default_after_capture(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -709,6 +775,531 @@ class FreshPublishArchiveTests(unittest.TestCase):
             self.assertEqual(locator["day"]["classification"], "delta-nearby")
             self.assertEqual(locator["day"]["samples"]["lowerRibbon"]["nearestPixel"], [788, 512])
             self.assertEqual(locator["day"]["samples"]["transparentEdge"]["classification"], "delta-elsewhere")
+            self.assertEqual(
+                locator["day"]["layerFinalPublishBoundary"]["fromStage"],
+                "default-before-effect",
+            )
+            self.assertEqual(
+                locator["day"]["layerFinalPublishBoundary"]["toStage"],
+                "default-after-effect",
+            )
+
+    def test_yakkai_delta_locator_uses_isolated_final_display_boundary_when_present(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            archive = root / "fresh.zip"
+            make_package(archive)
+            report = compare.load_windows_package(archive)
+            default_before = root / "default_before.png"
+            default_after = root / "default_after.png"
+            final_before = root / "final_before.png"
+            final_after = root / "final_after.png"
+            for path in (default_before, default_after, final_before):
+                Image.new("RGBA", (1280, 720), (0, 0, 0, 255)).save(path)
+            final_after_image = Image.new("RGBA", (1280, 720), (0, 0, 0, 255))
+            final_after_image.putpixel((768, 512), (80, 0, 0, 255))
+            final_after_image.save(final_after)
+            write_yakkai_summary(root, default_before, default_after)
+            for variant in ("day", "sunset", "night"):
+                manifest_path = root / variant / "effect-captures" / "manifest.json"
+                add_yakkai_capture(manifest_path, "final-display-before", final_before)
+                add_yakkai_capture(manifest_path, "final-display-after", final_after)
+            variants = compare.load_yakkai_variant_manifests(root)
+            report["yakkaiDefaultDeltaOracle"] = compare.build_yakkai_default_delta_oracle(report, variants)
+
+            locator = compare.build_yakkai_default_delta_locator(report, variants)
+
+            self.assertEqual(locator["day"]["classification"], "missing-default-delta")
+            layer_boundary = locator["day"]["layerFinalPublishBoundary"]
+            self.assertEqual(layer_boundary["fromStage"], "final-display-before")
+            self.assertEqual(layer_boundary["toStage"], "final-display-after")
+            self.assertEqual(layer_boundary["classification"], "delta-at-windows-sample")
+            self.assertGreater(layer_boundary["samples"]["lowerRibbon"]["sampleMagnitude"], 0.1)
+
+    def test_yakkai_delta_locator_reports_missing_selected_final_display_capture_file(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            archive = root / "fresh.zip"
+            make_package(archive)
+            report = compare.load_windows_package(archive)
+            default_before = root / "default_before.png"
+            default_after = root / "default_after.png"
+            Image.new("RGBA", (1280, 720), (51, 76, 102, 255)).save(default_before)
+            Image.new("RGBA", (1280, 720), (153, 178, 204, 255)).save(default_after)
+            write_yakkai_summary(root, default_before, default_after)
+            for variant in ("day", "sunset", "night"):
+                manifest_path = root / variant / "effect-captures" / "manifest.json"
+                add_yakkai_capture(manifest_path, "final-display-before", root / f"{variant}_missing_before.png")
+                add_yakkai_capture(manifest_path, "final-display-after", root / f"{variant}_missing_after.png")
+            variants = compare.load_yakkai_variant_manifests(root)
+            report["yakkaiDefaultDeltaOracle"] = compare.build_yakkai_default_delta_oracle(report, variants)
+
+            with self.assertRaisesRegex(
+                compare.FreshPublishError,
+                r"day missing final-display-before capture file: .*day_missing_before\.png",
+            ):
+                compare.build_yakkai_default_delta_locator(report, variants)
+
+    def test_isolated_publish_parity_reports_variants_and_uses_final_display_boundary(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            archive = root / "fresh.zip"
+            make_package(archive)
+            report = compare.load_windows_package(archive)
+            default_before = root / "default_before.png"
+            default_after = root / "default_after.png"
+            final_before = root / "final_before.png"
+            final_after = root / "final_after.png"
+            for path in (default_before, final_before):
+                Image.new("RGBA", (1280, 720), (51, 76, 102, 255)).save(path)
+            default_after_image = Image.new("RGBA", (1280, 720), (51, 76, 102, 255))
+            final_after_image = Image.new("RGBA", (1280, 720), (51, 76, 102, 255))
+            for image in (default_after_image, final_after_image):
+                image.putpixel((768, 512), (153, 178, 204, 255))
+                image.putpixel((640, 0), (153, 178, 204, 255))
+            default_after_image.save(default_after)
+            final_after_image.save(final_after)
+            write_yakkai_summary(root, default_before, default_after)
+            for variant in ("day", "sunset", "night"):
+                manifest_path = root / variant / "effect-captures" / "manifest.json"
+                add_yakkai_capture(manifest_path, "final-display-before", final_before)
+                add_yakkai_capture(manifest_path, "final-display-after", final_after)
+            variants = compare.load_yakkai_variant_manifests(root)
+            report["yakkaiDefaultDeltaOracle"] = compare.build_yakkai_default_delta_oracle(report, variants)
+
+            parity = compare.build_yakkai_isolated_publish_parity(report, variants)
+
+            self.assertEqual(parity["day"]["fromStage"], "final-display-before")
+            self.assertEqual(parity["day"]["toStage"], "final-display-after")
+            self.assertEqual(parity["day"]["classification"], "isolated-publish-close")
+            self.assertIn("lowerRibbon", parity["day"]["samples"])
+            self.assertIn("transparentEdge", parity["day"]["samples"])
+
+    def test_combine_isolated_publish_classifications_reports_edge_cases(self):
+        cases = [
+            (
+                {
+                    "a": {"classification": "isolated-publish-close"},
+                    "b": {"classification": "isolated-publish-close"},
+                },
+                "isolated-publish-close",
+            ),
+            (
+                {
+                    "a": {"classification": "isolated-publish-close"},
+                    "b": {"classification": "isolated-publish-directional-match"},
+                },
+                "isolated-publish-directional-match",
+            ),
+            (
+                {
+                    "a": {"classification": "isolated-publish-close"},
+                    "b": {"classification": "isolated-publish-mismatch"},
+                },
+                "isolated-publish-mixed",
+            ),
+            (
+                {
+                    "a": {"classification": "isolated-publish-mismatch"},
+                    "b": {"classification": "isolated-publish-mismatch"},
+                },
+                "isolated-publish-mismatch",
+            ),
+        ]
+        for samples, expected in cases:
+            with self.subTest(expected=expected):
+                self.assertEqual(compare.combine_isolated_publish_classifications(samples), expected)
+
+        with self.assertRaisesRegex(compare.FreshPublishError, "no isolated publish samples"):
+            compare.combine_isolated_publish_classifications({})
+
+    def test_isolated_publish_parity_reports_context_for_missing_variants(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            archive = root / "fresh.zip"
+            make_package(archive)
+            report = compare.load_windows_package(archive)
+            before = root / "before.png"
+            after = root / "after.png"
+            Image.new("RGBA", (1280, 720), (51, 76, 102, 255)).save(before)
+            Image.new("RGBA", (1280, 720), (153, 178, 204, 255)).save(after)
+            write_yakkai_summary(root, before, after)
+            for variant in ("day", "sunset", "night"):
+                manifest_path = root / variant / "effect-captures" / "manifest.json"
+                add_yakkai_capture(manifest_path, "final-display-before", before)
+                add_yakkai_capture(manifest_path, "final-display-after", after)
+            variants = compare.load_yakkai_variant_manifests(root)
+            report["yakkaiDefaultDeltaOracle"] = compare.build_yakkai_default_delta_oracle(report, variants)
+
+            report_without_night = dict(report)
+            report_without_night["variants"] = [
+                variant for variant in report["variants"] if variant["variant"] != "night"
+            ]
+            with self.assertRaisesRegex(compare.FreshPublishError, "missing Windows variant in report: night"):
+                compare.build_yakkai_isolated_publish_parity(report_without_night, variants)
+
+            variants_without_night = dict(variants)
+            del variants_without_night["night"]
+            with self.assertRaisesRegex(compare.FreshPublishError, "missing Yakkai variant manifest: night"):
+                compare.build_yakkai_isolated_publish_parity(report, variants_without_night)
+
+    def test_isolated_publish_parity_reports_missing_final_display_capture_file(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            archive = root / "fresh.zip"
+            make_package(archive)
+            report = compare.load_windows_package(archive)
+            default_before = root / "default_before.png"
+            default_after = root / "default_after.png"
+            Image.new("RGBA", (1280, 720), (51, 76, 102, 255)).save(default_before)
+            Image.new("RGBA", (1280, 720), (153, 178, 204, 255)).save(default_after)
+            write_yakkai_summary(root, default_before, default_after)
+            for variant in ("day", "sunset", "night"):
+                manifest_path = root / variant / "effect-captures" / "manifest.json"
+                add_yakkai_capture(manifest_path, "final-display-before", root / f"{variant}_missing_before.png")
+                add_yakkai_capture(manifest_path, "final-display-after", root / f"{variant}_missing_after.png")
+            variants = compare.load_yakkai_variant_manifests(root)
+            report["yakkaiDefaultDeltaOracle"] = compare.build_yakkai_default_delta_oracle(report, variants)
+
+            with self.assertRaisesRegex(
+                compare.FreshPublishError,
+                "day missing final-display-before capture file",
+            ):
+                compare.build_yakkai_isolated_publish_parity(report, variants)
+
+    def test_content_stage_attribution_ranks_best_yakkai_stage_for_windows_anchors(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            windows_root = root / "windows"
+            for variant in ("day", "sunset", "night"):
+                variant_root = windows_root / variant
+                variant_root.mkdir(parents=True)
+                Image.new("RGBA", (8, 8), (10, 20, 30, 255)).save(
+                    variant_root / "effect-input-before-visible-effects.png"
+                )
+                Image.new("RGBA", (8, 8), (20, 40, 60, 255)).save(
+                    variant_root / "prefix-3-after-first-lut-pair.png"
+                )
+                Image.new("RGBA", (8, 8), (30, 60, 90, 255)).save(
+                    variant_root / "prefix-7-after-visible-effect-7.png"
+                )
+                Image.new("RGBA", (8, 8), (90, 120, 150, 255)).save(
+                    variant_root / "final-publish-input.png"
+                )
+            default_before = root / "default_before.png"
+            default_after = root / "default_after.png"
+            Image.new("RGBA", (4, 4), (0, 0, 0, 255)).save(default_before)
+            Image.new("RGBA", (4, 4), (0, 0, 0, 255)).save(default_after)
+            write_yakkai_summary(root, default_before, default_after)
+            effect_input = root / "effect_input.png"
+            material_1 = root / "material_1.png"
+            material_2 = root / "material_2.png"
+            Image.new("RGBA", (8, 8), (10, 20, 30, 255)).save(effect_input)
+            Image.new("RGBA", (8, 8), (30, 60, 90, 255)).save(material_1)
+            Image.new("RGBA", (8, 8), (90, 120, 150, 255)).save(material_2)
+            for variant in ("day", "sunset", "night"):
+                manifest_path = root / variant / "effect-captures" / "manifest.json"
+                add_yakkai_capture(manifest_path, "effect-input", effect_input)
+                add_yakkai_material_capture(manifest_path, "material-output-7-0", material_1, "effects/waterwaves", 7)
+                add_yakkai_material_capture(manifest_path, "material-output-12-0", material_2, "effects/shake", 12)
+            variants = compare.load_yakkai_variant_manifests(root)
+
+            attribution = compare.build_yakkai_content_stage_attribution(variants, windows_root)
+
+            day = attribution["day"]
+            self.assertEqual(day["anchors"]["effect-input"]["bestMatch"]["stage"], "effect-input")
+            self.assertEqual(day["anchors"]["prefix-7"]["bestMatch"]["stage"], "material-output-7-0")
+            self.assertEqual(day["anchors"]["prefix-7"]["bestMatch"]["stageFamily"], "waterwaves")
+            self.assertEqual(day["anchors"]["final-publish-input"]["bestMatch"]["stage"], "material-output-12-0")
+            self.assertEqual(day["anchors"]["final-publish-input"]["bestMatch"]["stageFamily"], "shake")
+            self.assertEqual(day["ranking"][0]["anchor"], "prefix-3")
+            self.assertEqual(day["classification"], "content-stage-mismatch")
+
+    def test_content_transition_attribution_ranks_best_yakkai_delta_transition(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            windows_root = root / "windows"
+            for variant in ("day", "sunset", "night"):
+                variant_root = windows_root / variant
+                variant_root.mkdir(parents=True)
+                Image.new("RGBA", (8, 8), (10, 10, 10, 255)).save(
+                    variant_root / "effect-input-before-visible-effects.png"
+                )
+                Image.new("RGBA", (8, 8), (20, 20, 20, 255)).save(
+                    variant_root / "prefix-3-after-first-lut-pair.png"
+                )
+                Image.new("RGBA", (8, 8), (50, 40, 30, 255)).save(
+                    variant_root / "prefix-7-after-visible-effect-7.png"
+                )
+                Image.new("RGBA", (8, 8), (55, 45, 35, 255)).save(
+                    variant_root / "final-publish-input.png"
+                )
+            default_before = root / "default_before.png"
+            default_after = root / "default_after.png"
+            Image.new("RGBA", (4, 4), (0, 0, 0, 255)).save(default_before)
+            Image.new("RGBA", (4, 4), (0, 0, 0, 255)).save(default_after)
+            write_yakkai_summary(root, default_before, default_after)
+            effect_input = root / "effect_input.png"
+            material_2 = root / "material_2.png"
+            material_7 = root / "material_7.png"
+            material_12 = root / "material_12.png"
+            Image.new("RGBA", (8, 8), (10, 10, 10, 255)).save(effect_input)
+            Image.new("RGBA", (8, 8), (20, 20, 20, 255)).save(material_2)
+            Image.new("RGBA", (8, 8), (50, 40, 30, 255)).save(material_7)
+            Image.new("RGBA", (8, 8), (55, 45, 35, 255)).save(material_12)
+            for variant in ("day", "sunset", "night"):
+                manifest_path = root / variant / "effect-captures" / "manifest.json"
+                add_yakkai_capture(manifest_path, "effect-input", effect_input)
+                add_yakkai_material_capture(manifest_path, "material-output-2-0", material_2, "effects/pulse", 2)
+                add_yakkai_material_capture(manifest_path, "material-output-7-0", material_7, "effects/waterwaves", 7)
+                add_yakkai_material_capture(manifest_path, "material-output-12-0", material_12, "effects/shake", 12)
+            variants = compare.load_yakkai_variant_manifests(root)
+
+            attribution = compare.build_yakkai_content_transition_attribution(variants, windows_root)
+
+            day = attribution["day"]
+            prefix_match = day["transitions"]["prefix-3-to-prefix-7"]["bestMatch"]
+            self.assertEqual(prefix_match["fromStage"], "material-output-2-0")
+            self.assertEqual(prefix_match["toStage"], "material-output-7-0")
+            self.assertEqual(prefix_match["toStageFamily"], "waterwaves")
+            self.assertEqual(prefix_match["deltaRmse"], 0.0)
+            publish_match = day["transitions"]["prefix-7-to-final-publish-input"]["bestMatch"]
+            self.assertEqual(publish_match["fromStage"], "material-output-7-0")
+            self.assertEqual(publish_match["toStage"], "material-output-12-0")
+            self.assertEqual(day["classification"], "content-transition-close")
+
+    def test_content_range_attribution_finds_non_adjacent_cumulative_range(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            windows_root = root / "windows"
+            for variant in ("day", "sunset", "night"):
+                variant_root = windows_root / variant
+                variant_root.mkdir(parents=True)
+                Image.new("RGBA", (8, 8), (10, 10, 10, 255)).save(
+                    variant_root / "effect-input-before-visible-effects.png"
+                )
+                Image.new("RGBA", (8, 8), (20, 20, 20, 255)).save(
+                    variant_root / "prefix-3-after-first-lut-pair.png"
+                )
+                Image.new("RGBA", (8, 8), (70, 60, 50, 255)).save(
+                    variant_root / "prefix-7-after-visible-effect-7.png"
+                )
+                Image.new("RGBA", (8, 8), (70, 60, 50, 255)).save(
+                    variant_root / "final-publish-input.png"
+                )
+            default_before = root / "default_before.png"
+            default_after = root / "default_after.png"
+            Image.new("RGBA", (4, 4), (0, 0, 0, 255)).save(default_before)
+            Image.new("RGBA", (4, 4), (0, 0, 0, 255)).save(default_after)
+            write_yakkai_summary(root, default_before, default_after)
+            effect_input = root / "effect_input.png"
+            material_2 = root / "material_2.png"
+            material_4 = root / "material_4.png"
+            material_7 = root / "material_7.png"
+            Image.new("RGBA", (8, 8), (10, 10, 10, 255)).save(effect_input)
+            Image.new("RGBA", (8, 8), (20, 20, 20, 255)).save(material_2)
+            Image.new("RGBA", (8, 8), (45, 40, 35, 255)).save(material_4)
+            Image.new("RGBA", (8, 8), (70, 60, 50, 255)).save(material_7)
+            for variant in ("day", "sunset", "night"):
+                manifest_path = root / variant / "effect-captures" / "manifest.json"
+                add_yakkai_capture(manifest_path, "effect-input", effect_input)
+                add_yakkai_material_capture(manifest_path, "material-output-2-0", material_2, "effects/pulse", 2)
+                add_yakkai_material_capture(manifest_path, "material-output-4-0", material_4, "effects/waterwaves", 4)
+                add_yakkai_material_capture(manifest_path, "material-output-7-0", material_7, "effects/waterwaves", 7)
+            variants = compare.load_yakkai_variant_manifests(root)
+
+            attribution = compare.build_yakkai_content_range_attribution(variants, windows_root)
+
+            day = attribution["day"]
+            best = day["ranges"]["prefix-3-to-prefix-7"]["bestMatch"]
+            self.assertEqual(best["fromStage"], "material-output-2-0")
+            self.assertEqual(best["toStage"], "material-output-7-0")
+            self.assertEqual(best["stageFamilies"], ["pulse", "waterwaves", "waterwaves"])
+            self.assertEqual(best["rangeLength"], 2)
+            self.assertEqual(best["deltaRmse"], 0.0)
+            self.assertEqual(day["classification"], "content-range-close")
+
+    def test_middle_block_microscope_reports_toward_and_away_steps(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            windows_root = root / "windows"
+            for variant in ("day", "sunset", "night"):
+                variant_root = windows_root / variant
+                variant_root.mkdir(parents=True)
+                Image.new("RGBA", (8, 8), (10, 10, 10, 255)).save(
+                    variant_root / "effect-input-before-visible-effects.png"
+                )
+                Image.new("RGBA", (8, 8), (20, 20, 20, 255)).save(
+                    variant_root / "prefix-3-after-first-lut-pair.png"
+                )
+                Image.new("RGBA", (8, 8), (70, 60, 50, 255)).save(
+                    variant_root / "prefix-7-after-visible-effect-7.png"
+                )
+                Image.new("RGBA", (8, 8), (70, 60, 50, 255)).save(
+                    variant_root / "final-publish-input.png"
+                )
+            default_before = root / "default_before.png"
+            default_after = root / "default_after.png"
+            Image.new("RGBA", (4, 4), (0, 0, 0, 255)).save(default_before)
+            Image.new("RGBA", (4, 4), (0, 0, 0, 255)).save(default_after)
+            write_yakkai_summary(root, default_before, default_after)
+            effect_input = root / "effect_input.png"
+            material_2 = root / "material_2.png"
+            material_4 = root / "material_4.png"
+            material_7 = root / "material_7.png"
+            Image.new("RGBA", (8, 8), (20, 20, 20, 255)).save(effect_input)
+            Image.new("RGBA", (8, 8), (20, 20, 20, 255)).save(material_2)
+            Image.new("RGBA", (8, 8), (55, 45, 35, 255)).save(material_4)
+            Image.new("RGBA", (8, 8), (30, 20, 20, 255)).save(material_7)
+            for variant in ("day", "sunset", "night"):
+                manifest_path = root / variant / "effect-captures" / "manifest.json"
+                add_yakkai_capture(manifest_path, "effect-input", effect_input)
+                add_yakkai_material_capture(manifest_path, "material-output-2-0", material_2, "effects/pulse", 2)
+                add_yakkai_material_capture(manifest_path, "material-output-4-0", material_4, "effects/waterwaves", 4)
+                add_yakkai_material_capture(manifest_path, "material-output-7-0", material_7, "effects/waterwaves", 7)
+            variants = compare.load_yakkai_variant_manifests(root)
+
+            microscope = compare.build_yakkai_middle_block_microscope(variants, windows_root)
+
+            day = microscope["day"]
+            self.assertEqual(day["classification"], "middle-block-regression-step")
+            self.assertEqual(day["strongestTowardStep"]["fromStage"], "material-output-2-0")
+            self.assertEqual(day["strongestTowardStep"]["toStage"], "material-output-4-0")
+            self.assertEqual(day["strongestTowardStep"]["direction"], "toward-prefix-7")
+            self.assertLess(day["strongestTowardStep"]["prefix7RmseChange"], 0)
+            self.assertEqual(day["strongestAwayStep"]["fromStage"], "material-output-4-0")
+            self.assertEqual(day["strongestAwayStep"]["toStage"], "material-output-7-0")
+            self.assertEqual(day["selectedTarget"], day["strongestAwayStep"])
+            self.assertGreater(day["strongestAwayStep"]["prefix7RmseChange"], 0)
+
+    def test_selected_step_metadata_preserves_material_state_and_windows_request(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            default_before = root / "default_before.png"
+            default_after = root / "default_after.png"
+            Image.new("RGBA", (4, 4), (0, 0, 0, 255)).save(default_before)
+            Image.new("RGBA", (4, 4), (0, 0, 0, 255)).save(default_after)
+            write_yakkai_summary(root, default_before, default_after)
+
+            for variant in ("day", "sunset", "night"):
+                manifest_path = root / variant / "effect-captures" / "manifest.json"
+                for stage, shader, effect_index, color in (
+                    ("material-output-2-0", "effects/pulse", 2, (20, 20, 20, 255)),
+                    ("material-output-3-0", "effects/waterwaves", 3, (30, 40, 50, 255)),
+                    ("material-output-4-0", "workshop/3165346237/effects/lut_loader", 4, (45, 50, 55, 255)),
+                    ("material-output-5-0", "effects/waterwaves", 5, (50, 60, 70, 255)),
+                ):
+                    path = root / f"{variant}_{stage}.png"
+                    Image.new("RGBA", (8, 8), color).save(path)
+                    add_yakkai_material_capture(
+                        manifest_path,
+                        stage,
+                        path,
+                        shader,
+                        effect_index,
+                        material_extra={
+                            "authoredCombos": {"MASK": "1"},
+                            "resolvedCombos": {"MASK": "1", "DUALWAVES": "0"},
+                            "defines": ["g_Texture0", "g_Texture1"],
+                            "authoredTextures": ["_rt_effect_pingpong_a", "masks/test_mask"],
+                            "resolvedTextures": ["_rt_effect_pingpong_a", "masks/test_mask"],
+                            "textureBindings": [
+                                {"slot": 0, "authored": "_rt_effect_pingpong_a", "resolved": "_rt_effect_pingpong_a"},
+                                {"slot": 1, "authored": "masks/test_mask", "resolved": "masks/test_mask"},
+                            ],
+                            "materialValues": {"speed": [2.5], "strength": [0.088]},
+                            "resolvedConstValues": {"g_Speed": [2.5], "g_Strength": [0.088]},
+                            "resolvedOutputRenderTarget": "_rt_effect_pingpong_b",
+                        },
+                    )
+
+            variants = compare.load_yakkai_variant_manifests(root)
+            microscope = {
+                "day": {
+                    "manifestPath": variants["day"]["manifestPath"],
+                    "windowsPrefix3Path": str(root / "day_prefix3.png"),
+                    "windowsPrefix7Path": str(root / "day_prefix7.png"),
+                    "selectedTarget": {
+                        "fromStage": "material-output-2-0",
+                        "toStage": "material-output-3-0",
+                        "fromPath": str(root / "day_material-output-2-0.png"),
+                        "toPath": str(root / "day_material-output-3-0.png"),
+                        "direction": "away-from-prefix-7",
+                        "prefix7RmseChange": 0.01,
+                        "windowsBlockDeltaRmse": 0.11,
+                        "windowsBlockDeltaCosine": 0.08,
+                    },
+                    "strongestTowardStep": None,
+                    "strongestAwayStep": None,
+                },
+                "sunset": {
+                    "manifestPath": variants["sunset"]["manifestPath"],
+                    "windowsPrefix3Path": str(root / "sunset_prefix3.png"),
+                    "windowsPrefix7Path": str(root / "sunset_prefix7.png"),
+                    "selectedTarget": {
+                        "fromStage": "material-output-2-0",
+                        "toStage": "material-output-3-0",
+                        "fromPath": str(root / "sunset_material-output-2-0.png"),
+                        "toPath": str(root / "sunset_material-output-3-0.png"),
+                        "direction": "toward-prefix-7",
+                        "prefix7RmseChange": -0.01,
+                        "windowsBlockDeltaRmse": 0.13,
+                        "windowsBlockDeltaCosine": 0.34,
+                    },
+                    "strongestTowardStep": None,
+                    "strongestAwayStep": None,
+                },
+                "night": {
+                    "manifestPath": variants["night"]["manifestPath"],
+                    "windowsPrefix3Path": str(root / "night_prefix3.png"),
+                    "windowsPrefix7Path": str(root / "night_prefix7.png"),
+                    "selectedTarget": {
+                        "fromStage": "material-output-4-0",
+                        "toStage": "material-output-5-0",
+                        "fromPath": str(root / "night_material-output-4-0.png"),
+                        "toPath": str(root / "night_material-output-5-0.png"),
+                        "direction": "away-from-prefix-7",
+                        "prefix7RmseChange": 0.004,
+                        "windowsBlockDeltaRmse": 0.21,
+                        "windowsBlockDeltaCosine": 0.02,
+                    },
+                    "strongestTowardStep": {
+                        "fromStage": "material-output-2-0",
+                        "toStage": "material-output-3-0",
+                        "fromPath": str(root / "night_material-output-2-0.png"),
+                        "toPath": str(root / "night_material-output-3-0.png"),
+                        "direction": "toward-prefix-7",
+                        "prefix7RmseChange": -0.09,
+                        "windowsBlockDeltaRmse": 0.08,
+                        "windowsBlockDeltaCosine": 0.89,
+                    },
+                    "strongestAwayStep": None,
+                },
+            }
+
+            metadata = compare.build_yakkai_selected_step_metadata(variants, microscope)
+            request = compare.middle_block_windows_request_markdown(metadata, scene_id="3228578419", layer_id=405)
+
+            day_step = metadata["day"]["steps"][0]
+            self.assertEqual(day_step["fromMaterial"]["shader"], "effects/pulse")
+            self.assertEqual(day_step["toMaterial"]["shader"], "effects/waterwaves")
+            self.assertEqual(day_step["toMaterial"]["resolvedCombos"]["DUALWAVES"], "0")
+            self.assertEqual(day_step["toMaterial"]["materialValues"]["speed"], [2.5])
+            self.assertEqual(day_step["toMaterial"]["textureBindings"][1]["resolved"], "masks/test_mask")
+            self.assertEqual(day_step["toImageStats"]["dimensions"], [8, 8])
+            for actual, expected in zip(
+                day_step["toImageStats"]["meanRgba"],
+                [30 / 255.0, 40 / 255.0, 50 / 255.0, 1.0],
+            ):
+                self.assertAlmostEqual(actual, expected)
+            self.assertEqual(
+                [step["toStage"] for step in metadata["night"]["steps"]],
+                ["material-output-5-0", "material-output-3-0"],
+            )
+            self.assertIn("fresh Layer 405 internal pass export request", request)
+            self.assertIn("day: `material-output-2-0 -> material-output-3-0`", request)
+            self.assertIn("night: `material-output-4-0 -> material-output-5-0`", request)
+            self.assertIn("export every internal pass output between Windows `prefix-3` and `prefix-7`", request)
 
     def test_boundary_stage_check_detects_late_final_publish_delta(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -732,6 +1323,48 @@ class FreshPublishArchiveTests(unittest.TestCase):
 
             self.assertEqual(boundary["classification"], "delta-at-windows-sample")
             self.assertGreater(boundary["sampleMagnitude"], 0.1)
+
+    def test_isolated_publish_sample_compares_windows_and_yakkai_deltas(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            before = root / "final_before.png"
+            after = root / "final_after.png"
+            before_image = Image.new("RGBA", (1280, 720), (10, 20, 30, 255))
+            after_image = Image.new("RGBA", (1280, 720), (10, 20, 30, 255))
+            after_image.putpixel((768, 512), (60, 20, 30, 255))
+            before_image.save(before)
+            after_image.save(after)
+            windows_variant = {
+                "variant": "day",
+                "pixelHistory": {
+                    "lowerRibbon": {
+                        "preModRgba": [10, 20, 30, 255],
+                        "postModRgba": [60, 20, 30, 255],
+                    }
+                },
+            }
+            oracle_sample = {
+                "sampleName": "lowerRibbon",
+                "coordinate": [1536, 1024],
+                "coordinateDimensions": [2560, 1440],
+                "beforeSample": {"samplePixel": [768, 512]},
+            }
+
+            sample = compare.build_yakkai_isolated_publish_sample(
+                windows_variant,
+                oracle_sample,
+                before,
+                after,
+                from_stage="final-display-before",
+                to_stage="final-display-after",
+            )
+
+            self.assertEqual(sample["classification"], "isolated-publish-close")
+            self.assertEqual(sample["fromStage"], "final-display-before")
+            self.assertEqual(sample["toStage"], "final-display-after")
+            self.assertEqual(sample["beforeSample"]["samplePixel"], [768, 512])
+            self.assertEqual(sample["afterSample"]["samplePixel"], [768, 512])
+            self.assertEqual(sample["metrics"]["classification"], "default-delta-close")
 
     def test_yakkai_default_delta_oracle_reports_matching_scaled_sample(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -941,6 +1574,10 @@ class FreshPublishArchiveTests(unittest.TestCase):
             before_image.save(before)
             after_image.save(after)
             write_yakkai_summary(root, before, after)
+            for variant in ("day", "sunset", "night"):
+                manifest_path = root / variant / "effect-captures" / "manifest.json"
+                add_yakkai_capture(manifest_path, "final-display-before", before)
+                add_yakkai_capture(manifest_path, "final-display-after", after)
 
             compare.main(["--windows", str(archive), "--output", str(output), "--yakkai-root", str(root)])
 
@@ -982,16 +1619,96 @@ class FreshPublishArchiveTests(unittest.TestCase):
             before_image.save(before)
             after_image.save(after)
             write_yakkai_summary(root, before, after)
+            for variant in ("day", "sunset", "night"):
+                manifest_path = root / variant / "effect-captures" / "manifest.json"
+                add_yakkai_capture(manifest_path, "final-display-before", before)
+                add_yakkai_capture(manifest_path, "final-display-after", after)
+                add_yakkai_capture(manifest_path, "effect-input", root / f"{variant}_effect_input.png")
+                add_yakkai_material_capture(
+                    manifest_path,
+                    "material-output-7-0",
+                    root / f"{variant}_material_7.png",
+                    "effects/waterwaves",
+                    7,
+                )
+                Image.new("RGBA", (64, 48), (32, 64, 96, 255)).save(root / f"{variant}_effect_input.png")
+                Image.new("RGBA", (64, 48), (32, 64, 96, 255)).save(root / f"{variant}_material_7.png")
 
             compare.main(["--windows", str(archive), "--output", str(output), "--yakkai-root", str(root)])
 
             summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
             self.assertEqual(summary["yakkaiDefaultDeltaLocator"]["day"]["classification"], "delta-nearby")
+            self.assertIn("yakkaiIsolatedPublishParity", summary)
+            self.assertIn("day", summary["yakkaiIsolatedPublishParity"])
+            self.assertIn("yakkaiContentStageAttribution", summary)
+            self.assertIn("final-publish-input", summary["yakkaiContentStageAttribution"]["day"]["anchors"])
+            self.assertIn("yakkaiContentTransitionAttribution", summary)
+            self.assertIn(
+                "prefix-3-to-prefix-7",
+                summary["yakkaiContentTransitionAttribution"]["day"]["transitions"],
+            )
+            self.assertIn("yakkaiContentRangeAttribution", summary)
+            self.assertIn(
+                "prefix-3-to-prefix-7",
+                summary["yakkaiContentRangeAttribution"]["day"]["ranges"],
+            )
+            self.assertIn("yakkaiMiddleBlockMicroscope", summary)
+            self.assertIn("steps", summary["yakkaiMiddleBlockMicroscope"]["day"])
+            self.assertIn("yakkaiSelectedStepMetadata", summary)
+            self.assertEqual(
+                summary["yakkaiSelectedStepMetadata"]["day"]["steps"][0]["toMaterial"]["shader"],
+                "effects/waterwaves",
+            )
             markdown = (output / "summary.md").read_text(encoding="utf-8")
             self.assertIn("## Yakkai Default-Delta Locator", markdown)
             self.assertIn("| day | lowerRibbon | `delta-nearby` |", markdown)
+            self.assertIn("## Yakkai Layer Final-Publish Boundary", markdown)
+            self.assertIn("| day | `final-display-before -> final-display-after` | `delta-nearby` |", markdown)
+            self.assertIn("## Yakkai Isolated Final-Publish Parity", markdown)
+            self.assertIn("## Yakkai Content Stage Attribution", markdown)
+            self.assertIn("## Yakkai Content Transition Attribution", markdown)
+            self.assertIn("## Yakkai Content Range Attribution", markdown)
+            self.assertIn("## Yakkai Middle-Block Microscope", markdown)
+            self.assertIn("## Yakkai Selected Step Metadata", markdown)
             self.assertTrue((output / "locator-crops" / "day-lowerRibbon-sample-delta.png").exists())
             self.assertTrue((output / "locator-crops" / "day-lowerRibbon-nearest-delta.png").exists())
+            self.assertTrue(
+                (output / "isolated-publish-crops" / "day-lowerRibbon-final-display-delta.png").exists()
+            )
+            self.assertTrue(
+                (output / "content-stage-crops" / "day-final-publish-input-lowerRibbon-material-output-7-0.png").exists()
+            )
+            self.assertTrue(
+                (
+                    output
+                    / "content-transition-crops"
+                    / "day-prefix-3-to-prefix-7-lowerRibbon-effect-input-to-material-output-7-0.png"
+                ).exists()
+            )
+            self.assertTrue(
+                (
+                    output
+                    / "content-range-crops"
+                    / "day-prefix-3-to-prefix-7-lowerRibbon-effect-input-to-material-output-7-0.png"
+                ).exists()
+            )
+            self.assertTrue(
+                (
+                    output
+                    / "middle-block-crops"
+                    / "day-selected-lowerRibbon-effect-input-to-material-output-7-0.png"
+                ).exists()
+            )
+            self.assertTrue(
+                (
+                    output
+                    / "selected-step-crops"
+                    / "day-selectedTarget-lowerRibbon-effect-input-to-material-output-7-0.png"
+                ).exists()
+            )
+            self.assertTrue((output / "middle-block-windows-request.md").exists())
+            request = (output / "middle-block-windows-request.md").read_text(encoding="utf-8")
+            self.assertIn("fresh Layer 405 internal pass export request", request)
 
 
 if __name__ == "__main__":

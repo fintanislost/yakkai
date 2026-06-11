@@ -117,7 +117,7 @@ For effect-chain debugging, the paper backend can write intermediate render-targ
   --debug-effect-captures /tmp/yakkai-effect-debug
 ```
 
-`--debug-effect-captures` is harness-only and off by default. `--debug-effect-capture-delay-ms` can delay the TGA dumps until a requested scene time so effect captures line up with a delayed PNG or sequence frame; the manifest records this as `captureDelayMs`. The manifest also records `shaderTimeSeconds`, `frameTimeSeconds`, and `effectiveCaptureTimeSeconds` so CPU shader oracles can use the exact `g_Time` value from the dumped frame instead of assuming the requested delay is the shader time. It writes `manifest.json` plus `effect-input`, `effect-output`, and `final-publish` TGA captures for preserved effect-chain layers. Each capture entry includes `captureIndex`, a zero-based manifest order marker for diagnostics that need stable capture progression. Rendered effect entries include diagnostic classification fields such as `candidateFamilies`, `candidateMixFamilies`, `candidateRisk`, `candidateChainShape`, `candidateEffectClass`, `candidateBlockedReason`, and `candidateChecks` when the policy can classify the layer. `candidateEffectClass` gives high-risk reports a stable grouping key, including `regular-blur-only`, `utility-blur`, `regular-lut-only`, `protected-puppet-lut`, `mixed-puppet-lut`, `composelayer-color-grade`, and water-carrier diagnostics such as `composelayer-water-only` and `utility-water-only`. `candidateChecks` also flags high-risk stripped families with `hasBlurFamily`, `hasLutFamily`, and `hasColorGradingFamily`. Preserved effect layers also include `effectMaterials` diagnostics with material shader names, authored/resolved texture slots, authored/resolved combos, material values, resolved shader constant values, generated defines, final-material routing, and a `publish` block with target, blend, parent, transform, mesh route, final display route, route risk, and capture-timing metadata. The `publish` block also records final-publish composition evidence: effect-input and standalone-display local transforms, standalone final source texture, standalone final material blend, display node ordinal, input/final mesh bounds, effect-input viewport size and whether it expanded to mesh bounds, and `puppetCutoutSlotCoverage` for puppet layers. Non-fullscreen composelayers keep their authored layer transform and publish through `effect-layer-node-final-publish`; fullscreen utility layers still use fullscreen final publish. Each puppet slot records bone/parent names, primary and weighted vertex/triangle coverage, secondary-only weighted slots, weighted layer-local bounds/centroid, raw simulation metadata, parsed simulation target point/mass fields, whether the metadata contains active physics controls, and a `simulatedInactive` marker for active-physics bones that are currently inactive. Target point/mass metadata alone is reported as tip metadata and does not mark a slot as simulated inactive. Standalone final-display nodes also register `final-display-before` and `final-display-after` captures by inserting debug-only render-graph copies around the tagged node; matching publish fields record `finalDisplayBoundaryCaptureTiming`, `finalDisplayBeforeRenderTarget`, and `finalDisplayAfterRenderTarget`. Puppet layers add `puppetAnimationLayers` entries with animation id/name, blend, rate, visibility, paused state, additive state, current time, animation match state, active weighting state, and active bone slot ids; the same state is summarized in top-level `puppetAnimationLayerInventory`. For preserved effect materials with non-empty shader names, the debug path registers `material-output-<effectIndex>-<materialIndex>` captures around the material stage. When a LUT material is also the final published pass, it additionally registers `material-output-local-<effectIndex>-<materialIndex>` from a duplicate layer-local diagnostic pass before final publish, while `material-output-<effectIndex>-<materialIndex>` remains the screen-sized final-publish material capture. The debug path also registers `default-before-effect` and `default-after-effect` captures around preserved effect layers by copying `_rt_default` into non-reused diagnostic render targets. `final-publish` is a post-frame render-target dump of `_rt_default`, not a per-layer final-node capture; prefer `final-display-before/after` when present for isolated final-display contribution evidence. Mismatched debug-copy extents are clamped to the overlapping region instead of aborting the renderer. These fields are diagnostic metadata only and do not imply that an effect chain is safe to render. The manifest also includes a top-level `strippedCandidates` array for effect chains that policy removed before render graph construction; these entries are metadata only and do not represent failed dumps. Protected puppet crop-sheet chains that remain stripped are additionally copied into `protectedPuppetDiagnostics` with `captureMode=metadata-only`, alpha evidence, authored effect order, authored material constants, pass order, final-publish routing, and puppet animation layer state so they can be inspected without creating normal capture records or modifying `_rt_default`. Simple isolated water candidates (`waterflow`, `waterripple`, and isolated `waterwaves`), composelayer water-only carriers classified as `composelayer-water-only`, regular image-layer `lut-only` chains, regular non-carrier `blur-only` chains, fullscreen utility blur carriers classified as `utility-blur`, composelayer color-grade carriers classified as `composelayer-color-grade`, and protected puppet crop-sheet chains made only from recognized water/LUT/pulse/shake families can be preserved. Water-only utility/fullscreen carrier classes remain diagnostic/probe-only unless a later slice adds a narrow production predicate. Mixed blur/color-grading chains outside the strict composelayer predicate, unknown families, non-blur utility carriers, fullscreen layers outside the strict `utility-blur` class, protected blur paths, and generic puppet paths remain stripped or probe-only. These captures are run artifacts for investigation; PNG smoke baselines remain the committed source of truth.
+`--debug-effect-captures` is harness-only and off by default. `--debug-effect-capture-delay-ms` can delay the TGA dumps until a requested scene time so effect captures line up with a delayed PNG or sequence frame; the manifest records this as `captureDelayMs`. The manifest also records `shaderTimeSeconds`, `frameTimeSeconds`, and `effectiveCaptureTimeSeconds` so CPU shader oracles can use the exact `g_Time` value from the dumped frame instead of assuming the requested delay is the shader time. It writes `manifest.json` plus `effect-input`, `effect-output`, and `final-publish` TGA captures for preserved effect-chain layers. Each capture entry includes `captureIndex`, a zero-based manifest order marker for diagnostics that need stable capture progression. Rendered effect entries include diagnostic classification fields such as `candidateFamilies`, `candidateMixFamilies`, `candidateRisk`, `candidateChainShape`, `candidateEffectClass`, `candidateBlockedReason`, and `candidateChecks` when the policy can classify the layer. `candidateEffectClass` gives high-risk reports a stable grouping key, including `regular-blur-only`, `utility-blur`, `regular-lut-only`, `protected-puppet-lut`, `mixed-puppet-lut`, `composelayer-color-grade`, and water-carrier diagnostics such as `composelayer-water-only` and `utility-water-only`. `candidateChecks` also flags high-risk stripped families with `hasBlurFamily`, `hasLutFamily`, and `hasColorGradingFamily`. Preserved effect layers also include `effectMaterials` diagnostics with material shader names, authored/resolved texture slots, authored/resolved combos, material values, resolved shader constant values, generated defines, final-material routing, and a `publish` block with target, blend, parent, transform, mesh route, final display route, route risk, and capture-timing metadata. The `publish` block also records final-publish composition evidence: effect-input and standalone-display local transforms, standalone final source texture, standalone final material blend, display node ordinal, input/final mesh bounds, effect-input viewport size and whether it expanded to mesh bounds, and `puppetCutoutSlotCoverage` for puppet layers. Non-fullscreen composelayers keep their authored layer transform and publish through `effect-layer-node-final-publish`; fullscreen utility layers still use fullscreen final publish. Each puppet slot records bone/parent names, primary and weighted vertex/triangle coverage, secondary-only weighted slots, weighted layer-local bounds/centroid, raw simulation metadata, parsed simulation target point/mass fields, whether the metadata contains active physics controls, and a `simulatedInactive` marker for active-physics bones that are currently inactive. Target point/mass metadata alone is reported as tip metadata and does not mark a slot as simulated inactive. Standalone final-display nodes also register `final-display-before` and `final-display-after` captures by inserting debug-only render-graph copies around the tagged node; effect-layer node final-publish passes now register the same boundary around the actual final material node, with timing `render-graph-copy-around-effect-layer-final-publish-node`. Matching publish fields record `finalDisplayBoundaryCaptureTiming`, `finalDisplayBeforeRenderTarget`, and `finalDisplayAfterRenderTarget`. Puppet layers add `puppetAnimationLayers` entries with animation id/name, blend, rate, visibility, paused state, additive state, current time, animation match state, active weighting state, and active bone slot ids; the same state is summarized in top-level `puppetAnimationLayerInventory`. For preserved effect materials with non-empty shader names, the debug path registers `material-output-<effectIndex>-<materialIndex>` captures around the material stage. When a LUT material is also the final published pass, it additionally registers `material-output-local-<effectIndex>-<materialIndex>` from a duplicate layer-local diagnostic pass before final publish, while `material-output-<effectIndex>-<materialIndex>` remains the screen-sized final-publish material capture. The debug path also registers `default-before-effect` and `default-after-effect` captures around preserved effect layers by copying `_rt_default` into non-reused diagnostic render targets. `final-publish` is a post-frame render-target dump of `_rt_default`, not a per-layer final-node capture; prefer `final-display-before/after` when present for isolated final-display contribution evidence. Mismatched debug-copy extents are clamped to the overlapping region instead of aborting the renderer. These fields are diagnostic metadata only and do not imply that an effect chain is safe to render. The manifest also includes a top-level `strippedCandidates` array for effect chains that policy removed before render graph construction; these entries are metadata only and do not represent failed dumps. Protected puppet crop-sheet chains that remain stripped are additionally copied into `protectedPuppetDiagnostics` with `captureMode=metadata-only`, alpha evidence, authored effect order, authored material constants, pass order, final-publish routing, and puppet animation layer state so they can be inspected without creating normal capture records or modifying `_rt_default`. Simple isolated water candidates (`waterflow`, `waterripple`, and isolated `waterwaves`), composelayer water-only carriers classified as `composelayer-water-only`, regular image-layer `lut-only` chains, regular non-carrier `blur-only` chains, fullscreen utility blur carriers classified as `utility-blur`, composelayer color-grade carriers classified as `composelayer-color-grade`, and protected puppet crop-sheet chains made only from recognized water/LUT/pulse/shake families can be preserved. Water-only utility/fullscreen carrier classes remain diagnostic/probe-only unless a later slice adds a narrow production predicate. Mixed blur/color-grading chains outside the strict composelayer predicate, unknown families, non-blur utility carriers, fullscreen layers outside the strict `utility-blur` class, protected blur paths, and generic puppet paths remain stripped or probe-only. These captures are run artifacts for investigation; PNG smoke baselines remain the committed source of truth.
 
 Narrow non-protected puppet water chains can also be preserved as `puppet-water-effect` when the layer has a water family and every non-water mix family is one of `opacity`, `shine`, or `iris`. This route keeps the puppet render in a layer-local offscreen target, expands that target to the generated puppet mesh bounds when animated geometry extends outside the nominal object rectangle, preserves the layer's blend mode while composing overlapping puppet cutouts into that target, and publishes the result through the standalone puppet final-display path. Offscreen puppet effect targets are composited back into the scene with a premultiplied final-display blend so semi-transparent puppet edges are not multiplied by alpha twice. Generic puppet chains outside this predicate, plus audio/lightshaft, blur, LUT, color-grade, fullscreen/utility, protected blur, or unknown-family mixes, remain stripped or diagnostic-only.
 
@@ -278,14 +278,107 @@ the Windows final-publish pixel-history coordinates (`lowerRibbon` and
 the Yakkai default-target delta map for sample, nearest, and peak RGB changes
 and emits before/after/delta crop sheets under `locator-crops/`.
 
-The current real locator run at `/tmp/yakkai-layer405-default-delta-locator`
-classifies all Day/Sunset/Night `default-before-effect` to `default-after-effect`
-samples as `missing-default-delta`, but the optional
-`default-after-effect` to `final-publish` boundary classifies as
-`delta-at-windows-sample`. Treat that as evidence that the next target is the
-debug capture timing/final-publish boundary, not color-mask parity, projection,
-or another Windows capture. It is intended for trusted local RenderDoc evidence
-archives and can take a few minutes when the full image-registration pass runs.
+The current real locator run at
+`/tmp/yakkai-layer405-final-publish-boundary-compare` classifies all
+Day/Sunset/Night `default-before-effect` to `default-after-effect` samples as
+`missing-default-delta`, but `layerFinalPublishBoundary` uses the isolated
+`final-display-before` to `final-display-after` captures and classifies all
+variants as `delta-at-windows-sample`. Treat that as evidence that the earlier
+missing default delta was a debug capture timing issue, not a missing layer
+publish, color-mask parity, projection, or Windows capture issue. It is intended
+for trusted local RenderDoc evidence archives and can take a few minutes when
+the full image-registration pass runs.
+
+The report also writes `yakkaiIsolatedPublishParity` when isolated
+`final-display-before/after` captures are present. This compares the Windows
+final-publish pixel-history RGB delta against Yakkai's isolated layer
+final-publish RGB delta at the same scaled default-target coordinates and writes
+sample crops under `isolated-publish-crops/`. Use this after
+`layerFinalPublishBoundary=delta-at-windows-sample` to decide whether the
+remaining drift is inside the layer output itself or downstream of the publish
+boundary.
+
+The same `--yakkai-root` run writes `yakkaiContentStageAttribution` and
+`content-stage-crops/`. This compares Windows layer-local anchors
+(`effect-input`, `prefix-3`, `prefix-7`, and `final-publish-input`) against
+Yakkai layer `405` `effect-input` plus same-sized `material-output-*` captures.
+Screen-sized synthetic puppet-final captures are skipped for this layer-local
+comparison. Use the worst-anchor ranking to choose the next shader/effect-stage
+target before changing final-publish routing.
+
+The current real content-stage run at
+`/tmp/yakkai-layer405-content-stage-attribution` shows raw `effect-input` is
+near-exact and `prefix-3` is close, while `prefix-7` and
+`final-publish-input` diverge for all time variants. Treat that as evidence for
+a later layer-local visible-effect progression target, not a layer-loading,
+Windows capture-label, color-mask, or final-publish route target.
+
+The report also writes `yakkaiContentTransitionAttribution` and
+`content-transition-crops/`. This compares signed deltas between Windows
+layer-local anchors (`effect-input -> prefix-3`, `prefix-3 -> prefix-7`, and
+`prefix-7 -> final-publish-input`) against adjacent same-sized Yakkai
+`effect-input`/`material-output-*` transitions. Use this to identify which
+Windows checkpoint block first diverges before drilling into individual effect
+passes.
+
+The current real transition run at
+`/tmp/yakkai-layer405-content-transition-attribution` classifies all
+Day/Sunset/Night variants as `content-transition-mismatch`. The worst transition
+is `prefix-3-to-prefix-7` for every variant; the later
+`prefix-7-to-final-publish-input` delta is near zero. Treat that as evidence
+that the next renderer target is the middle visible-effect block before final
+publish.
+
+The report also writes `yakkaiContentRangeAttribution` and
+`content-range-crops/`. This compares each Windows checkpoint delta against
+every same-sized contiguous Yakkai `effect-input`/`material-output-*` range, so
+it can catch a cumulative Yakkai block even when no adjacent transition matches.
+The current real range run at
+`/tmp/yakkai-layer405-content-range-attribution` still classifies
+Day/Sunset/Night as `content-range-mismatch`. Day remains closest to the single
+`material-output-5-0 -> material-output-6-0` waterwaves step, Night is closest
+to `material-output-1-0 -> material-output-3-0` (`pulse -> pulse -> lut`), and
+Sunset only gets closest by spanning `effect-input -> material-output-12-0`.
+Treat that as evidence that the Windows `prefix-3 -> prefix-7` block is not
+explained by choosing a wider contiguous Yakkai range; the next target needs
+effect-pass internals or stronger Windows/Yakkai pass-boundary evidence inside
+that middle block.
+
+The report also writes `yakkaiMiddleBlockMicroscope` and
+`middle-block-crops/`. This treats Windows `prefix-3` and `prefix-7` as fixed
+endpoints, reports each Yakkai layer-local stage's distance to both endpoints,
+and ranks adjacent Yakkai steps by whether they move toward or away from
+Windows `prefix-7`. The current real microscope run at
+`/tmp/yakkai-layer405-middle-block-microscope` classifies all variants as
+`middle-block-incomplete-progress`: Day's selected step is
+`material-output-2-0 -> material-output-3-0` moving away from prefix-7, Sunset's
+same step moves slightly toward prefix-7 but remains far off, and Night has a
+large helpful LUT step at `material-output-2-0 -> material-output-3-0` followed
+by a waterwaves step `material-output-4-0 -> material-output-5-0` that moves
+away again. Treat that as evidence for a finer pass-internal or Windows
+pass-boundary investigation inside the middle visible-effect block, not another
+final-publish or range-selection patch.
+
+The same run now writes `yakkaiSelectedStepMetadata`,
+`selected-step-crops/`, and `middle-block-windows-request.md`. The metadata
+report preserves the selected Yakkai step's shader name, effect/material
+indices, authored and resolved combos, defines, material constants, texture
+bindings, render-target routing, and input/output image stats. It includes the
+microscope-selected step plus any distinct strongest toward/away step, then
+generates a Windows handoff asking for every internal pass between Windows
+`prefix-3` and `prefix-7`.
+
+The current real selected-step metadata run at
+`/tmp/yakkai-layer405-selected-step-metadata` records Day
+`material-output-2-0 -> material-output-3-0` (`pulse -> waterwaves`) moving
+away from prefix-7, Sunset `material-output-2-0 -> material-output-3-0`
+(`pulse -> lut_loader`) moving slightly toward prefix-7, and Night both
+`material-output-2-0 -> material-output-3-0` (`pulse -> lut_loader`) moving
+strongly toward prefix-7 and `material-output-4-0 -> material-output-5-0`
+(`waterwaves -> waterwaves`) moving away. Treat
+`middle-block-windows-request.md` from that directory as the current precise
+Windows-side ask for finer pass-boundary evidence.
+
 If final-publish state looks missing or malformed, rebuild the backend and
 harness explicitly with
 `cmake --build build/native/scene_backend --target yakkai_scene_backend yakkai_scene_backendplugin`

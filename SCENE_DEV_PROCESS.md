@@ -229,7 +229,7 @@ python3 tools/arona_layer405_fresh_publish_compare.py \
 ```
 
 Run it with a fresh Arona comparator output root when checking Yakkai's
-final-publish pass state:
+final-publish pass state and isolated layer final-publish boundary:
 
 ```bash
 python3 tools/arona_layer405_fresh_publish_compare.py \
@@ -263,7 +263,12 @@ final-publish pixel-history coordinates and compares Yakkai's RGB delta against
 Windows `pre_mod_rgba` to `post_mod_rgba` for `lowerRibbon` and
 `transparentEdge`. The locator searches the Yakkai default-target delta map for
 sample, nearest, and peak RGB changes and writes before/after/delta crop sheets
-under `locator-crops/`.
+under `locator-crops/`. When the Yakkai manifest contains `final-display-before`
+and `final-display-after` captures for layer `405`, the report also writes
+`layerFinalPublishBoundary`. This is the preferred isolated boundary for the
+`effect-layer-node-final-publish` pass; the older `default-before-effect` to
+`default-after-effect` comparison is earlier in the effect command sequence and
+can miss the actual final material publish.
 
 Interpret locator results this way:
 
@@ -273,13 +278,93 @@ Interpret locator results this way:
 | `delta-nearby` | Yakkai contribution exists near the Windows coordinate | projection, viewport, transform, or sample-coordinate mapping |
 | `delta-elsewhere` | Contribution exists far from the Windows point | layer/default-target registration or wrong source region |
 | `missing-default-delta` plus `boundaryAfterToFinalPublish=delta-*` | `default-after-effect` capture is too early, or final-publish capture is later | debug capture timing/final-publish boundary |
+| `missing-default-delta` plus `layerFinalPublishBoundary=delta-*` | Default effect boundary is early but isolated final-publish node changes the expected pixel | compare isolated publish output against Windows, not another route/color-mask patch |
 | `missing-default-delta` with no boundary delta | Yakkai is not publishing the expected contribution | render graph/final-publish route |
 
-The current real run at `/tmp/yakkai-layer405-default-delta-locator` classifies
-every variant/sample as `missing-default-delta` from `default-before-effect` to
-`default-after-effect`, while `boundaryAfterToFinalPublish` is
-`delta-at-windows-sample` for Day/Sunset/Night. That routes the next
-investigation to the debug capture timing/final-publish boundary.
+Interpret `yakkaiIsolatedPublishParity` results this way:
+
+| Parity result | Meaning | Next target |
+| --- | --- | --- |
+| `isolated-publish-close` | Yakkai isolated publish delta matches Windows at all sample points | pivot to broader frame/crop comparison or another visible drift hypothesis |
+| `isolated-publish-directional-match` | Yakkai changes in the right direction but differs in magnitude | shader constants, blend amount, or color-space handling inside the layer |
+| `isolated-publish-mixed` | Some sample points match and others do not | inspect per-sample crops before changing renderer code |
+| `isolated-publish-mismatch` | Yakkai isolated publish delta does not match Windows at sampled points | target layer content before final publish, not final-publish routing |
+
+Interpret `yakkaiContentStageAttribution` results this way:
+
+| Attribution result | Meaning | Next target |
+| --- | --- | --- |
+| `content-stage-close` | Windows layer-local anchors match Yakkai same-sized captures | pivot away from layer-local visible effects |
+| `content-stage-drift` | A layer-local anchor is close but measurably different | inspect anchor crops and shader constants for that family |
+| `content-stage-mismatch` | A layer-local anchor diverges strongly | target the worst-anchor effect family or stage progression |
+| `missing-comparable-content-stage` | No same-sized Yakkai capture exists for at least one anchor | add diagnostic capture coverage before changing renderer code |
+
+Interpret `yakkaiContentTransitionAttribution` results this way:
+
+| Attribution result | Meaning | Next target |
+| --- | --- | --- |
+| `content-transition-close` | Windows checkpoint deltas match adjacent Yakkai stage deltas | pivot away from this transition block |
+| `content-transition-drift` | A checkpoint delta is close but measurably different | inspect transition crops and effect constants in that block |
+| `content-transition-mismatch` | A checkpoint delta diverges strongly | target the worst checkpoint block before changing renderer code |
+| `missing-comparable-content-transition` | No same-sized adjacent Yakkai transitions exist | add material-output coverage before changing renderer code |
+
+Interpret `yakkaiContentRangeAttribution` results this way:
+
+| Attribution result | Meaning | Next target |
+| --- | --- | --- |
+| `content-range-close` | Windows checkpoint deltas match a contiguous Yakkai stage range | inspect the matching range instead of final-publish routing |
+| `content-range-drift` | A contiguous range is close but measurably different | inspect range crops and shader constants across the full block |
+| `content-range-mismatch` | No contiguous Yakkai range explains the Windows checkpoint delta | request/pass-generate finer pass-boundary evidence or audit effect internals |
+| `missing-comparable-content-range` | No same-sized contiguous Yakkai ranges exist | add material-output coverage before changing renderer code |
+
+Interpret `yakkaiMiddleBlockMicroscope` results this way:
+
+| Attribution result | Meaning | Next target |
+| --- | --- | --- |
+| `middle-block-close` | A Yakkai stage reaches Windows `prefix-7` closely | pivot to broader frame/composition checks |
+| `middle-block-drift` | A Yakkai stage gets close but still differs visibly | inspect the selected step crops and shader constants |
+| `middle-block-incomplete-progress` | Some steps may move toward prefix-7, but no stage gets close | add finer pass-boundary evidence or audit the selected effect internals |
+| `middle-block-regression-step` | A Yakkai step strongly increases distance from Windows `prefix-7` | target that selected step first |
+| `missing-comparable-middle-block-stage` | No same-sized Yakkai stages exist for endpoint comparison | add material-output coverage before changing renderer code |
+
+Interpret `yakkaiSelectedStepMetadata` results this way:
+
+| Metadata result | Meaning | Next target |
+| --- | --- | --- |
+| `selected-step-metadata-ready` | Selected middle-block steps have shader, constants, texture bindings, image stats, and crops attached | use the generated Windows request or audit the listed shader/effect internals |
+| `missing-selected-step-metadata` | The microscope did not produce a selected, toward, or away step for that variant | add or repair material-output coverage before requesting Windows internals |
+
+The generated `middle-block-windows-request.md` is the handoff for missing
+Windows evidence. It asks for all internal pass outputs between Windows
+`prefix-3` and `prefix-7`, with replay event ids, XML draw/chunk ids,
+SRV/RTV bindings, constants, blend state, and full-resolution pass PNGs.
+
+The current real run at
+`/tmp/yakkai-layer405-final-publish-boundary-compare` classifies every
+variant/sample as `missing-default-delta` from `default-before-effect` to
+`default-after-effect`, while `layerFinalPublishBoundary` is
+`delta-at-windows-sample` for Day/Sunset/Night. That resolves the old
+default-delta miss as a capture-timing artifact. The current content-stage run
+at `/tmp/yakkai-layer405-content-stage-attribution` shows raw `effect-input` is
+near-exact, `prefix-3` is close, and `prefix-7`/`final-publish-input` diverge
+for all time variants. The transition run at
+`/tmp/yakkai-layer405-content-transition-attribution` narrows the worst block to
+`prefix-3 -> prefix-7` for all variants. The range run at
+`/tmp/yakkai-layer405-content-range-attribution` still classifies all variants
+as `content-range-mismatch`: Day remains closest to a single waterwaves step,
+Night to a pulse/pulse/LUT range, and Sunset to almost the full chain. The next
+microscope run at `/tmp/yakkai-layer405-middle-block-microscope` classifies all
+variants as `middle-block-incomplete-progress`: Day moves away at
+`material-output-2-0 -> material-output-3-0`, Sunset moves slightly toward at
+that same step but remains far off, and Night has a large helpful LUT step at
+`2 -> 3` followed by a smaller waterwaves regression at `4 -> 5`. The next
+selected-step metadata run at `/tmp/yakkai-layer405-selected-step-metadata`
+preserves material constants and texture bindings for those same steps and
+writes the current Windows internal-pass request. The next useful Arona target
+is finer evidence or effect-internal work inside the middle layer-local
+visible-effect block before final publish, not color masks,
+source-coordinate mapping, layer loading, final-publish routing, choosing a
+wider Yakkai range, or another Windows capture request for this question.
 The tool extracts local diagnostic archives and is intended for trusted local
 RenderDoc exports; it is not a general-purpose untrusted zip scanner. Full
 registration over the real package can take a few minutes.

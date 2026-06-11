@@ -28,6 +28,9 @@ Window {
     property string debugPuppetEffectFinalMesh: sceneHarnessDebugPuppetEffectFinalMesh
     property bool debugPuppetEffectRouteOnly: sceneHarnessDebugPuppetEffectRouteOnly
     property string debugPuppetAnimationLayerOverrides: sceneHarnessDebugPuppetAnimationLayerOverrides
+    property bool debugSyntheticAudioEnabled: sceneHarnessDebugSyntheticAudioEnabled
+    property int debugSyntheticAudioBins: sceneHarnessDebugSyntheticAudioBins
+    property int debugSyntheticAudioIntervalMs: sceneHarnessDebugSyntheticAudioIntervalMs
     property string scenePropertiesJson: sceneHarnessScenePropertiesJson
     property bool captureReady: false
     property string backendStatus: backendLoader.item && backendLoader.item.backendStatus
@@ -123,6 +126,21 @@ Window {
             item.muted = Qt.binding(function() {
                 return root.muted
             })
+            if ("debugSyntheticAudioEnabled" in item) {
+                item.debugSyntheticAudioEnabled = Qt.binding(function() {
+                    return root.debugSyntheticAudioEnabled
+                })
+            }
+            if ("debugSyntheticAudioBins" in item) {
+                item.debugSyntheticAudioBins = Qt.binding(function() {
+                    return root.debugSyntheticAudioBins
+                })
+            }
+            if ("debugSyntheticAudioIntervalMs" in item) {
+                item.debugSyntheticAudioIntervalMs = Qt.binding(function() {
+                    return root.debugSyntheticAudioIntervalMs
+                })
+            }
         }
     }
 

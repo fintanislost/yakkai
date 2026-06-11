@@ -93,15 +93,35 @@
     },
     {
       "id": "we-web-wallpaper",
-      "name": "Wallpaper Engine Web Project",
+      "name": "Wallpaper Engine Web Project And Audio Shim",
       "requiredForPhase": "stretch",
-      "minimumStatus": "requiresHarness",
+      "minimumStatus": "candidate",
       "coverage": [
         {
           "sceneId": "1509243786",
-          "status": "requiresHarness",
-          "source": "RENDERER_FIXTURE_CANDIDATE_SLICES.md",
-          "notes": "CWAV Engine is a web project and must stay out of the native scene manifest until a web or Plasma-live harness exists. Local probe on 2026-05-27 found the Workshop item installed."
+          "status": "candidate",
+          "source": "docs/superpowers/plans/2026-06-08-web-video-audio-coverage.md",
+          "notes": "CWAV Engine is a WE web project covered by the web harness candidate path. The candidate uses WE viewport globals, authored web properties, and harness-only synthetic audio to validate visible audio-reactive bars; real Linux audio capture remains deferred until a separate PipeWire/PulseAudio design. Local review on 2026-06-09 showed the authored defaults can place the clock and date tightly enough to overlap at the 1280x720 harness size; keep tests on the authored defaults and do not add fixture-only placement overrides. A far-future Plasma settings feature should expose or import WE Web user properties so users can adjust values such as DateY themselves."
+        },
+        {
+          "sceneId": "893418273",
+          "status": "candidate",
+          "source": "docs/superpowers/plans/2026-06-08-web-video-audio-coverage.md",
+          "notes": "Audio Visualizer is a WE web project with a canvas visualizer, Wallpaper Engine audio listener usage, and optional HTML video background. It should be used as a stronger web/audio stress candidate than CWAV after synthetic-audio review artifacts are generated."
+        }
+      ]
+    },
+    {
+      "id": "we-web-video-wallpaper",
+      "name": "Wallpaper Engine Web Project With Video Element",
+      "requiredForPhase": "stretch",
+      "minimumStatus": "candidate",
+      "coverage": [
+        {
+          "sceneId": "779812076",
+          "status": "candidate",
+          "source": "docs/superpowers/plans/2026-06-08-web-video-audio-coverage.md",
+          "notes": "Rain Drops (heavy rain) is a WE web project that includes local video media plus WebGL/canvas rain rendering. It is the preferred web-video candidate because it exercises QtWebEngine media loading and visible web animation without requiring user input."
         }
       ]
     },
@@ -109,13 +129,19 @@
       "id": "we-video-wallpaper",
       "name": "Wallpaper Engine Video Project",
       "requiredForPhase": "stretch",
-      "minimumStatus": "requiresHarness",
+      "minimumStatus": "candidate",
       "coverage": [
         {
           "sceneId": "2478419118",
-          "status": "requiresHarness",
-          "source": "RENDERER_FIXTURE_CANDIDATE_SLICES.md",
-          "notes": "Blue Archive Shiroko Live2D is a plain WE video project and needs a video wallpaper harness before strict gating. Local probe on 2026-05-27 found the Workshop item installed."
+          "status": "candidate",
+          "source": "docs/superpowers/plans/2026-06-08-web-video-audio-coverage.md",
+          "notes": "Blue Archive Shiroko Live2D is a plain WE video project covered by the video harness candidate path. Local probing confirmed project.json type video with shiroko.mp4; the 90000ms normal-speed window had the strongest reviewed motion among sampled Shiroko windows, but the source is visually calm and should be treated as decode coverage rather than strong motion coverage."
+        },
+        {
+          "sceneId": "874499201",
+          "status": "candidate",
+          "source": "docs/superpowers/plans/2026-06-08-web-video-audio-coverage.md",
+          "notes": "TIMDRIFT II Mountains/Clouds Timelapse is the preferred plain WE video motion candidate. A quick source-frame probe showed stronger normal-speed motion than Shiroko while still looking like wallpaper-style video rather than a hard scene transition."
         }
       ]
     }

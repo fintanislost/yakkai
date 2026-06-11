@@ -10,6 +10,7 @@ target_link_libraries(yakkai_scene_harness
         Qt6::Gui
         Qt6::Qml
         Qt6::Quick
+        Qt6::WebEngineQuick
 )
 
 target_compile_features(yakkai_scene_harness PRIVATE cxx_std_20)

@@ -132,6 +132,99 @@ class RunnerCoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             runner.scene_properties_json_for_scene({"id": "bad", "scenePropertyOverrides": ["timeofday", "1"]}, Path("/repo/scene.pkg"))
 
+    def test_scene_result_metadata_uses_manifest_properties_for_web_project(self):
+        manifest = {"paths": {"workshop": "/workshop"}}
+        scene = {
+            "id": "1509243786",
+            "projectType": "web",
+            "source": "${workshop}/1509243786/index.html",
+            "scenePropertiesJson": '{"rate":{"value":50}}',
+        }
+
+        source_scene_id, scene_properties_json = runner.scene_result_metadata(
+            scene,
+            manifest,
+            Path("/repo"),
+            assets_override=None,
+            workshop_override=None,
+        )
+
+        self.assertEqual(source_scene_id, "1509243786")
+        self.assertEqual(scene_properties_json, '{"rate":{"value":50}}')
+
+    def test_scene_result_metadata_loads_project_defaults_for_web_project(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "workshop" / "1509243786" / "index.html"
+            source.parent.mkdir(parents=True)
+            source.write_text("<html></html>", encoding="utf-8")
+            (source.parent / "project.json").write_text(
+                json.dumps({"general": {"properties": {"wallpapermode": {"value": 1}}}}),
+                encoding="utf-8",
+            )
+            manifest = {"paths": {"workshop": str(root / "workshop")}}
+            scene = {
+                "id": "1509243786",
+                "projectType": "web",
+                "source": "${workshop}/1509243786/index.html",
+            }
+
+            source_scene_id, scene_properties_json = runner.scene_result_metadata(
+                scene,
+                manifest,
+                root,
+                assets_override=None,
+                workshop_override=None,
+            )
+
+        self.assertEqual(source_scene_id, "1509243786")
+        self.assertEqual(scene_properties_json, '{"wallpapermode":{"value":1}}')
+
+    def test_scene_result_metadata_applies_property_overrides_for_web_project(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "workshop" / "1509243786" / "index.html"
+            source.parent.mkdir(parents=True)
+            source.write_text("<html></html>", encoding="utf-8")
+            (source.parent / "project.json").write_text(
+                json.dumps({
+                    "general": {
+                        "properties": {
+                            "DateAlignment": {"type": "combo", "value": "right"},
+                            "DateX": {"type": "slider", "value": 59},
+                            "DateY": {"type": "slider", "value": 56},
+                        }
+                    }
+                }),
+                encoding="utf-8",
+            )
+            manifest = {"paths": {"workshop": str(root / "workshop")}}
+            scene = {
+                "id": "1509243786",
+                "projectType": "web",
+                "source": "${workshop}/1509243786/index.html",
+                "scenePropertyOverrides": {"DateAlignment": "left", "DateX": 61},
+            }
+
+            source_scene_id, scene_properties_json = runner.scene_result_metadata(
+                scene,
+                manifest,
+                root,
+                assets_override=None,
+                workshop_override=None,
+            )
+
+        self.assertEqual(source_scene_id, "1509243786")
+        self.assertEqual(
+            json.loads(scene_properties_json),
+            {
+                "DateAlignment": {"type": "combo", "value": "left"},
+                "DateX": {"type": "slider", "value": 61},
+                "DateY": {"type": "slider", "value": 56},
+            },
+        )
+        self.assertEqual(scene_properties_json, json.dumps(json.loads(scene_properties_json), separators=(",", ":"), sort_keys=True))
+
     def test_load_project_scene_properties_treats_non_object_shapes_as_empty(self):
         with tempfile.TemporaryDirectory() as temp:
             source = Path(temp) / "scene.pkg"
@@ -341,15 +434,108 @@ class RunnerCoreTests(unittest.TestCase):
         self.assertIn("--scene-properties-json", command)
         self.assertEqual(command[command.index("--scene-properties-json") + 1], '{"timeofday":{"value":"1"}}')
 
+    def test_build_harness_base_command_rejects_invalid_harness_args(self):
+        for harness_args in ("--debug-synthetic-audio", ["--debug-synthetic-audio", 128]):
+            with self.subTest(harness_args=harness_args):
+                with self.assertRaisesRegex(ValueError, "scene bad harnessArgs must be a list of strings"):
+                    runner.build_harness_base_command(
+                        Path("/repo/build/harness"),
+                        {"id": "bad", "backend": "paper", "harnessArgs": harness_args},
+                        Path("/repo/scene.pkg"),
+                        Path("/repo/assets"),
+                        {"width": 1280, "height": 720},
+                    )
+
+    def test_run_scene_captures_fails_invalid_harness_args_shape(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            harness = root / "harness"
+            assets = root / "assets"
+            source = root / "workshop" / "1509243786" / "index.html"
+            run_dir = root / "run"
+            harness.write_text("harness", encoding="utf-8")
+            source.parent.mkdir(parents=True)
+            source.write_text("<html></html>", encoding="utf-8")
+            assets.mkdir()
+            manifest = {
+                "defaults": {"captureSize": {"width": 1280, "height": 720}},
+                "paths": {
+                    "harness": str(harness),
+                    "assets": str(assets),
+                    "baselines": "baselines",
+                    "workshop": str(root / "workshop"),
+                },
+            }
+            scene = {
+                "id": "1509243786",
+                "projectType": "web",
+                "source": "${workshop}/1509243786/index.html",
+                "harnessArgs": "--debug-synthetic-audio",
+                "captures": [{"timeMs": 6000, "baseline": "1509243786/stills/still-6000.png"}],
+                "sequences": [],
+            }
+
+            status, log_path, actuals, notes = runner.run_scene_captures(
+                manifest=manifest,
+                scene=scene,
+                root=root,
+                run_dir=run_dir,
+                assets_override=None,
+                workshop_override=None,
+            )
+
+        self.assertEqual(status, "fail")
+        self.assertIsNone(log_path)
+        self.assertEqual(actuals, [])
+        self.assertEqual(notes, ["scene 1509243786 harnessArgs must be a list of strings"])
+
+    def test_project_type_for_scene_rejects_unsupported_project_type(self):
+        with self.assertRaisesRegex(ValueError, "unsupported projectType for bad: app"):
+            runner.project_type_for_scene({"id": "bad", "projectType": "app"})
+
+    def test_backend_for_project_type_defaults_scene_to_paper(self):
+        self.assertEqual(runner.backend_for_project_type("scene", {"id": "scene"}), "paper")
+
+    def test_backend_for_project_type_preserves_manifest_override_for_video(self):
+        self.assertEqual(
+            runner.backend_for_project_type("video", {"id": "video", "backend": "custom-video"}),
+            "custom-video",
+        )
+
+    def test_describe_return_code_labels_signal_exits(self):
+        self.assertEqual(runner.describe_return_code(0), "exit 0")
+        self.assertEqual(runner.describe_return_code(7), "exit 7")
+        self.assertEqual(runner.describe_return_code(-5), "signal 5 SIGTRAP")
+
+    def test_run_command_appends_command_and_exit_metadata(self):
+        with tempfile.TemporaryDirectory() as temp:
+            log_path = Path(temp) / "logs" / "command.log"
+            code = "import sys; marker='CHILD_STD'+'OUT'; print(marker); print('CHILD_STD'+'ERR', file=sys.stderr); sys.exit(7)"
+
+            returncode = runner.run_command([sys.executable, "-c", code], log_path, 5)
+            text = log_path.read_text(encoding="utf-8")
+
+            self.assertEqual(returncode, 7)
+            self.assertIn("COMMAND:", text)
+            self.assertIn("CHILD_STDOUT", text)
+            self.assertIn("CHILD_STDERR", text)
+            self.assertIn("EXIT: exit 7", text)
+            self.assertIn("elapsedSeconds=", text)
+            self.assertLess(text.index("COMMAND:"), text.index("\nCHILD_STDOUT\n"))
+            self.assertLess(text.index("TIMEOUT_SECONDS:"), text.index("\nCHILD_STDOUT\n"))
+
     def test_run_command_writes_combined_output_and_returns_exit_code(self):
         with tempfile.TemporaryDirectory() as temp:
             log_path = Path(temp) / "logs" / "command.log"
-            code = "import sys; print('out'); print('err', file=sys.stderr); sys.exit(7)"
+            code = "import sys; print('CHILD_'+'OUT'); print('CHILD_'+'ERR', file=sys.stderr); sys.exit(7)"
 
             returncode = runner.run_command([sys.executable, "-c", code], log_path, 5)
+            text = log_path.read_text(encoding="utf-8")
 
             self.assertEqual(returncode, 7)
-            self.assertCountEqual(log_path.read_text(encoding="utf-8").splitlines(), ["out", "err"])
+            self.assertIn("\nCHILD_OUT\n", text)
+            self.assertIn("\nCHILD_ERR\n", text)
+            self.assertIn("EXIT: exit 7", text)
 
     def test_run_command_returns_124_and_logs_timeout(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -590,6 +776,293 @@ class RunnerCoreTests(unittest.TestCase):
         self.assertEqual([path.name for path in actuals], ["frame-00008000ms.png", "frame-0000.png", "frame-0001.png"])
         self.assertEqual(timeouts, [78, 79])
 
+    def test_run_scene_captures_uses_video_backend_for_video_project(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            harness = root / "harness"
+            assets = root / "assets"
+            source = root / "workshop" / "2478419118" / "shiroko.mp4"
+            run_dir = root / "run"
+            harness.write_text("harness", encoding="utf-8")
+            source.parent.mkdir(parents=True)
+            source.write_text("video", encoding="utf-8")
+            assets.mkdir()
+            manifest = {
+                "defaults": {"captureSize": {"width": 1280, "height": 720}},
+                "paths": {
+                    "harness": str(harness),
+                    "assets": str(assets),
+                    "baselines": "baselines",
+                    "workshop": str(root / "workshop"),
+                },
+            }
+            scene = {
+                "id": "2478419118",
+                "projectType": "video",
+                "source": "${workshop}/2478419118/shiroko.mp4",
+                "captures": [{"timeMs": 5000, "baseline": "2478419118/stills/still-5000.png"}],
+                "sequences": [],
+            }
+
+            def fake_run(command, log_path, timeout_seconds):
+                self.assertIn("--backend", command)
+                self.assertEqual(command[command.index("--backend") + 1], "video")
+                self.assertNotIn("--scene-properties-json", command)
+                capture_dir = Path(command[command.index("--capture-dir") + 1])
+                capture_dir.mkdir(parents=True)
+                (capture_dir / "frame-00005000ms.png").write_text("still", encoding="utf-8")
+                log_path.write_text("ok", encoding="utf-8")
+                return 0
+
+            with mock.patch.object(runner, "run_command", side_effect=fake_run):
+                status, log_path, actuals, notes = runner.run_scene_captures(
+                    manifest=manifest,
+                    scene=scene,
+                    root=root,
+                    run_dir=run_dir,
+                    assets_override=None,
+                    workshop_override=None,
+                )
+
+        self.assertEqual(status, "pass")
+        self.assertEqual(notes, [])
+        self.assertEqual([path.name for path in actuals], ["frame-00005000ms.png"])
+
+    def test_run_scene_captures_uses_web_backend_and_properties_for_web_project(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            harness = root / "harness"
+            assets = root / "assets"
+            source = root / "workshop" / "1509243786" / "index.html"
+            run_dir = root / "run"
+            harness.write_text("harness", encoding="utf-8")
+            source.parent.mkdir(parents=True)
+            source.write_text("<html></html>", encoding="utf-8")
+            assets.mkdir()
+            manifest = {
+                "defaults": {"captureSize": {"width": 1280, "height": 720}},
+                "paths": {
+                    "harness": str(harness),
+                    "assets": str(assets),
+                    "baselines": "baselines",
+                    "workshop": str(root / "workshop"),
+                },
+            }
+            scene = {
+                "id": "1509243786",
+                "projectType": "web",
+                "source": "${workshop}/1509243786/index.html",
+                "scenePropertiesJson": '{"rate":{"value":50}}',
+                "captures": [{"timeMs": 6000, "baseline": "1509243786/stills/still-6000.png"}],
+                "sequences": [],
+            }
+
+            def fake_run(command, log_path, timeout_seconds):
+                self.assertIn("--backend", command)
+                self.assertEqual(command[command.index("--backend") + 1], "web")
+                self.assertIn("--scene-properties-json", command)
+                self.assertEqual(command[command.index("--scene-properties-json") + 1], '{"rate":{"value":50}}')
+                capture_dir = Path(command[command.index("--capture-dir") + 1])
+                capture_dir.mkdir(parents=True)
+                (capture_dir / "frame-00006000ms.png").write_text("still", encoding="utf-8")
+                log_path.write_text("ok", encoding="utf-8")
+                return 0
+
+            with mock.patch.object(runner, "run_command", side_effect=fake_run):
+                status, log_path, actuals, notes = runner.run_scene_captures(
+                    manifest=manifest,
+                    scene=scene,
+                    root=root,
+                    run_dir=run_dir,
+                    assets_override=None,
+                    workshop_override=None,
+                )
+
+        self.assertEqual(status, "pass")
+        self.assertEqual(notes, [])
+        self.assertEqual([path.name for path in actuals], ["frame-00006000ms.png"])
+
+    def test_run_scene_captures_appends_manifest_harness_args(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            harness = root / "harness"
+            assets = root / "assets"
+            source = root / "workshop" / "1509243786" / "index.html"
+            run_dir = root / "run"
+            harness.write_text("harness", encoding="utf-8")
+            source.parent.mkdir(parents=True)
+            source.write_text("<html></html>", encoding="utf-8")
+            assets.mkdir()
+            manifest = {
+                "defaults": {"captureSize": {"width": 1280, "height": 720}},
+                "paths": {
+                    "harness": str(harness),
+                    "assets": str(assets),
+                    "baselines": "baselines",
+                    "workshop": str(root / "workshop"),
+                },
+            }
+            harness_args = ["--debug-synthetic-audio", "--debug-synthetic-audio-bins", "128"]
+            scene = {
+                "id": "1509243786",
+                "projectType": "web",
+                "source": "${workshop}/1509243786/index.html",
+                "harnessArgs": harness_args,
+                "captures": [{"timeMs": 6000, "baseline": "1509243786/stills/still-6000.png"}],
+                "sequences": [],
+            }
+
+            def fake_run(command, log_path, timeout_seconds):
+                capture_arg_index = command.index("--capture-dir")
+                self.assertEqual(command[capture_arg_index - len(harness_args):capture_arg_index], harness_args)
+                capture_dir = Path(command[capture_arg_index + 1])
+                capture_dir.mkdir(parents=True)
+                (capture_dir / "frame-00006000ms.png").write_text("still", encoding="utf-8")
+                log_path.write_text("ok", encoding="utf-8")
+                return 0
+
+            with mock.patch.object(runner, "run_command", side_effect=fake_run):
+                status, log_path, actuals, notes = runner.run_scene_captures(
+                    manifest=manifest,
+                    scene=scene,
+                    root=root,
+                    run_dir=run_dir,
+                    assets_override=None,
+                    workshop_override=None,
+                )
+
+        self.assertEqual(status, "pass")
+        self.assertEqual(notes, [])
+        self.assertEqual([path.name for path in actuals], ["frame-00006000ms.png"])
+
+    def test_run_scene_captures_writes_live_review_video(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            harness = root / "harness"
+            assets = root / "assets"
+            source = root / "workshop" / "893418273" / "index.html"
+            run_dir = root / "run"
+            harness.write_text("harness", encoding="utf-8")
+            source.parent.mkdir(parents=True)
+            source.write_text("<html></html>", encoding="utf-8")
+            assets.mkdir()
+            manifest = {
+                "defaults": {"captureSize": {"width": 1280, "height": 720}},
+                "paths": {
+                    "harness": str(harness),
+                    "assets": str(assets),
+                    "baselines": "baselines",
+                    "workshop": str(root / "workshop"),
+                },
+            }
+            harness_args = ["--capture-exit-mode", "immediate", "--debug-synthetic-audio"]
+            scene = {
+                "id": "893418273-web-audio-candidate",
+                "projectType": "web",
+                "source": "${workshop}/893418273/index.html",
+                "harnessArgs": harness_args,
+                "captures": [],
+                "sequences": [],
+                "reviewVideo": {
+                    "name": "audio-live",
+                    "durationMs": 10000,
+                    "fps": 30,
+                    "startDelayMs": 5000,
+                },
+            }
+
+            def fake_run(command, log_path, timeout_seconds):
+                record_index = command.index("--record")
+                self.assertEqual(command[record_index - len(harness_args):record_index], harness_args)
+                output = Path(command[record_index + 1])
+                output.parent.mkdir(parents=True)
+                output.write_bytes(b"mp4")
+                self.assertEqual(command[record_index + 2:record_index + 8], [
+                    "--record-duration-ms",
+                    "10000",
+                    "--record-fps",
+                    "30",
+                    "--record-start-delay-ms",
+                    "5000",
+                ])
+                log_path.write_text("ok", encoding="utf-8")
+                self.assertGreaterEqual(timeout_seconds, 85)
+                return 0
+
+            with mock.patch.object(runner, "run_command", side_effect=fake_run):
+                status, log_path, actuals, notes = runner.run_scene_captures(
+                    manifest=manifest,
+                    scene=scene,
+                    root=root,
+                    run_dir=run_dir,
+                    assets_override=None,
+                    workshop_override=None,
+                )
+
+            clip = run_dir / "893418273-web-audio-candidate" / "review-clips" / "audio-live.mp4"
+            self.assertEqual(status, "pass")
+            self.assertEqual(log_path, run_dir / "893418273-web-audio-candidate" / "audio-live.log")
+            self.assertEqual(actuals, [])
+            self.assertEqual(notes, [])
+            self.assertEqual(clip.read_bytes(), b"mp4")
+
+    def test_run_scene_captures_uses_project_defaults_for_web_project(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            harness = root / "harness"
+            assets = root / "assets"
+            source = root / "workshop" / "1509243786" / "index.html"
+            run_dir = root / "run"
+            harness.write_text("harness", encoding="utf-8")
+            source.parent.mkdir(parents=True)
+            source.write_text("<html></html>", encoding="utf-8")
+            (source.parent / "project.json").write_text(
+                json.dumps({"general": {"properties": {"wallpapermode": {"value": 1}}}}),
+                encoding="utf-8",
+            )
+            assets.mkdir()
+            manifest = {
+                "defaults": {"captureSize": {"width": 1280, "height": 720}},
+                "paths": {
+                    "harness": str(harness),
+                    "assets": str(assets),
+                    "baselines": "baselines",
+                    "workshop": str(root / "workshop"),
+                },
+            }
+            scene = {
+                "id": "1509243786",
+                "projectType": "web",
+                "source": "${workshop}/1509243786/index.html",
+                "captures": [{"timeMs": 6000, "baseline": "1509243786/stills/still-6000.png"}],
+                "sequences": [],
+            }
+
+            def fake_run(command, log_path, timeout_seconds):
+                self.assertIn("--backend", command)
+                self.assertEqual(command[command.index("--backend") + 1], "web")
+                self.assertIn("--scene-properties-json", command)
+                self.assertEqual(command[command.index("--scene-properties-json") + 1], '{"wallpapermode":{"value":1}}')
+                capture_dir = Path(command[command.index("--capture-dir") + 1])
+                capture_dir.mkdir(parents=True)
+                (capture_dir / "frame-00006000ms.png").write_text("still", encoding="utf-8")
+                log_path.write_text("ok", encoding="utf-8")
+                return 0
+
+            with mock.patch.object(runner, "run_command", side_effect=fake_run):
+                status, log_path, actuals, notes = runner.run_scene_captures(
+                    manifest=manifest,
+                    scene=scene,
+                    root=root,
+                    run_dir=run_dir,
+                    assets_override=None,
+                    workshop_override=None,
+                )
+
+        self.assertEqual(status, "pass")
+        self.assertEqual(notes, [])
+        self.assertEqual([path.name for path in actuals], ["frame-00006000ms.png"])
+
     def test_run_scene_captures_reuses_precomputed_scene_properties_json(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -689,6 +1162,49 @@ class RunnerCoreTests(unittest.TestCase):
         self.assertIsNone(log_path)
         self.assertEqual(actuals, [])
         self.assertEqual(notes, ["scene scene scenePropertyOverrides must be an object"])
+
+    def test_run_scene_captures_fails_invalid_web_scene_property_overrides_shape(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            harness = root / "harness"
+            assets = root / "assets"
+            source = root / "workshop" / "1509243786" / "index.html"
+            run_dir = root / "run"
+            harness.write_text("harness", encoding="utf-8")
+            source.parent.mkdir(parents=True)
+            source.write_text("<html></html>", encoding="utf-8")
+            assets.mkdir()
+            manifest = {
+                "defaults": {"captureSize": {"width": 1280, "height": 720}},
+                "paths": {
+                    "harness": str(harness),
+                    "assets": str(assets),
+                    "baselines": "baselines",
+                    "workshop": str(root / "workshop"),
+                },
+            }
+            scene = {
+                "id": "1509243786",
+                "projectType": "web",
+                "source": "${workshop}/1509243786/index.html",
+                "captures": [],
+                "sequences": [],
+                "scenePropertyOverrides": ["bad"],
+            }
+
+            status, log_path, actuals, notes = runner.run_scene_captures(
+                manifest=manifest,
+                scene=scene,
+                root=root,
+                run_dir=run_dir,
+                assets_override=None,
+                workshop_override=None,
+            )
+
+        self.assertEqual(status, "fail")
+        self.assertIsNone(log_path)
+        self.assertEqual(actuals, [])
+        self.assertEqual(notes, ["scene 1509243786 scenePropertyOverrides must be an object"])
 
     def test_run_scene_captures_fails_missing_still_output(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -1012,6 +1528,15 @@ class RunnerCoreTests(unittest.TestCase):
 
         self.assertIsNone(clip)
 
+    def test_review_clip_framerate_uses_sequence_interval(self):
+        self.assertEqual(runner.review_clip_framerate_for_interval_ms(100), "10")
+        self.assertEqual(runner.review_clip_framerate_for_interval_ms(40), "25")
+        self.assertEqual(runner.review_clip_framerate_for_interval_ms(33), "1000/33")
+
+    def test_review_clip_framerate_rejects_non_positive_interval(self):
+        with self.assertRaisesRegex(ValueError, "intervalMs must be positive"):
+            runner.review_clip_framerate_for_interval_ms(0)
+
     def test_write_review_clip_invokes_ffmpeg_for_sequence_frames(self):
         with tempfile.TemporaryDirectory() as temp:
             frames_dir = Path(temp) / "frames"
@@ -1029,6 +1554,93 @@ class RunnerCoreTests(unittest.TestCase):
         self.assertEqual(command[:6], ["/usr/bin/ffmpeg", "-y", "-framerate", "24", "-pattern_type", "glob"])
         self.assertIn(str(frames_dir / "frame-*.png"), command)
         self.assertEqual(command[-1], str(output))
+
+    def test_main_encodes_review_clip_at_sequence_interval(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            run_dir = root / "artifacts"
+            manifest_path = root / "manifest.json"
+            manifest_path.write_text(
+                json.dumps({
+                    "version": 1,
+                    "defaults": {
+                        "captureSize": {"width": 1280, "height": 720},
+                        "thresholds": {
+                            "rmseReview": 0.015,
+                            "rmseFail": 0.08,
+                            "minGrayStddev": 0.01,
+                            "minUniqueColors": 50,
+                            "minMotionRmse": 0.002,
+                            "maxStaticMotionRmse": 0.01,
+                        },
+                    },
+                    "paths": {
+                        "harness": "build/native/scene_harness/yakkai_scene_harness",
+                        "assets": "assets",
+                        "workshop": "workshop",
+                        "baselines": "smoke-tests/baselines",
+                    },
+                    "scenes": [
+                        {
+                            "id": "web",
+                            "name": "Web Candidate",
+                            "source": "${workshop}/web/index.html",
+                            "projectType": "web",
+                            "gates": ["deep"],
+                            "sequences": [
+                                {
+                                    "name": "audio-motion",
+                                    "startMs": 5000,
+                                    "frames": 2,
+                                    "intervalMs": 100,
+                                    "baselineDir": "web/sequences/audio-motion",
+                                }
+                            ],
+                            "expectations": {"motion": True},
+                        }
+                    ],
+                }),
+                encoding="utf-8",
+            )
+
+            def fake_run_scene_captures(**kwargs):
+                frames_dir = kwargs["run_dir"] / "web" / "captures" / "audio-motion"
+                frames_dir.mkdir(parents=True)
+                frames = [frames_dir / "frame-0000.png", frames_dir / "frame-0001.png"]
+                for frame in frames:
+                    frame.write_bytes(b"png")
+                return "pass", kwargs["run_dir"] / "web" / "harness.log", frames, []
+
+            commands = runner.ImageMagickCommands(["identify"], ["convert"], ["compare"])
+            with (
+                mock.patch.object(runner, "repo_root", return_value=root),
+                mock.patch.object(runner, "require_imagemagick", return_value=commands),
+                mock.patch.object(runner, "find_ffmpeg", return_value="/usr/bin/ffmpeg"),
+                mock.patch.object(runner, "clear_shader_cache", return_value=[]),
+                mock.patch.object(runner, "timestamped_artifact_dir", return_value=run_dir),
+                mock.patch.object(runner, "run_scene_captures", side_effect=fake_run_scene_captures),
+                mock.patch.object(
+                    runner,
+                    "evaluate_png",
+                    return_value=runner.FrameResult(
+                        name="frame",
+                        status="pass",
+                        actual="frame.png",
+                        baseline=None,
+                        diff=None,
+                        metrics={},
+                    ),
+                ),
+                mock.patch.object(runner, "compare_rmse", return_value=0.01),
+                mock.patch.object(runner, "write_review_clip", return_value=str(run_dir / "web" / "review-clips" / "audio-motion.mp4")) as write_review_clip,
+                redirect_stdout(io.StringIO()),
+                redirect_stderr(io.StringIO()),
+            ):
+                exit_code = runner.main(["--manifest", "manifest.json", "--suite", "deep"])
+
+        self.assertEqual(exit_code, 0)
+        write_review_clip.assert_called_once()
+        self.assertEqual(write_review_clip.call_args.kwargs["fps"], "10")
 
     def test_promote_copies_only_candidate_pngs_under_baseline_root(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -1459,6 +2071,209 @@ class RunnerCoreTests(unittest.TestCase):
             self.assertIn("| bucket | Bucket | active | active | yes | 1 |", output.getvalue())
             require_imagemagick.assert_not_called()
             find_ffmpeg.assert_not_called()
+
+
+class WebBackgroundQmlTests(unittest.TestCase):
+    def web_background_source(self) -> str:
+        return (Path(__file__).resolve().parents[1] / "wallpapers/io.team7.yakkai/contents/ui/WebBackground.qml").read_text(
+            encoding="utf-8"
+        )
+
+    def test_web_property_delivery_catches_wallpaper_listener_exceptions(self):
+        source = self.web_background_source()
+
+        self.assertIn("function deliverToPropertyListener()", source)
+        self.assertIn('console.error("[Yakkai] WE web property listener failed", error);', source)
+        self.assertIn("return false;", source)
+
+    def test_web_property_delivery_retries_after_failed_apply(self):
+        source = self.web_background_source()
+
+        self.assertIn("property int propertyPushAttempts: 0", source)
+        self.assertIn("readonly property int maxPropertyPushAttempts:", source)
+        self.assertIn("Timer {\n        id: propertyRetryTimer", source)
+        self.assertIn("propertyRetryTimer.restart()", source)
+        self.assertIn("propertyRetryTimer.stop()", source)
+
+    def test_web_view_defers_initial_load_until_compat_script_is_installed(self):
+        source = self.web_background_source()
+
+        self.assertIn("property bool compatScriptInstalled: false", source)
+        self.assertIn("function loadWebSource()", source)
+        self.assertIn('url: ""', source)
+        self.assertIn("root.compatScriptInstalled = true", source)
+        self.assertIn("root.loadWebSource()", source)
+
+    def test_web_backend_reports_runtime_property_diagnostics(self):
+        background_source = self.web_background_source()
+        harness_source = (Path(__file__).resolve().parents[1] / "native/scene_harness/qml/WebWallpaperHarness.qml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('property string runtimeDiagnostics: ""', background_source)
+        self.assertIn("function updateRuntimeDiagnostics()", background_source)
+        self.assertIn("id: runtimeDiagnosticsTimer", background_source)
+        self.assertIn("hasShim", background_source)
+        self.assertIn("latestUserKeys", background_source)
+        self.assertIn("+ \" diagnostics=\" + web.runtimeDiagnostics", harness_source)
+
+    def test_web_background_diagnostics_overlay_is_opt_in(self):
+        source = self.web_background_source()
+
+        self.assertIn("property bool showDiagnosticsOverlay: false", source)
+        self.assertIn("function shouldShowDiagnosticOverlay()", source)
+        self.assertIn("return showDiagnosticsOverlay && diagnosticText.length > 0", source)
+        self.assertIn("visible: root.shouldShowDiagnosticOverlay()", source)
+        self.assertIn("running: root.pageLoaded && root.showDiagnosticsOverlay && !root.propertiesSent", source)
+
+    def test_web_property_shim_exposes_wallpaper_engine_media_listener_apis(self):
+        source = self.web_background_source()
+
+        self.assertIn("signalMediaProperties", source)
+        self.assertIn("window.wallpaperRegisterMediaPropertiesListener", source)
+        self.assertIn("window.wallpaperRegisterMediaThumbnailListener", source)
+        self.assertIn("window.wallpaperRegisterMediaTimelineListener", source)
+        self.assertIn("window.wallpaperRegisterMediaPlaybackListener", source)
+
+    def test_web_compat_shim_exposes_wallpaper_engine_viewport_globals(self):
+        source = self.web_background_source()
+
+        self.assertIn("function updateWallpaperEngineViewportGlobals()", source)
+        self.assertIn("window.width = window.innerWidth;", source)
+        self.assertIn("window.height = window.innerHeight;", source)
+        self.assertIn('window.addEventListener("resize", updateWallpaperEngineViewportGlobals);', source)
+
+    def test_web_background_synthetic_audio_uses_page_owned_timer(self):
+        source = self.web_background_source()
+        stop_body = source.split("function stopSyntheticAudio()", 1)[1].split("\n    onWebSourceChanged:", 1)[0]
+        load_started_body = source.split("if (loadRequest.status === WebEngineView.LoadStartedStatus)", 1)[1].split(
+            "if (loadRequest.status === WebEngineView.LoadSucceededStatus)", 1
+        )[0]
+        load_failed_body = source.split("if (loadRequest.status === WebEngineView.LoadFailedStatus)", 1)[1].split(
+            "root.loadErrorText =", 1
+        )[0]
+
+        self.assertIn("function startSyntheticAudio()", source)
+        self.assertIn("function stopSyntheticAudio()", source)
+        self.assertIn("function scheduleSyntheticAudioRetry()", source)
+        self.assertIn("window.__yakkaiSyntheticAudioTimer", source)
+        self.assertIn("clearInterval(window.__yakkaiSyntheticAudioTimer)", source)
+        self.assertIn("id: syntheticAudioRetryTimer", source)
+        self.assertIn("syntheticAudioRetryTimer.restart()", source)
+        self.assertIn("syntheticAudioRetryTimer.stop()", source)
+        self.assertNotIn("if (!pageLoaded)", stop_body)
+        self.assertIn("root.stopSyntheticAudio()", load_started_body)
+        self.assertLess(load_started_body.index("root.stopSyntheticAudio()"), load_started_body.index("root.pageLoaded = false"))
+        self.assertIn("root.stopSyntheticAudio()", load_failed_body)
+        self.assertLess(load_failed_body.index("root.stopSyntheticAudio()"), load_failed_body.index("root.pageLoaded = false"))
+        self.assertNotIn("id: syntheticAudioTimer", source)
+
+    def test_web_background_has_capture_exit_cleanup(self):
+        source = self.web_background_source()
+        push_properties_body = source.split("function pushProperties()", 1)[1].split("\n    function schedulePropertyRetry()", 1)[0]
+        schedule_property_retry_body = source.split("function schedulePropertyRetry()", 1)[1].split("\n    function loadWebSource()", 1)[0]
+        schedule_synthetic_retry_body = source.split("function scheduleSyntheticAudioRetry()", 1)[1].split(
+            "\n    function startSyntheticAudio()", 1
+        )[0]
+        start_synthetic_body = source.split("function startSyntheticAudio()", 1)[1].split("\n    function stopSyntheticAudio()", 1)[0]
+        prepare_exit_body = source.split("function prepareForCaptureExit()", 1)[1].split("\n    onWebSourceChanged:", 1)[0]
+        load_succeeded_body = source.split("if (loadRequest.status === WebEngineView.LoadSucceededStatus)", 1)[1].split(
+            "if (loadRequest.status === WebEngineView.LoadFailedStatus)", 1
+        )[0]
+
+        self.assertIn("property bool captureExiting: false", source)
+        self.assertIn("function prepareForCaptureExit()", source)
+        self.assertIn("propertyRetryTimer.stop()", source)
+        self.assertIn("runtimeDiagnosticsTimer.stop()", source)
+        self.assertIn("stopSyntheticAudio()", source)
+        self.assertIn("syntheticAudioRetryTimer.stop()", source)
+        self.assertIn("if (captureExiting || !pageLoaded)", push_properties_body)
+        self.assertIn("if (captureExiting || !pageLoaded || propertiesSent)", schedule_property_retry_body)
+        self.assertIn("if (captureExiting || !pageLoaded || !debugSyntheticAudioEnabled)", schedule_synthetic_retry_body)
+        self.assertIn("if (captureExiting || !pageLoaded)", start_synthetic_body)
+        self.assertIn("if (root.captureExiting)", load_succeeded_body)
+        self.assertIn("window.__yakkaiSyntheticAudioTimer", prepare_exit_body)
+        self.assertIn("clearInterval(window.__yakkaiSyntheticAudioTimer)", prepare_exit_body)
+        self.assertEqual(prepare_exit_body.count("webView.runJavaScript(`"), 1)
+        self.assertIn("audioMuted: root.captureExiting || root.muted", source)
+
+    def test_web_harness_capture_exit_does_not_clear_web_source(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "native/scene_harness/qml/WebWallpaperHarness.qml").read_text(encoding="utf-8")
+
+        self.assertIn("function prepareForCaptureExit()", source)
+        self.assertIn("web.prepareForCaptureExit()", source)
+        self.assertNotIn("web.webSource = \"\"", source)
+
+    def test_web_harness_forwards_synthetic_audio_properties(self):
+        root = Path(__file__).resolve().parents[1]
+        harness_source = (root / "native/scene_harness/qml/WebWallpaperHarness.qml").read_text(encoding="utf-8")
+        main_source = (root / "native/scene_harness/qml/Main.qml").read_text(encoding="utf-8")
+
+        self.assertIn("property bool debugSyntheticAudioEnabled: false", harness_source)
+        self.assertIn("debugSyntheticAudioEnabled: root.debugSyntheticAudioEnabled", harness_source)
+        self.assertIn("debugSyntheticAudioBins: root.debugSyntheticAudioBins", harness_source)
+        self.assertIn("debugSyntheticAudioIntervalMs: root.debugSyntheticAudioIntervalMs", harness_source)
+        self.assertIn("sceneHarnessDebugSyntheticAudioEnabled", main_source)
+        self.assertIn("sceneHarnessDebugSyntheticAudioBins", main_source)
+        self.assertIn("sceneHarnessDebugSyntheticAudioIntervalMs", main_source)
+
+class SceneHarnessSourceTests(unittest.TestCase):
+    def scene_harness_source(self) -> str:
+        return (Path(__file__).resolve().parents[1] / "native/scene_harness/src/main.cpp").read_text(encoding="utf-8")
+
+    def test_scene_harness_cli_exposes_synthetic_audio_flags(self):
+        source = self.scene_harness_source()
+
+        self.assertIn('"debug-synthetic-audio"', source)
+        self.assertIn('"debug-synthetic-audio-bins"', source)
+        self.assertIn('"debug-synthetic-audio-interval-ms"', source)
+        self.assertIn("sceneHarnessDebugSyntheticAudioEnabled", source)
+        self.assertIn("sceneHarnessDebugSyntheticAudioBins", source)
+        self.assertIn("sceneHarnessDebugSyntheticAudioIntervalMs", source)
+        self.assertIn("invalid --debug-synthetic-audio-bins value", source)
+        self.assertIn("invalid --debug-synthetic-audio-interval-ms value", source)
+
+    def test_scene_harness_cli_exposes_capture_exit_mode(self):
+        source = self.scene_harness_source()
+        request_capture_exit_body = source.split("void requestCaptureExit(", 1)[1].split("\nvoid scheduleSingleCapture", 1)[0]
+        capture_exit_option_body = source.split("QCommandLineOption captureExitModeOption(", 1)[1].split("\n    );", 1)[0]
+        validation_body = source.split("if (!captureExitMode)", 1)[1].split("if (!debugSyntheticAudioBins", 1)[0]
+        debug_capture_rejection_body = source.split(
+            "if (*captureExitMode == CaptureExitMode::Immediate && debugEffectCapturesRequested)", 1
+        )[1].split("if (debugEffectCapturesRequested && backend", 1)[0]
+
+        self.assertIn('"capture-exit-mode"', source)
+        self.assertIn("graceful|immediate", capture_exit_option_body)
+        self.assertIn('QStringLiteral("graceful")', capture_exit_option_body)
+        self.assertIn("CaptureExitMode::Immediate", source)
+        self.assertIn("if (exitMode == CaptureExitMode::Immediate)", request_capture_exit_body)
+        self.assertIn("std::_Exit(status)", request_capture_exit_body)
+        self.assertLess(request_capture_exit_body.index("std::fflush(stderr);"), request_capture_exit_body.index("std::_Exit(status)"))
+        self.assertIn(
+            "requestCaptureExit(guardedWindow, saveWindowCapture(guardedWindow, absoluteCapturePath), exitMode)",
+            source,
+        )
+        self.assertIn("requestCaptureExit(guardedWindow, *failed ? 5 : 0, exitMode)", source)
+        self.assertIn("invalid --capture-exit-mode", validation_body)
+        self.assertIn("--capture-exit-mode immediate cannot be combined with --debug-effect-captures", debug_capture_rejection_body)
+        self.assertIn("const CaptureExitMode selectedCaptureExitMode = *captureExitMode;", source)
+
+    def test_scene_harness_cli_exposes_live_recording_flags(self):
+        source = self.scene_harness_source()
+
+        self.assertIn('"record"', source)
+        self.assertIn('"record-duration-ms"', source)
+        self.assertIn('"record-fps"', source)
+        self.assertIn('"record-start-delay-ms"', source)
+        self.assertIn("scheduleWindowRecording", source)
+        self.assertIn("QProcess", source)
+        self.assertIn("ffmpeg", source)
+        self.assertIn("rawvideo", source)
+        self.assertIn("pipe:0", source)
+        self.assertIn("QImage::Format_RGBA8888", source)
+        self.assertIn("--record cannot be combined with --capture", source)
+        self.assertIn("startCaptureTimersAfterFirstFrame(&app, guardedWindow", source)
 
 
 if __name__ == "__main__":

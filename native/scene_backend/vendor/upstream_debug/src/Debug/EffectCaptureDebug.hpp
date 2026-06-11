@@ -2,6 +2,7 @@
 
 #include "Policy/EffectPolicy.hpp"
 
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -247,10 +248,15 @@ struct EffectPassState {
     std::string loadOp;
     std::string depthLoadOp;
     std::string colorMask;
+    uint32_t    colorMaskBits { 0 };
     std::string blendMode;
     bool        blendEnabled { false };
     bool        preserveOutput { false };
     bool        usesDepth { false };
+    std::string camera;
+    int         nodeId { -1 };
+    std::string materialName;
+    std::string debugPurpose;
 };
 
 std::string sanitizeCapturePathSegment(std::string_view value);

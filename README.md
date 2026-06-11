@@ -8,7 +8,7 @@ A KDE Plasma 6 wallpaper plugin with native Wallpaper Engine scene rendering sup
 - **Video wallpapers** — local video playback via QtMultimedia
 - **Wallpaper Engine support** — scan Steam libraries for WE workshops:
   - **Video** projects via QtMultimedia
-  - **Web** projects via QtWebEngine with WE API compatibility shim
+  - **Web** projects via QtWebEngine with WE property, viewport, audio-listener, and media-listener compatibility shims
   - **Scene** projects via a native Vulkan C++ renderer with puppet animation, particle systems, QuickJS script evaluation, and day-night cycle support
 - **Scene property editor** — in-settings controls for WE scene toggles (rain, snow, effects, etc.)
 - **Playlist mode** — sequential, random, or time-scheduled wallpaper cycling for scenes, with shared playlist libraries and per-monitor active selection
@@ -82,6 +82,8 @@ Use the dev flag when working on the renderer or smoke-test harness:
 ```
 
 Use `--scene-properties-json '<json-object>'` to pass a complete Wallpaper Engine scene property object to the harness. Smoke tests generate this object from `scenePropertyOverrides` merged over the scene's `project.json` defaults; direct harness users can omit the flag to use the project defaults.
+
+The harness also has `video` and `web` backends for plain Wallpaper Engine video projects and web projects. Web candidate manifests can pass harness-only flags through `harnessArgs`, including `--debug-synthetic-audio` for deterministic audio-reactive validation and `--capture-exit-mode immediate` for QtWebEngine capture sequences that finish writing frames but crash during browser teardown. The synthetic audio path exercises web visualizers but does not capture real Linux audio. Web candidate promotion requires clean smoke-runner exit evidence and human-reviewed clips because web projects can depend on browser timing, media codecs, and input APIs.
 
 Add `--capture /tmp/output.png --capture-delay-ms 10000` for automated testing.
 Capture timers start only after the scene backend reports its first rendered
@@ -181,9 +183,9 @@ kpackagetool6 -t Plasma/Wallpaper -u wallpapers/io.team7.yakkai
 
 ## Dependencies
 
-Yakkai requires KDE Plasma 6, Qt 6.6 or newer with Core/Gui/Qml/Quick, CMake 3.24 or newer, a C++20 compiler, Vulkan development files, and liblz4. Qt Multimedia and Qt WebEngine runtime packages are needed for video and web wallpaper modes. FFmpeg development packages enable Wallpaper Engine video textures in native scene rendering when available.
+Yakkai requires KDE Plasma 6, Qt 6.6 or newer with Core/Gui/Qml/Quick/WebEngineQuick, CMake 3.24 or newer, a C++20 compiler, Vulkan development files, and liblz4. Qt Multimedia and Qt WebEngine runtime packages are needed for video and web wallpaper modes. FFmpeg development packages enable Wallpaper Engine video textures in native scene rendering when available.
 
-On distro packages, look for the Qt Quick/QML development packages, Qt Multimedia, Qt WebEngine, `extra-cmake-modules`, `vulkan-headers`/`vulkan-loader`, `lz4`, and FFmpeg libraries (`libavformat`, `libavcodec`, `libswscale`, `libavutil`). The Python scanner used by the wallpaper package needs Python 3.
+On distro packages, look for the Qt Quick/QML development packages, Qt Multimedia, Qt WebEngine Quick, `extra-cmake-modules`, `vulkan-headers`/`vulkan-loader`, `lz4`, and FFmpeg libraries (`libavformat`, `libavcodec`, `libswscale`, `libavutil`). The Python scanner used by the wallpaper package needs Python 3.
 
 ## Package Validation
 
@@ -215,13 +217,13 @@ Use the coverage command before renderer phase work to confirm the limitation ha
 tools/scene-script-log-summary.py /tmp/yakkai-debug/validate-3326873240.log
 ```
 
-The harness compares deterministic PNG captures against versioned baselines and writes review artifacts to `/tmp/yakkai-smoke`. Capture schedules are relative to the backend's first rendered frame, not process startup, and the smoke runner budgets for the harness first-frame wait so cold shader-cache renders can complete before capture timers fire. Smoke-test captures hide the local harness info overlay; generated review videos are for human inspection only, and PNG frames remain the source of truth.
+The harness compares deterministic PNG captures against versioned baselines and writes review artifacts to `/tmp/yakkai-smoke`. Capture schedules are relative to the backend readiness signal, not process startup, and the smoke runner budgets for that readiness wait so cold shader-cache renders can complete before capture timers fire. Smoke-test captures hide the local harness info overlay; generated review videos are artifacts for human animation review, either encoded from PNG sequences at the configured frame interval or recorded live by piping repeated harness window grabs to `ffmpeg`. PNG frames remain the source of truth.
 
-Scenes in `smoke-tests/scenes.json` can define variants that inherit shared capture schedules, thresholds, features, expectations, and source paths from a base template. Each variant uses `baselinePrefix` to keep inherited PNG baselines under a variant-specific directory. `scenePropertyOverrides` contains raw Wallpaper Engine user-property values; the smoke runner merges them over `project.json` defaults and passes compact `scenePropertiesJson` to the harness. Arona is split into deterministic Day, Sunset, and Night variants so LUT-related rendering changes are tested without depending on the local clock; the Night variant carries a slightly wider still review threshold for observed animated-particle timing drift while its motion sequence still uses temporal matching. Spider-Verse `1591277437` is a deep-only still fixture for godrays, shake, pulse, and stale final-presentation artifact replay. The Elaina `3326873240` candidate is split into deep-only Morning, Day, Dusk, Night, and Day Night Gradient variants for SceneScript/time-mode review, with a slightly wider review threshold for expected animated sky/video phase drift between otherwise valid still captures. Girl and Fluorescent Beach `2788691565` is a deep-only sequence fixture for overlay video texture, water-effect motion, and particle coverage. Cyber City Parkour `1576514332` is a deep-only still fixture for static model, material, lighting, composelayer, and particle sprite coverage.
+Scenes in `smoke-tests/scenes.json` can define variants that inherit shared capture schedules, thresholds, features, expectations, and source paths from a base template. Each variant uses `baselinePrefix` to keep inherited PNG baselines under a variant-specific directory. `scenePropertyOverrides` contains raw Wallpaper Engine user-property values; the smoke runner merges them over `project.json` defaults for scene and web projects and passes compact `scenePropertiesJson` to the harness. Candidate manifests can use `harnessArgs` for narrow harness debug flags such as synthetic web audio. Arona is split into deterministic Day, Sunset, and Night variants so LUT-related rendering changes are tested without depending on the local clock; the Night variant carries a slightly wider still review threshold for observed animated-particle timing drift while its motion sequence still uses temporal matching. Spider-Verse `1591277437` is a deep-only still fixture for godrays, shake, pulse, and stale final-presentation artifact replay. The Elaina `3326873240` candidate is split into deep-only Morning, Day, Dusk, Night, and Day Night Gradient variants for SceneScript/time-mode review, with a slightly wider review threshold for expected animated sky/video phase drift between otherwise valid still captures. Girl and Fluorescent Beach `2788691565` is a deep-only sequence fixture for overlay video texture, water-effect motion, and particle coverage. Cyber City Parkour `1576514332` is a deep-only still fixture for static model, material, lighting, composelayer, and particle sprite coverage.
 
 Local Windows Wallpaper Engine reference capture dumps can live at the repo root under `yakkai_arona/` for detailed Arona time-of-day/effect evidence and `yakkai-reference/` or `yakkai-references/` for broader library references. These directories are ignored and should stay local; committed smoke baselines remain under `smoke-tests/baselines/`.
 
-For Arona LUT/effect debugging against Windows Wallpaper Engine still captures, place local ignored references under `yakkai_arona/day/still.png`, `yakkai_arona/sunset/still.png`, and `yakkai_arona/night/still.png`, then run `tools/compare-arona-reference.sh`. Use `tools/compare-arona-reference.sh --debug-effect-captures` when investigating LUT/color-grade parity; this writes each variant's harness `effect-captures/manifest.json` beside its render artifacts. The comparator also writes a registered diagnostic by default: it scans a bounded Yakkai scale/offset grid against the normalized Windows reference, selects the transform with the lowest downsampled grayscale/contrast structure RMSE, and then records both `registeredRmse` for the final RGB comparison and `registrationStructureRmse` for the selection score. It also records `registrationMetric`, `registrationScale`, `registrationOffsetX`, `registrationOffsetY`, and `registrationRmseImprovement`. Use `--skip-registration` when only the raw same-framing comparison is needed. Summarize those manifests with:
+For Arona LUT/effect debugging against Windows Wallpaper Engine still captures, place local ignored references under `yakkai_arona/day/still.png`, `yakkai_arona/sunset/still.png`, and `yakkai_arona/night/still.png`, then run `tools/compare-arona-reference.sh`. Use `tools/compare-arona-reference.sh --debug-effect-captures` when investigating LUT/color-grade parity; this writes each variant's harness `effect-captures/manifest.json` beside its render artifacts. The comparator also writes a registered diagnostic by default: it scans a bounded Yakkai scale/offset grid against the normalized Windows reference, selects the transform with the lowest downsampled grayscale/contrast structure RMSE, and then records both `registeredRmse` for the final RGB comparison and `registrationStructureRmse` for the selection score. It also records `registrationMetric`, `registrationScale`, `registrationOffsetX`, `registrationOffsetY`, and `registrationRmseImprovement`. Use `--skip-registration` when only the raw same-framing comparison is needed. Heavy debug-effect probes can raise the per-variant timeout with `--harness-timeout-extra-seconds <seconds>`; the default extra budget is `30` seconds beyond `--capture-delay-ms`. Summarize those manifests with:
 
 ```bash
 RUN_DIR="$(ls -td /tmp/yakkai-arona-reference/* | head -1)"
@@ -243,6 +245,53 @@ tools/arona_protected_puppet_lab.py /tmp/yakkai-arona-reference/<probe-timestamp
 ```
 
 The comparator forwards `--debug-puppet-animation-layer-overrides` to the harness when `--debug-effect-captures` is enabled, which lets Arona reference runs isolate authored puppet animation-layer state without launching the harness manually. The lab writes `protected-puppet-lab.json`, `protected-puppet-lab.md`, and `protected-puppet-contact-sheet.png`. It summarizes the protected layer's normal or metadata-only diagnostic, probe captures, policy reason, effect order, alpha evidence, generic route diagnostics, final-publish composition diagnostics, final coverage diagnostics for active puppet slots, capture-level alpha/color statistics, boundary comparisons such as `effect-input->effect-output`, and optional probe-final-to-normal-frame drift when `--normal-summary` is supplied. When `final-display-before/after` captures are present, the lab prefers their before/after delta as the final coverage source and reports `final-display-boundary-present` plus delta bounds/centroid evidence. It also compares the final-display delta geometry against `effect-output` alpha geometry and classifies it as `final-display-aligned`, `final-display-shape-drift`, or `final-display-coverage-loss` using visible ratio, normalized bounds IoU, and centroid drift. The same final-display delta is swept at RGB delta thresholds `1`, `4`, `8`, and `16` out of 255; `finalDisplayThresholdSensitivity` reports whether drift is threshold-sensitive, persistent, weak-signal, or stable before a renderer route change is considered. Because `effect-output` is layer-local while `final-display-before/after` are screen-space captures, `finalDisplayScreenSpaceProjection` additionally projects the output alpha centroid from output bounds into final-display delta bounds and reports whether the shape is affine-consistent after that coordinate-space remap. The normal-summary comparison also reports screen-space centroid drift so a puppet can be flagged when it shifts on screen even if layer-local alpha looks stable. If a comparator variant fails after writing `variant/effect-captures/manifest.json`, the lab recovers that manifest from the run output directory so partial timeout artifacts can still be inspected. Probe runs remain diagnostic artifacts; current safe `ARONA_CROP_SHEET` water/LUT/pulse/shake chains can also appear as normal preserved captures. `final-publish` remains a post-frame `_rt_default` dump, so final coverage diagnostics from `final-publish` are routing evidence, not proof that a production route is safe by themselves.
+
+For fresh Layer 405 final-publish evidence exported from Windows RenderDoc, keep
+the local ignored archive at
+`yakkai_arona/layer405_final_publish_composite_fresh.zip`. To validate the
+package and run layer-local-to-default-target registration:
+
+```bash
+python3 tools/arona_layer405_fresh_publish_compare.py \
+  --windows yakkai_arona/layer405_final_publish_composite_fresh.zip \
+  --output /tmp/yakkai-layer405-fresh-publish-compare
+```
+
+To correlate the Windows evidence with a fresh Yakkai debug-effect run:
+
+```bash
+python3 tools/arona_layer405_fresh_publish_compare.py \
+  --windows yakkai_arona/layer405_final_publish_composite_fresh.zip \
+  --yakkai-root /tmp/yakkai-layer405-fresh-yakkai-rerun \
+  --output /tmp/yakkai-layer405-default-delta-locator
+```
+
+This diagnostic validates the Day/Sunset/Night source labels, confirms Windows
+final-publish state (`4160x2923` layer target into `2560x1440`, RGB-only
+`writeMask=7`), parses final-event pixel histories, and correlates Yakkai
+`debugEffectPassStates` when a comparator output root is supplied. With
+`--yakkai-root`, the report also writes `yakkaiDefaultDeltaOracle`, which samples
+Yakkai layer `405` `default-before-effect` and `default-after-effect` captures at
+the Windows final-publish pixel-history coordinates (`lowerRibbon` and
+`transparentEdge`) and compares the RGB delta against Windows `pre_mod_rgba` to
+`post_mod_rgba`. The same run writes `yakkaiDefaultDeltaLocator`, which searches
+the Yakkai default-target delta map for sample, nearest, and peak RGB changes
+and emits before/after/delta crop sheets under `locator-crops/`.
+
+The current real locator run at `/tmp/yakkai-layer405-default-delta-locator`
+classifies all Day/Sunset/Night `default-before-effect` to `default-after-effect`
+samples as `missing-default-delta`, but the optional
+`default-after-effect` to `final-publish` boundary classifies as
+`delta-at-windows-sample`. Treat that as evidence that the next target is the
+debug capture timing/final-publish boundary, not color-mask parity, projection,
+or another Windows capture. It is intended for trusted local RenderDoc evidence
+archives and can take a few minutes when the full image-registration pass runs.
+If final-publish state looks missing or malformed, rebuild the backend and
+harness explicitly with
+`cmake --build build/native/scene_backend --target yakkai_scene_backend yakkai_scene_backendplugin`
+and `cmake --build build/native/scene_harness --target yakkai_scene_harness`
+before rerunning; stale backend manifests can omit `debugEffectPassStates` and
+`colorMaskBits`.
 
 For focused Arona mask/effect parity checks, `tools/arona_mask_effect_parity.py` reads a layer `405` effect-capture manifest, slot-boundary JSON, and local `scene.pkg` to extract authored pulse/waterwaves/shake masks. The report maps mask coverage onto the ribbon slots, records mask texture formats such as `R8` and `RG8`, and estimates per-slot displacement from WE shader constants before any renderer patch is considered.
 
@@ -492,7 +541,7 @@ QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner \
 | Gradient | Two-color gradient with animation and time-of-day support |
 | Video | Local video file via QtMultimedia |
 | WE Video | Wallpaper Engine video projects from Steam library |
-| WE Web | Wallpaper Engine web projects via QtWebEngine |
+| WE Web | Wallpaper Engine web projects via QtWebEngine with WE property, viewport, audio-listener, and media-listener compatibility shims |
 | WE Scene (diagnostics) | Safe scan/selection with placeholder diagnostics |
 | WE Scene (native) | Native Vulkan renderer for WE scene projects |
 | Playlist | Sequential, random, or scheduled cycling of scene wallpapers |
@@ -519,6 +568,8 @@ The native backend supports:
 - High-risk color-grading outside the strict `composelayer-color-grade` class, fullscreen blur outside the strict `utility-blur` class, mixed blur, utility/fullscreen water-only carrier classes, and protected blur effect paths remain stripped or probe-only. Regular non-carrier `blur-only` chains can render normally under the narrow `regular-blur-only-effect` predicate, fullscreen utility blur carriers can render normally under the narrow `utility-blur-effect` predicate, composelayer water-only carriers can render normally under the narrow `composelayer-water-effect` predicate, and composelayer blur/color-grade carriers can render normally under the narrow `composelayer-color-grade-effect` predicate after human visual approval. Non-fullscreen composelayers publish preserved effect output through their authored local layer card instead of fullscreen-blitting the effect texture; this keeps small local water/reflection carriers from overwriting the whole frame. Protected puppet crop-sheet chains can render normally only when their visible effects are limited to recognized water/LUT/pulse/shake families; protected blur/color-grade, unknown mixed families, and generic puppet paths remain stripped or probe-only. Non-channelmap puppet final displays publish the rendered effect texture as an original-parent sibling layer card so the final display does not lose parent transforms or double-apply puppet skinning; the final display uses premultiplied blending because the offscreen effect texture has already been alpha-composited. For non-channelmap puppet final-display direct displaced `shake` passes, the shader preserves the original source alpha while displacing color so transparent crop-sheet silhouettes are not warped by effect UV offsets; restored-alpha edge pixels blend back toward source RGB when the displaced sample is more transparent. `waterwaves` uses the official WE displaced-alpha behavior after Windows shader-debug evidence showed source-alpha preservation was wrong for that shader. Source puppet meshes sample only the mapped image area of padded WE textures, while render-target final displays keep full render-target UVs. The layer-local effect viewport expands to puppet mesh bounds when authored geometry extends outside the nominal object size. The former `3476236738` flat gray background and missing extended-hand regressions are guarded by the scene visual sentinel.
 - The current stripped-effect family backlog, including candidate scenes and blocked follow-up slices, is tracked in `docs/renderer-effect-candidate-backlog.md`.
 - Small embedded video textures are decoded as static first frames to keep CPU use bounded. Continuous decode is enabled only for large/main videos when FFmpeg is available at build time.
+- WE Web audio listener APIs are compatibility shims. Real Linux audio capture is not implemented yet; current web-audio regression coverage uses harness-only synthetic data and still requires human review before promotion.
+- WE Web user-property editing/import is not implemented in the Plasma settings yet. Yakkai loads authored `project.json` defaults for web wallpapers, but per-user Wallpaper Engine adjustments such as moving CWAV's date position are a far-future settings feature.
 - Static model scenes use an experimental fallback for basis correction, camera framing, and material selection.
 - Material/lighting fidelity is partial: generic materials and point lights are supported, but full Wallpaper Engine PBR, shadow, and reflection parity is not.
 - SceneScript support is partial: Yakkai evaluates simple layer bindings (origin/color/alpha/visible and generated text returns) with generic layer/scene stubs, not the full Wallpaper Engine runtime. Text objects are represented structurally at their script-resolved transform and logged for validation, but full glyph rendering is not implemented yet. Media integration callbacks and unsupported object APIs are still diagnostics. Validator logs classify missing runtime APIs as visible, harmless, or media/runtime-only diagnostics so candidate fixtures can be triaged before adding new API stubs.

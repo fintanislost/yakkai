@@ -8,6 +8,7 @@
 #include <QtCore/QJsonObject>
 #include <QtCore/QMetaObject>
 #include <QtCore/QPointer>
+#include <QtCore/QProcess>
 #include <QtCore/QSize>
 #include <QtCore/QThread>
 #include <QtCore/QTimer>
@@ -16,6 +17,7 @@
 #include <QtGui/QGuiApplication>
 #include <QtGui/QWindow>
 #include <QtQuick/QQuickWindow>
+#include <QtWebEngineQuick/qtwebenginequickglobal.h>
 #include <QtQml/QQmlApplicationEngine>
 #include <QtQml/QQmlContext>
 
@@ -24,6 +26,9 @@
 #include "ScenePropertiesOption.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -45,6 +50,19 @@ struct CaptureRequest
     QString fileName;
 };
 
+struct RecordingRequest
+{
+    QString outputPath;
+    int durationMs = 10000;
+    int fps = 30;
+    int startDelayMs = 0;
+};
+
+enum class CaptureExitMode {
+    Graceful,
+    Immediate,
+};
+
 enum CaptureStatus
 {
     CaptureSuccess = 0,
@@ -57,6 +75,15 @@ std::optional<int> parseNonNegativeInt(const QString& value)
     bool ok = false;
     const int parsed = value.toInt(&ok);
     if (!ok || parsed < 0) {
+        return std::nullopt;
+    }
+    return parsed;
+}
+
+std::optional<int> parsePositiveInt(const QString& value)
+{
+    const std::optional<int> parsed = parseNonNegativeInt(value);
+    if (!parsed || *parsed == 0) {
         return std::nullopt;
     }
     return parsed;
@@ -211,6 +238,62 @@ CaptureStatus saveWindowCapture(QQuickWindow* window, const QString& absolutePat
     return CaptureSuccess;
 }
 
+QStringList rawVideoEncoderArguments(const QString& outputPath, const QSize& frameSize, int fps)
+{
+    return QStringList{
+        QStringLiteral("-y"),
+        QStringLiteral("-hide_banner"),
+        QStringLiteral("-loglevel"),
+        QStringLiteral("error"),
+        QStringLiteral("-f"),
+        QStringLiteral("rawvideo"),
+        QStringLiteral("-pix_fmt"),
+        QStringLiteral("rgba"),
+        QStringLiteral("-s"),
+        QStringLiteral("%1x%2").arg(frameSize.width()).arg(frameSize.height()),
+        QStringLiteral("-r"),
+        QString::number(fps),
+        QStringLiteral("-i"),
+        QStringLiteral("pipe:0"),
+        QStringLiteral("-an"),
+        QStringLiteral("-c:v"),
+        QStringLiteral("libx264"),
+        QStringLiteral("-preset"),
+        QStringLiteral("veryfast"),
+        QStringLiteral("-tune"),
+        QStringLiteral("zerolatency"),
+        QStringLiteral("-pix_fmt"),
+        QStringLiteral("yuv420p"),
+        outputPath,
+    };
+}
+
+bool writeRgbaFrame(QProcess* process, const QImage& frame)
+{
+    const QImage rgba = frame.format() == QImage::Format_RGBA8888
+        ? frame
+        : frame.convertToFormat(QImage::Format_RGBA8888);
+    const qsizetype expectedLineBytes = static_cast<qsizetype>(rgba.width()) * 4;
+    QByteArray frameBytes;
+    frameBytes.reserve(static_cast<qsizetype>(rgba.height()) * expectedLineBytes);
+    for (int y = 0; y < rgba.height(); ++y) {
+        frameBytes.append(reinterpret_cast<const char*>(rgba.constScanLine(y)), expectedLineBytes);
+    }
+
+    const qint64 written = process->write(frameBytes);
+    if (written != frameBytes.size()) {
+        qWarning() << "yakkai_scene_harness: failed to write complete raw video frame"
+                   << "written=" << written
+                   << "expected=" << frameBytes.size();
+        return false;
+    }
+    if (!process->waitForBytesWritten(5000)) {
+        qWarning() << "yakkai_scene_harness: timed out writing raw video frame to ffmpeg";
+        return false;
+    }
+    return true;
+}
+
 bool readDebugEffectManifestOk(const QString& manifestPath, QString* error)
 {
     QFile manifestFile(manifestPath);
@@ -256,8 +339,15 @@ bool waitForDebugEffectManifestOk(const QString& manifestPath)
     return false;
 }
 
-void requestCaptureExit(QQuickWindow* window, int status)
+void requestCaptureExit(QQuickWindow* window, int status, CaptureExitMode exitMode)
 {
+    if (exitMode == CaptureExitMode::Immediate) {
+        qInfo() << "yakkai_scene_harness: immediate capture exit requested status=" << status;
+        std::fprintf(stderr, "yakkai_scene_harness: immediate capture exit requested status=%d\n", status);
+        std::fflush(stderr);
+        std::_Exit(status);
+    }
+
     bool invokedShutdownHook = false;
     if (window != nullptr) {
         invokedShutdownHook = QMetaObject::invokeMethod(window, "prepareForCaptureExit", Qt::DirectConnection);
@@ -275,29 +365,31 @@ void requestCaptureExit(QQuickWindow* window, int status)
 void scheduleSingleCapture(QCoreApplication* app,
                            QPointer<QQuickWindow> guardedWindow,
                            QString absoluteCapturePath,
-                           int captureDelayMs)
+                           int captureDelayMs,
+                           CaptureExitMode exitMode)
 {
-    QTimer::singleShot(std::max(captureDelayMs, 0), app, [guardedWindow, absoluteCapturePath]() {
+    QTimer::singleShot(std::max(captureDelayMs, 0), app, [guardedWindow, absoluteCapturePath, exitMode]() {
         if (!guardedWindow) {
             qWarning() << "yakkai_scene_harness: capture window was destroyed before capture";
             QCoreApplication::exit(3);
             return;
         }
-        requestCaptureExit(guardedWindow, saveWindowCapture(guardedWindow, absoluteCapturePath));
+        requestCaptureExit(guardedWindow, saveWindowCapture(guardedWindow, absoluteCapturePath), exitMode);
     });
 }
 
 void scheduleMultiCaptures(QCoreApplication* app,
                            QPointer<QQuickWindow> guardedWindow,
                            const std::vector<CaptureRequest>& captures,
-                           const QString& absoluteCaptureDir)
+                           const QString& absoluteCaptureDir,
+                           CaptureExitMode exitMode)
 {
     auto remaining = std::make_shared<int>(static_cast<int>(captures.size()));
     auto failed = std::make_shared<bool>(false);
 
     for (const CaptureRequest& capture : captures) {
         const QString absolutePath = QDir(absoluteCaptureDir).filePath(capture.fileName);
-        QTimer::singleShot(capture.timeMs, app, [guardedWindow, absolutePath, remaining, failed]() {
+        QTimer::singleShot(capture.timeMs, app, [guardedWindow, absolutePath, remaining, failed, exitMode]() {
             if (!guardedWindow) {
                 qWarning() << "yakkai_scene_harness: capture window was destroyed before capture";
                 *failed = true;
@@ -307,10 +399,145 @@ void scheduleMultiCaptures(QCoreApplication* app,
 
             *remaining -= 1;
             if (*remaining == 0) {
-                requestCaptureExit(guardedWindow, *failed ? 5 : 0);
+                requestCaptureExit(guardedWindow, *failed ? 5 : 0, exitMode);
             }
         });
     }
+}
+
+void finishWindowRecording(QPointer<QQuickWindow> guardedWindow,
+                           const std::shared_ptr<QProcess>& encoder,
+                           int status,
+                           int frameCount,
+                           const QElapsedTimer& elapsed,
+                           CaptureExitMode exitMode)
+{
+    int finalStatus = status;
+    if (encoder->state() != QProcess::NotRunning) {
+        encoder->closeWriteChannel();
+        if (!encoder->waitForFinished(15000)) {
+            qWarning() << "yakkai_scene_harness: timed out waiting for ffmpeg to finalize live recording";
+            encoder->terminate();
+            if (!encoder->waitForFinished(5000)) {
+                encoder->kill();
+                encoder->waitForFinished(5000);
+            }
+            finalStatus = 5;
+        }
+    }
+
+    if (encoder->exitStatus() != QProcess::NormalExit || encoder->exitCode() != 0) {
+        qWarning() << "yakkai_scene_harness: ffmpeg recording process failed"
+                   << "exitStatus=" << encoder->exitStatus()
+                   << "exitCode=" << encoder->exitCode()
+                   << "stderr=" << QString::fromLocal8Bit(encoder->readAllStandardError());
+        finalStatus = 5;
+    }
+
+    qInfo() << "yakkai_scene_harness: live recording finished"
+            << "frames=" << frameCount
+            << "elapsedMs=" << elapsed.elapsed()
+            << "status=" << finalStatus;
+    requestCaptureExit(guardedWindow, finalStatus, exitMode);
+}
+
+void scheduleWindowRecording(QCoreApplication* app,
+                             QPointer<QQuickWindow> guardedWindow,
+                             const RecordingRequest& request,
+                             CaptureExitMode exitMode)
+{
+    QTimer::singleShot(std::max(request.startDelayMs, 0), app, [app, guardedWindow, request, exitMode]() {
+        if (!guardedWindow) {
+            qWarning() << "yakkai_scene_harness: recording window was destroyed before first frame";
+            QCoreApplication::exit(3);
+            return;
+        }
+
+        QImage firstFrame = guardedWindow->grabWindow();
+        if (firstFrame.isNull()) {
+            qWarning() << "yakkai_scene_harness: recording first frame is null";
+            QCoreApplication::exit(CaptureNullImage);
+            return;
+        }
+        firstFrame = firstFrame.convertToFormat(QImage::Format_RGBA8888);
+        const QSize frameSize = firstFrame.size();
+        const QFileInfo outputInfo(request.outputPath);
+        const QString absoluteOutputPath = outputInfo.absoluteFilePath();
+        if (!QDir().mkpath(outputInfo.absolutePath())) {
+            qWarning() << "yakkai_scene_harness: failed to create recording output directory" << outputInfo.absolutePath();
+            QCoreApplication::exit(5);
+            return;
+        }
+
+        auto encoder = std::make_shared<QProcess>();
+        encoder->setProgram(QStringLiteral("ffmpeg"));
+        encoder->setArguments(rawVideoEncoderArguments(absoluteOutputPath, frameSize, request.fps));
+        encoder->setProcessChannelMode(QProcess::SeparateChannels);
+        qInfo() << "yakkai_scene_harness: starting live recording"
+                << "path=" << absoluteOutputPath
+                << "size=" << frameSize
+                << "fps=" << request.fps
+                << "durationMs=" << request.durationMs
+                << "startDelayMs=" << request.startDelayMs;
+        encoder->start();
+        if (!encoder->waitForStarted(5000)) {
+            qWarning() << "yakkai_scene_harness: failed to start ffmpeg for live recording"
+                       << "error=" << encoder->errorString();
+            QCoreApplication::exit(5);
+            return;
+        }
+
+        const int targetFrameCount = std::max(1, static_cast<int>(std::ceil(static_cast<double>(request.durationMs) * request.fps / 1000.0)));
+        const int timerIntervalMs = std::max(1, static_cast<int>(std::round(1000.0 / request.fps)));
+        auto frameCount = std::make_shared<int>(0);
+        auto failed = std::make_shared<bool>(false);
+        auto elapsed = std::make_shared<QElapsedTimer>();
+        elapsed->start();
+        auto timer = std::make_shared<QTimer>();
+        timer->setInterval(timerIntervalMs);
+
+        auto writeFrame = [guardedWindow, encoder, frameSize, frameCount, failed]() {
+            if (!guardedWindow) {
+                qWarning() << "yakkai_scene_harness: recording window was destroyed during capture";
+                *failed = true;
+                return;
+            }
+            QImage frame = guardedWindow->grabWindow();
+            if (frame.isNull()) {
+                qWarning() << "yakkai_scene_harness: recording frame is null";
+                *failed = true;
+                return;
+            }
+            frame = frame.convertToFormat(QImage::Format_RGBA8888);
+            if (frame.size() != frameSize) {
+                qWarning() << "yakkai_scene_harness: recording frame size changed"
+                           << "actual=" << frame.size()
+                           << "expected=" << frameSize;
+                *failed = true;
+                return;
+            }
+            if (!writeRgbaFrame(encoder.get(), frame)) {
+                *failed = true;
+                return;
+            }
+            *frameCount += 1;
+        };
+
+        writeFrame();
+        QObject::connect(timer.get(), &QTimer::timeout, app, [timer, writeFrame, frameCount, failed, targetFrameCount, elapsed, guardedWindow, encoder, exitMode]() {
+            if (*failed || *frameCount >= targetFrameCount) {
+                timer->stop();
+                finishWindowRecording(guardedWindow, encoder, *failed ? 5 : 0, *frameCount, *elapsed, exitMode);
+                return;
+            }
+            writeFrame();
+            if (*failed || *frameCount >= targetFrameCount) {
+                timer->stop();
+                finishWindowRecording(guardedWindow, encoder, *failed ? 5 : 0, *frameCount, *elapsed, exitMode);
+            }
+        });
+        timer->start();
+    });
 }
 
 void startCaptureTimersAfterFirstFrame(QCoreApplication* app,
@@ -331,7 +558,7 @@ void startCaptureTimersAfterFirstFrame(QCoreApplication* app,
             return;
         }
 
-        qInfo() << "yakkai_scene_harness: backend first frame ready; arming capture timers";
+        qInfo() << "yakkai_scene_harness: backend readiness signaled; arming capture timers";
         readyPollTimer->stop();
         readyTimeoutTimer->stop();
         readyPollTimer->deleteLater();
@@ -341,7 +568,7 @@ void startCaptureTimersAfterFirstFrame(QCoreApplication* app,
 
     QObject::connect(readyPollTimer, &QTimer::timeout, app, [guardedWindow, gate, tryStart]() {
         if (!guardedWindow) {
-            qWarning() << "yakkai_scene_harness: capture window was destroyed before backend first frame";
+            qWarning() << "yakkai_scene_harness: capture window was destroyed before backend readiness";
             QCoreApplication::exit(3);
             return;
         }
@@ -355,13 +582,13 @@ void startCaptureTimersAfterFirstFrame(QCoreApplication* app,
         const QString status = guardedWindow
             ? guardedWindow->property("backendStatus").toString()
             : QStringLiteral("<window destroyed>");
-        qWarning() << "yakkai_scene_harness: timed out waiting for backend first frame before capture"
+        qWarning() << "yakkai_scene_harness: timed out waiting for backend readiness before capture"
                    << "timeoutMs=" << CaptureReadyTimeoutMs
                    << "backendStatus=" << status;
         QCoreApplication::exit(7);
     });
 
-    qInfo() << "yakkai_scene_harness: waiting for backend first frame before capture"
+    qInfo() << "yakkai_scene_harness: waiting for backend readiness before capture"
             << "timeoutMs=" << CaptureReadyTimeoutMs;
     if (guardedWindow && guardedWindow->property("captureReady").toBool()) {
         gate->markFirstFrameReady();
@@ -386,18 +613,42 @@ int fillModeFromString(const QString& fillMode)
     return 0;
 }
 
+std::optional<CaptureExitMode> captureExitModeFromString(const QString& value)
+{
+    if (value == QStringLiteral("graceful")) {
+        return CaptureExitMode::Graceful;
+    }
+    if (value == QStringLiteral("immediate")) {
+        return CaptureExitMode::Immediate;
+    }
+    return std::nullopt;
+}
+
 QString backendQmlFile(const QString& qmlDir, const QString& backend)
 {
     if (backend == QStringLiteral("paper")) {
         return QDir(qmlDir).filePath(QStringLiteral("YakkaiSceneViewerHarness.qml"));
     }
+    if (backend == QStringLiteral("video")) {
+        return QDir(qmlDir).filePath(QStringLiteral("VideoWallpaperHarness.qml"));
+    }
+    if (backend == QStringLiteral("web")) {
+        return QDir(qmlDir).filePath(QStringLiteral("WebWallpaperHarness.qml"));
+    }
 
     return QDir(qmlDir).filePath(QStringLiteral("SystemSceneViewerHarness.qml"));
+}
+
+QString wallpaperPackageUiDir(const QString& qmlDir)
+{
+    return QDir(qmlDir).absoluteFilePath(QStringLiteral("../../../wallpapers/io.team7.yakkai/contents/ui"));
 }
 }
 
 int main(int argc, char* argv[])
 {
+    QtWebEngineQuick::initialize();
+
     QGuiApplication app(argc, argv);
     QCoreApplication::setApplicationName(QStringLiteral("yakkai_scene_harness"));
     QCoreApplication::setOrganizationName(QStringLiteral("Team7"));
@@ -408,13 +659,13 @@ int main(int argc, char* argv[])
 
     QCommandLineOption backendOption(
         QStringList{QStringLiteral("backend")},
-        QStringLiteral("Select the backend to load: system or paper."),
+        QStringLiteral("Select the backend to load: system, paper, video, or web."),
         QStringLiteral("backend"),
         QStringLiteral("system")
     );
     QCommandLineOption sourceOption(
         QStringList{QStringLiteral("source")},
-        QStringLiteral("Absolute path to scene.json or scene.pkg."),
+        QStringLiteral("Absolute path to scene.json, scene.pkg, video file, or web index.html."),
         QStringLiteral("path")
     );
     QCommandLineOption assetsOption(
@@ -472,6 +723,35 @@ int main(int argc, char* argv[])
         QStringLiteral("Capture sequence START_MS:FRAME_COUNT:INTERVAL_MS, used with --capture-dir."),
         QStringLiteral("sequence")
     );
+    QCommandLineOption captureExitModeOption(
+        QStringList{QStringLiteral("capture-exit-mode")},
+        QStringLiteral("Harness-only capture exit mode: graceful|immediate. Immediate exits after the final capture without Qt teardown."),
+        QStringLiteral("mode"),
+        QStringLiteral("graceful")
+    );
+    QCommandLineOption recordOption(
+        QStringList{QStringLiteral("record")},
+        QStringLiteral("Record a live MP4 by piping repeated window grabs to ffmpeg, then exit."),
+        QStringLiteral("path")
+    );
+    QCommandLineOption recordDurationOption(
+        QStringList{QStringLiteral("record-duration-ms")},
+        QStringLiteral("Live recording duration in milliseconds."),
+        QStringLiteral("ms"),
+        QStringLiteral("10000")
+    );
+    QCommandLineOption recordFpsOption(
+        QStringList{QStringLiteral("record-fps")},
+        QStringLiteral("Live recording frame rate."),
+        QStringLiteral("fps"),
+        QStringLiteral("30")
+    );
+    QCommandLineOption recordStartDelayOption(
+        QStringList{QStringLiteral("record-start-delay-ms")},
+        QStringLiteral("Delay after backend readiness before live recording starts."),
+        QStringLiteral("ms"),
+        QStringLiteral("0")
+    );
     QCommandLineOption debugEffectCapturesOption(
         QStringList{QStringLiteral("debug-effect-captures")},
         QStringLiteral("Write effect input/output/final-publish debug captures and manifest into the given directory. Only supported by --backend paper."),
@@ -519,13 +799,29 @@ int main(int argc, char* argv[])
     );
     QCommandLineOption scenePropertiesJsonOption(
         QStringList{QStringLiteral("scene-properties-json")},
-        QStringLiteral("Scene properties override JSON object forwarded to the paper backend."),
+        QStringLiteral("Wallpaper Engine properties JSON object forwarded to backends that support it."),
         QStringLiteral("json")
     );
     QCommandLineOption puppetSimulationOption(
         QStringList{QStringLiteral("puppet-simulation")},
         QStringLiteral("Harness-only puppet simulation mode: off, diagnostic, or runtime."),
         QStringLiteral("mode")
+    );
+    QCommandLineOption debugSyntheticAudioOption(
+        QStringList{QStringLiteral("debug-synthetic-audio")},
+        QStringLiteral("Harness-only: emit synthetic Wallpaper Engine web audio FFT data. Only affects --backend web.")
+    );
+    QCommandLineOption debugSyntheticAudioBinsOption(
+        QStringList{QStringLiteral("debug-synthetic-audio-bins")},
+        QStringLiteral("Synthetic web audio bin count."),
+        QStringLiteral("count"),
+        QStringLiteral("128")
+    );
+    QCommandLineOption debugSyntheticAudioIntervalOption(
+        QStringList{QStringLiteral("debug-synthetic-audio-interval-ms")},
+        QStringLiteral("Synthetic web audio interval in milliseconds."),
+        QStringLiteral("ms"),
+        QStringLiteral("33")
     );
 
     parser.addOption(backendOption);
@@ -541,6 +837,11 @@ int main(int argc, char* argv[])
     parser.addOption(captureDirOption);
     parser.addOption(captureTimesOption);
     parser.addOption(captureSequenceOption);
+    parser.addOption(captureExitModeOption);
+    parser.addOption(recordOption);
+    parser.addOption(recordDurationOption);
+    parser.addOption(recordFpsOption);
+    parser.addOption(recordStartDelayOption);
     parser.addOption(debugEffectCapturesOption);
     parser.addOption(debugEffectCaptureDelayOption);
     parser.addOption(debugEffectProbeLayersOption);
@@ -552,6 +853,9 @@ int main(int argc, char* argv[])
     parser.addOption(debugPuppetAnimationLayerOverridesOption);
     parser.addOption(scenePropertiesJsonOption);
     parser.addOption(puppetSimulationOption);
+    parser.addOption(debugSyntheticAudioOption);
+    parser.addOption(debugSyntheticAudioBinsOption);
+    parser.addOption(debugSyntheticAudioIntervalOption);
     parser.process(app);
 
     const QString qmlDir = QStringLiteral(YAKKAI_SCENE_HARNESS_QML_DIR);
@@ -568,6 +872,11 @@ int main(int argc, char* argv[])
     const QString captureDirPath = parser.value(captureDirOption).trimmed();
     const QString captureTimesValue = parser.value(captureTimesOption).trimmed();
     const QString captureSequenceValue = parser.value(captureSequenceOption).trimmed();
+    const QString captureExitModeValue = parser.value(captureExitModeOption).trimmed();
+    const QString recordPath = parser.value(recordOption).trimmed();
+    const QString recordDurationValue = parser.value(recordDurationOption).trimmed();
+    const QString recordFpsValue = parser.value(recordFpsOption).trimmed();
+    const QString recordStartDelayValue = parser.value(recordStartDelayOption).trimmed();
     const QString debugEffectCapturesPath = parser.value(debugEffectCapturesOption).trimmed();
     const QString debugEffectCaptureDelayValue = parser.value(debugEffectCaptureDelayOption).trimmed();
     const QString debugEffectProbeLayersValue = parser.value(debugEffectProbeLayersOption).trimmed();
@@ -582,6 +891,8 @@ int main(int argc, char* argv[])
         yakkai::harness::validateScenePropertiesJsonOption(parser.value(scenePropertiesJsonOption));
     const yakkai::harness::PuppetSimulationOptionResult puppetSimulation =
         yakkai::harness::validatePuppetSimulationOption(parser.value(puppetSimulationOption));
+    const QString debugSyntheticAudioBinsValue = parser.value(debugSyntheticAudioBinsOption).trimmed();
+    const QString debugSyntheticAudioIntervalValue = parser.value(debugSyntheticAudioIntervalOption).trimmed();
     const bool debugEffectCapturesRequested = !debugEffectCapturesPath.isEmpty();
     const bool debugEffectCaptureDelayRequested = parser.isSet(debugEffectCaptureDelayOption);
     const bool debugEffectProbeLayersRequested = !debugEffectProbeLayersValue.isEmpty();
@@ -611,7 +922,14 @@ int main(int argc, char* argv[])
         debugEffectProbeMaxEffectsRequested && debugEffectProbeMaxEffects
             ? QString::number(*debugEffectProbeMaxEffects)
             : QString();
+    const std::optional<CaptureExitMode> captureExitMode = captureExitModeFromString(captureExitModeValue);
+    const std::optional<int> recordDurationMs = parsePositiveInt(recordDurationValue);
+    const std::optional<int> recordFps = parsePositiveInt(recordFpsValue);
+    const std::optional<int> recordStartDelayMs = parseNonNegativeInt(recordStartDelayValue);
+    const std::optional<int> debugSyntheticAudioBins = parseNonNegativeInt(debugSyntheticAudioBinsValue);
+    const std::optional<int> debugSyntheticAudioIntervalMs = parseNonNegativeInt(debugSyntheticAudioIntervalValue);
     const bool multiCaptureRequested = !captureDirPath.isEmpty() || !captureTimesValue.isEmpty() || !captureSequenceValue.isEmpty();
+    const bool recordRequested = !recordPath.isEmpty();
     std::optional<std::vector<CaptureRequest>> parsedCaptures;
     const std::optional<QSize> windowSize = parseWindowSize(windowSizeValue);
 
@@ -621,6 +939,37 @@ int main(int argc, char* argv[])
     }
     if (!puppetSimulation.valid) {
         qWarning().noquote() << "yakkai_scene_harness:" << puppetSimulation.error;
+        return 2;
+    }
+    if (!captureExitMode) {
+        const QByteArray encodedCaptureExitMode = captureExitModeValue.toLocal8Bit();
+        std::fprintf(stderr, "yakkai_scene_harness: invalid --capture-exit-mode %s\n", encodedCaptureExitMode.constData());
+        qWarning() << "yakkai_scene_harness: invalid --capture-exit-mode" << captureExitModeValue;
+        return 2;
+    }
+    if (!recordDurationMs) {
+        qWarning() << "yakkai_scene_harness: invalid --record-duration-ms value" << recordDurationValue;
+        return 2;
+    }
+    if (!recordFps) {
+        qWarning() << "yakkai_scene_harness: invalid --record-fps value" << recordFpsValue;
+        return 2;
+    }
+    if (!recordStartDelayMs) {
+        qWarning() << "yakkai_scene_harness: invalid --record-start-delay-ms value" << recordStartDelayValue;
+        return 2;
+    }
+    if (!debugSyntheticAudioBins || *debugSyntheticAudioBins == 0) {
+        qWarning() << "yakkai_scene_harness: invalid --debug-synthetic-audio-bins value" << debugSyntheticAudioBinsValue;
+        return 2;
+    }
+    if (!debugSyntheticAudioIntervalMs || *debugSyntheticAudioIntervalMs == 0) {
+        qWarning() << "yakkai_scene_harness: invalid --debug-synthetic-audio-interval-ms value" << debugSyntheticAudioIntervalValue;
+        return 2;
+    }
+    if (*captureExitMode == CaptureExitMode::Immediate && debugEffectCapturesRequested) {
+        std::fprintf(stderr, "yakkai_scene_harness: --capture-exit-mode immediate cannot be combined with --debug-effect-captures\n");
+        qWarning() << "yakkai_scene_harness: --capture-exit-mode immediate cannot be combined with --debug-effect-captures";
         return 2;
     }
     if (debugEffectCapturesRequested && backend != QStringLiteral("paper")) {
@@ -724,6 +1073,10 @@ int main(int argc, char* argv[])
         qWarning() << "yakkai_scene_harness: --capture cannot be combined with --capture-dir, --capture-times-ms, or --capture-sequence";
         return 2;
     }
+    if (recordRequested && (!capturePath.isEmpty() || multiCaptureRequested)) {
+        qWarning() << "yakkai_scene_harness: --record cannot be combined with --capture, --capture-dir, --capture-times-ms, or --capture-sequence";
+        return 2;
+    }
     if (multiCaptureRequested && captureDirPath.isEmpty()) {
         qWarning() << "yakkai_scene_harness: --capture-dir is required for multi-capture";
         return 2;
@@ -741,8 +1094,9 @@ int main(int argc, char* argv[])
         qWarning() << "yakkai_scene_harness: invalid multi-capture schedule";
         return 2;
     }
+    const CaptureExitMode selectedCaptureExitMode = *captureExitMode;
 
-    if (!capturePath.isEmpty() || multiCaptureRequested) {
+    if (!capturePath.isEmpty() || multiCaptureRequested || recordRequested) {
         app.setQuitOnLastWindowClosed(false);
     }
 
@@ -763,6 +1117,7 @@ int main(int argc, char* argv[])
         }
     });
     engine.addImportPath(buildQmlImportDir);
+    engine.addImportPath(wallpaperPackageUiDir(qmlDir));
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessBackend"), backend);
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessSource"), QUrl::fromLocalFile(sourcePath));
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessAssetsPath"), assetsPath);
@@ -784,6 +1139,9 @@ int main(int argc, char* argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugPuppetEffectFinalMesh"), debugPuppetEffectFinalMeshValue);
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugPuppetEffectRouteOnly"), debugPuppetEffectRouteOnlyRequested);
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugPuppetAnimationLayerOverrides"), debugPuppetAnimationLayerOverridesValue);
+    engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugSyntheticAudioEnabled"), parser.isSet(debugSyntheticAudioOption));
+    engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugSyntheticAudioBins"), *debugSyntheticAudioBins);
+    engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugSyntheticAudioIntervalMs"), *debugSyntheticAudioIntervalMs);
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessScenePropertiesJson"), scenePropertiesJson.normalized);
 
     const QUrl mainQml = QUrl::fromLocalFile(QDir(qmlDir).filePath(QStringLiteral("Main.qml")));
@@ -817,25 +1175,39 @@ int main(int argc, char* argv[])
             qInfo() << "yakkai_scene_harness: rootWindow heightChanged" << window->height();
         });
     });
-    QObject::connect(&engine, &QQmlApplicationEngine::objectCreated, &app, [&app, capturePath, captureDelayMs, captureDirPath, captureTimesValue, captureSequenceValue, parsedCaptures](QObject* object, const QUrl&) {
+    const RecordingRequest recordingRequest{
+        recordRequested ? QFileInfo(recordPath).absoluteFilePath() : QString(),
+        *recordDurationMs,
+        *recordFps,
+        *recordStartDelayMs,
+    };
+
+    QObject::connect(&engine, &QQmlApplicationEngine::objectCreated, &app, [&app, capturePath, captureDelayMs, captureDirPath, captureTimesValue, captureSequenceValue, parsedCaptures, selectedCaptureExitMode, recordRequested, recordingRequest](QObject* object, const QUrl&) {
         const bool multiCaptureRequested = !captureDirPath.isEmpty() || !captureTimesValue.isEmpty() || !captureSequenceValue.isEmpty();
-        if (capturePath.isEmpty() && !multiCaptureRequested) {
+        if (capturePath.isEmpty() && !multiCaptureRequested && !recordRequested) {
             return;
         }
 
         auto* quickWindow = qobject_cast<QQuickWindow*>(object);
         if (!quickWindow) {
-            qWarning() << "yakkai_scene_harness: capture requested but root object is not a QQuickWindow";
+            qWarning() << "yakkai_scene_harness: capture or recording requested but root object is not a QQuickWindow";
             QCoreApplication::exit(2);
             return;
         }
 
         QPointer<QQuickWindow> guardedWindow(quickWindow);
 
+        if (recordRequested) {
+            startCaptureTimersAfterFirstFrame(&app, guardedWindow, [&app, guardedWindow, recordingRequest, selectedCaptureExitMode]() {
+                scheduleWindowRecording(&app, guardedWindow, recordingRequest, selectedCaptureExitMode);
+            });
+            return;
+        }
+
         if (!capturePath.isEmpty()) {
             const QString absoluteCapturePath = QFileInfo(capturePath).absoluteFilePath();
-            startCaptureTimersAfterFirstFrame(&app, guardedWindow, [&app, guardedWindow, absoluteCapturePath, captureDelayMs]() {
-                scheduleSingleCapture(&app, guardedWindow, absoluteCapturePath, captureDelayMs);
+            startCaptureTimersAfterFirstFrame(&app, guardedWindow, [&app, guardedWindow, absoluteCapturePath, captureDelayMs, selectedCaptureExitMode]() {
+                scheduleSingleCapture(&app, guardedWindow, absoluteCapturePath, captureDelayMs, selectedCaptureExitMode);
             });
             return;
         }
@@ -852,8 +1224,8 @@ int main(int argc, char* argv[])
             QCoreApplication::exit(5);
             return;
         }
-        startCaptureTimersAfterFirstFrame(&app, guardedWindow, [&app, guardedWindow, parsedCaptures, absoluteCaptureDir]() {
-            scheduleMultiCaptures(&app, guardedWindow, *parsedCaptures, absoluteCaptureDir);
+        startCaptureTimersAfterFirstFrame(&app, guardedWindow, [&app, guardedWindow, parsedCaptures, absoluteCaptureDir, selectedCaptureExitMode]() {
+            scheduleMultiCaptures(&app, guardedWindow, *parsedCaptures, absoluteCaptureDir, selectedCaptureExitMode);
         });
     });
     engine.load(mainQml);

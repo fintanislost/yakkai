@@ -76,6 +76,44 @@ Latest source artifacts used for this revision:
   `/tmp/yakkai-arona-lut-lab/sunset-post-lut-flare-drift/post-lut-flare-drift.md`,
   and
   `/tmp/yakkai-arona-lut-lab/night-post-lut-flare-drift/post-lut-flare-drift.md`.
+- Arona 2026-06-09 regular-LUT stop diagnostics:
+  `/tmp/yakkai-arona-lut-color-parity/baseline/summary.json`,
+  `/tmp/yakkai-arona-lut-color-parity/baseline/lut-all/lut-sampling-summary.md`,
+  `/tmp/yakkai-arona-lut-color-parity/baseline/default-frame-progression/default-frame-progression.md`,
+  `/tmp/yakkai-arona-lut-color-parity/baseline/post-lut-drift/post-lut-drift.md`,
+  and
+  `/tmp/yakkai-arona-lut-color-parity/baseline/post-lut-flare-drift/post-lut-flare-drift.md`.
+- Arona 2026-06-10 layer-405 prefix 2-7 effect-chain diagnostics:
+  `/tmp/yakkai-arona-prefix-2-7-effect-chain/prefix-2/summary.json`,
+  `/tmp/yakkai-arona-prefix-2-7-effect-chain/prefix-3/summary.json`,
+  `/tmp/yakkai-arona-prefix-2-7-effect-chain/prefix-labs/`,
+  `/tmp/yakkai-arona-prefix-2-7-effect-chain/effect-drilldown/prefix-3-all-lut-layers/lut-sampling-summary.md`,
+  and
+  `/tmp/yakkai-arona-prefix-2-7-effect-chain/effect-drilldown/prefix-3-all-lut-layers/layer-405-ARONA_CROP_SHEET/lut-sampling-report.md`.
+- Arona 2026-06-10 layer-405 final-publish/composite boundary diagnostics:
+  `/tmp/yakkai-arona-final-publish-composite-boundary/normal/summary.json`,
+  `/tmp/yakkai-arona-final-publish-composite-boundary/prefix-2/summary.json`,
+  `/tmp/yakkai-arona-final-publish-composite-boundary/prefix-3/summary.json`,
+  `/tmp/yakkai-arona-final-publish-composite-boundary/prefix-7/summary.json`,
+  `/tmp/yakkai-arona-final-publish-composite-boundary/labs/prefix-3/protected-puppet-lab.json`,
+  `/tmp/yakkai-arona-final-publish-composite-boundary/lut-prefix-3/lut-sampling-summary.json`,
+  `/tmp/yakkai-arona-final-publish-composite-boundary/evidence/layer405-lut-crosscheck.json`,
+  and `ARONA_WINDOWS_AGENT_REQUEST.md`.
+- Arona 2026-06-10 Windows final-publish/composite fresh intake:
+  `yakkai_arona/layer405_final_publish_composite_fresh.zip`,
+  `yakkai_arona/layer405_final_publish_composite/`, and
+  `/tmp/yakkai-arona-windows-final-publish-composite-analysis/summary.md`.
+- Arona 2026-06-10 fresh final-publish Linux diagnostics:
+  `/tmp/yakkai-layer405-fresh-yakkai-rerun/summary.json`,
+  `/tmp/yakkai-layer405-fresh-publish-compare-rerun/summary.json`, and
+  `/tmp/yakkai-layer405-fresh-publish-compare/summary.json`.
+- Arona 2026-06-10 layer-405 default-delta oracle:
+  `/tmp/yakkai-layer405-default-delta-oracle/summary.json` and
+  `/tmp/yakkai-layer405-default-delta-oracle/summary.md`.
+- Arona 2026-06-10 layer-405 default-delta locator:
+  `/tmp/yakkai-layer405-default-delta-locator/summary.json`,
+  `/tmp/yakkai-layer405-default-delta-locator/summary.md`, and
+  `/tmp/yakkai-layer405-default-delta-locator/locator-crops/`.
 
 Those artifacts are generated diagnostics and are not committed baselines. If
 they are missing, regenerate them with `--debug-effect-captures` before changing
@@ -355,12 +393,25 @@ narrow predicate and passes visual review.
 
 ## Recommended Follow-Up Order
 
-1. Blur/LUT renderer parity: only after the harness can compare enough frames to
-   detect washed-out output and alpha/load regressions.
-2. Puppet mixed-chain renderer repair: use the Phase 3.8 probe captures as
+1. Arona layer `405` final-publish registration diagnostics: the fresh Windows
+   intake under `yakkai_arona/layer405_final_publish_composite_fresh.zip`
+   provides authoritative capture-session-labeled Day/Sunset/Night
+   final-publish evidence. All variants use final-publish blend
+   `color=(SrcAlpha Add InvSrcAlpha)`, `alpha=(SrcAlpha Add InvSrcAlpha)`,
+   `writeMask=7` (RGB-only) while sampling `4160x2923` layer output into the
+   `2560x1440` swapchain target. The Yakkai debug manifest now exposes
+   `colorMaskBits`, and the fresh comparator classifies the rebuilt Yakkai pass
+   as `yakkai-final-publish-rgb-mask`. The active follow-up is stronger
+   pixel-history/default-delta registration keyed to known final-publish sample
+   points; no additional Windows capture is currently required for the color-mask
+   question.
+2. Blur/LUT renderer parity for other scenes or non-regular classes: only after
+   the harness can compare enough frames to detect washed-out output and
+   alpha/load regressions.
+3. Puppet mixed-chain renderer repair: use the Phase 3.8 probe captures as
    negative evidence, and only revisit policy after the offscreen puppet
    effect publish path no longer occludes the final frame.
-3. Audio-reactive utility layers: separate from effect-chain re-enable work.
+4. Audio-reactive utility layers: separate from effect-chain re-enable work.
 
 Each follow-up should include:
 
@@ -690,6 +741,26 @@ Acceptance:
 - Arona Day/Sunset/Night smoke variants still pass or produce expected review
   artifacts for human comparison.
 
+2026-06-09 evidence-only stop:
+
+- current comparator artifact:
+  `/tmp/yakkai-arona-lut-color-parity/baseline/summary.json`
+- current Day/Sunset/Night RMSE: `0.0881986` / `0.0758847` / `0.0697778`.
+- regular Sunset/Night `lut-only` layers are already closely explained by the
+  manifest-resolved candidates. Trusted regular layers mostly report
+  `manifestRank=1`; the trusted rank-2 layers remain very close
+  (`314` RMSE `0.00431478`, `82` RMSE `0.00337407`).
+- the largest default-frame regression is `2143 -> 405 ARONA_CROP_SHEET`,
+  stage `material-output-12-0`, with `stepRmse=0.509021` and
+  `referenceDelta=+0.336093`.
+- post-LUT attribution classifies as `final-frame-improved-after-lut`, with
+  last-LUT reference RMSE `0.474167`, final reference RMSE `0.074727`, and
+  downstream delta `-0.39944`.
+- selected hypothesis: `not-lut`. Do not patch regular `lut_loader`, texture
+  decode, regular LUT color-space handling, or regular LUT policy from this
+  evidence. The next Arona target should be the protected puppet/default-RT
+  boundary around layer `405`.
+
 ### Slice B: Background Blur / Post-Processing Layers
 
 Target after LUT parity improves or evidence proves LUT is not the primary
@@ -735,6 +806,187 @@ Acceptance:
 - no rectangular/gray occlusion like the earlier puppet mixed-chain probes.
 - comparator and smoke runs show improvement that is visible in the character
   path, not just global frame metrics.
+
+2026-06-10 protected puppet/default-RT stop:
+
+- artifact root:
+  `/tmp/yakkai-arona-protected-default-rt-boundary/`
+- normal comparator Day/Sunset/Night RMSE:
+  `0.0906713` / `0.075915` / `0.0692575`.
+- full layer `405` probe Day/Sunset/Night RMSE:
+  `0.0871007` / `0.0763021` / `0.0712025`.
+- prefix probe recovery:
+  - prefix `0`: `0.0802839` / `0.0925228` / `0.18191`
+  - prefix `1`: `0.0863583` / `0.0986711` / `0.187231`
+  - prefix `2`: `0.0862968` / `0.10019` / `0.187643`
+  - prefix `7`: `0.0865852` / `0.0767716` / `0.0711158`
+  - prefix `11`: `0.0880205` / `0.07639` / `0.0712083`
+- prefix lab reports:
+  `/tmp/yakkai-arona-protected-default-rt-boundary/prefix-labs/`
+- selected hypothesis: `effect-chain-recovery`, not
+  `default-rt-composition`. Prefix `1/2/7/11` all keep the promoted generic
+  route stable (`card` input, `puppet-skinned-mesh` final display,
+  `effect-layer-node-final-publish`), and
+  `default-before-effect->default-after-effect` remains `stable`.
+- no renderer behavior change was made from this evidence. The Night gap is
+  reduced only after the LUT/waterwaves prefix enters the chain, so the next
+  renderer target should be a narrower effect-chain boundary with Windows
+  pass evidence rather than another puppet route/default-RT patch.
+- prefix `12` was not treated as evidence in this slice because the current
+  headless Qt harness session aborts under `xvfb-run` in
+  `QGuiApplicationPrivate::createEventDispatcherEv` before renderer logging.
+  A real-session run reached first frame, so this is a tooling/runtime
+  blocker, not an Arona render-boundary result.
+
+2026-06-10 layer `405` prefix 2-7 effect-chain stop:
+
+- artifact root:
+  `/tmp/yakkai-arona-prefix-2-7-effect-chain/`
+- prefix RMSE table:
+  - prefix `2`: `0.0858372` / `0.0989135` / `0.187149`
+  - prefix `3`: `0.0858825` / `0.081035` / `0.0709242`
+  - prefix `4`: `0.0863312` / `0.0787674` / `0.0713879`
+  - prefix `5`: `0.0863936` / `0.079858` / `0.0718435`
+  - prefix `6`: `0.0861431` / `0.0792446` / `0.0709687`
+  - prefix `7`: `0.0862672` / `0.0789933` / `0.0713856`
+- first recovery boundary: prefix `2 -> 3`, where layer `405` adds the first
+  `LUT Loader` pair after the two pulse passes.
+- protected puppet lab evidence: route/default-RT stayed stable across the
+  boundary (`card` input, `puppet-skinned-mesh` final,
+  `effect-layer-node-final-publish`, and
+  `default-before-effect->default-after-effect=stable`).
+- selected hypothesis: `protected-local-lut-boundary`. The prefix-3 all-LUT
+  drilldown found layer `405`'s actual local LUT stage
+  `material-output-local-3-0` closely matches the local model
+  (`best rmse=0.006367853`, manifest candidate `0.006378575`), while prefix `7`
+  only looked bad for layer `405` because later effects left the lab with
+  `missing-local-material-output`.
+- no renderer behavior change was made and no Arona-specific production logic
+  was added. This evidence stops short of a safe generic renderer patch.
+- next target: downstream final-publish/composite drift or Windows per-pass
+  evidence for layer `405`; do not restart from route/default-RT, regular
+  `lut_loader`, texture decode, or regular LUT policy unless new evidence
+  contradicts this slice.
+- harness/tooling notes: the first local capture attempt hit `/tmp` disk quota
+  while writing prefix `3`; stale Yakkai scratch artifacts were removed and the
+  fresh prefix `3..7` run completed. No Qt event-dispatcher blocker recurred in
+  this slice.
+
+2026-06-10 layer `405` final-publish/composite boundary stop:
+
+- artifact root:
+  `/tmp/yakkai-arona-final-publish-composite-boundary/`
+- normal comparator Day/Sunset/Night RMSE:
+  `0.0885455` / `0.0758132` / `0.0716605`.
+- prefix RMSE table:
+  - prefix `2`: `0.0861582` / `0.100437` / `0.186719`
+  - prefix `3`: `0.085912` / `0.0769291` / `0.0708945`
+  - prefix `7`: `0.0861397` / `0.0766664` / `0.0729421`
+- protected puppet lab evidence: route/default-RT stayed stable across the
+  boundary (`card` input, `puppet-skinned-mesh` final,
+  `effect-layer-node-final-publish`, and
+  `default-before-effect->default-after-effect=stable`).
+- prefix `3` local LUT evidence matched the model. Layer `405` Night best RMSE
+  was `0.00552772032096982` with manifest RMSE `0.005535931792110205`; Sunset
+  best/manifest RMSE was `0.00455861771479249`. Prefix `7` layer `405` reported
+  `missing-local-material-output`, so it is not evidence of bad LUT shader math.
+- final-publish color-drift remained directional evidence only because
+  final-publish is a post-frame `_rt_default` dump, not an isolated final
+  display node capture.
+- Windows inventory found optional prefixes and waterwaves shader-debug
+  evidence, but not layer `405` final-publish/composite pass-boundary captures,
+  final publish input texture, default framebuffer before/after, or
+  final-publish blend/SRV metadata.
+- selected outcome: `windows-per-pass-needed`. No renderer behavior change was
+  made and no Arona-specific production logic was added.
+
+2026-06-10 layer `405` Windows final-publish/composite evidence intake:
+
+- expected bundle path:
+  `yakkai_arona/captures/layer405_final_publish_composite/`
+- actual bundle path:
+  `yakkai_arona/layer405_final_publish_composite/`
+- analysis summary:
+  `/tmp/yakkai-arona-windows-final-publish-composite-analysis/summary.md`
+- bundle status: `partial_evidence_exported_unmapped_variants`.
+- requested Day/Sunset/Night variants remain missing; the received evidence has
+  two unmapped representatives, `capture_one_frame90` and
+  `capture_two_frame104`.
+- both representatives include effect input, prefix `3`, prefix `7`, final
+  publish input, default before/after, LUT-pair SRVs, final-publish blend/SRV
+  metadata, and lower-ribbon/transparent-edge pixel histories.
+- Windows final publish event `621` samples SRV0 resource `374`
+  (`4160x2923`, `R8G8B8A8_UNORM`) into swapchain resource `65`
+  (`2560x1440`, `R8G8B8A8_UNORM`) with blend state
+  `color=(SrcAlpha Add InvSrcAlpha)`, `alpha=(SrcAlpha Add InvSrcAlpha)`, and
+  `writeMask=7`. Treat `writeMask=7` as RGB-only final publish evidence.
+- pixel history supports the color-mask reading: transparent alpha-zero samples
+  do not change the default target, while partial-alpha samples change RGB and
+  keep default alpha opaque.
+- At this partial-intake stage, Yakkai prefix `3`/`7` manifests recorded final
+  blend mode `1`, route
+  `card -> puppet-skinned-mesh -> effect-layer-node-final-publish`, and
+  `_rt_default` post-frame capture, but did not expose the actual Vulkan final
+  color write mask. Current code could use RGB-only or RGBA masks depending on
+  camera/global target state, so this is not yet a safe renderer patch.
+- direct `final-publish-input` versus default-delta image comparison needs
+  registration because the Windows layer input is `4160x2923` and the swapchain
+  target is `2560x1440`.
+- selected outcome from the partial intake was `windows-behavior-not-yet-modeled`.
+  No renderer behavior change was made and no Arona-specific production logic
+  was added.
+- fresh Windows archive `yakkai_arona/layer405_final_publish_composite_fresh.zip`
+  supersedes the source-manifest blocker. It validates as
+  `complete_fresh_live_rdc_labeled_variants` with capture-session labels:
+  day `timeofday=1`, sunset `timeofday=2`, and night `timeofday=3`.
+- fresh pass mappings:
+  - day: effect input `344 / 377`, prefix `3` `394 / 377`, final layer output
+    `601 / 374`, final publish `621 / 374`.
+  - sunset: effect input `527 / 1736`, prefix `3` `577 / 1736`, final layer
+    output `804 / 1736`, final publish `824 / 1736`.
+  - night: effect input `902 / 1769`, prefix `3` `952 / 1769`, final layer
+    output `1179 / 1769`, final publish `1199 / 1769`.
+- all fresh variants publish to swapchain resource `65` (`2560x1440`,
+  `R8G8B8A8_UNORM`) from `4160x2923` layer targets with final-publish blend
+  `color=(SrcAlpha Add InvSrcAlpha)`, `alpha=(SrcAlpha Add InvSrcAlpha)`, and
+  `writeMask=7`.
+- `tools/arona_layer405_fresh_publish_compare.py` now performs the Yakkai-side
+  intake. After rebuilding the backend and rerunning the Arona comparator into
+  `/tmp/yakkai-layer405-fresh-yakkai-rerun`, Yakkai manifests expose
+  `debugEffectPassStates` candidates for `_rt_default` final publish with
+  `blendMode=1`, `blendEnabled=true`, `colorMask=RGB`, and `colorMaskBits=7`.
+  The comparator classifies the selected pass as
+  `yakkai-final-publish-rgb-mask`, so final-publish color-mask parity matches
+  the fresh Windows RGB-only evidence.
+- bounded layer-local-to-default image registration remains weak for all fresh
+  variants: Day/Sunset/Night after RMSE
+  `0.41506639` / `0.41790435` / `0.29333428`, all classified as
+  `weak-or-unregistered-match`. This means the next target should be stronger
+  pixel-history/default-delta registration keyed to known final-publish sample
+  points, not threshold tuning and not a renderer color-mask patch.
+- the default-delta oracle now performs that pixel-history keyed check. The
+  real run in `/tmp/yakkai-layer405-default-delta-oracle` still reports
+  `yakkai-final-publish-rgb-mask`, but every variant/sample is
+  `default-delta-mismatch`: lower-ribbon delta RMSE is
+  Day/Sunset/Night `0.20989248` / `0.22991677` / `0.18721128`, and
+  transparent-edge delta RMSE is `0.26572305` / `0.00554594` /
+  `0.00226412`. All sampled Yakkai deltas have zero magnitude at the checked
+  default-target pixels, while Windows final-publish pixel history changes RGB.
+  The locator follow-up in `/tmp/yakkai-layer405-default-delta-locator`
+  confirms every `default-before-effect -> default-after-effect` sample is
+  `missing-default-delta` with zero magnitude and no nearest nonzero delta, but
+  every optional `default-after-effect -> final-publish` boundary sample is
+  `delta-at-windows-sample`. Lower-ribbon boundary magnitudes are
+  Day/Sunset/Night `1.08272946` / `1.19851887` / `0.9906832`; transparent-edge
+  magnitudes are `0.04913712` / `0.14280111` / `0.19422655`. The next target is
+  a generic debug capture timing/final-publish boundary investigation around
+  layer `405`, not color-mask parity, not projection/source-coordinate mapping,
+  not registration threshold tuning, and not another Windows capture request.
+- no additional Windows capture is currently required for the color-mask
+  question. No renderer behavior change was made and no Arona-specific
+  production logic was added. Any future color-mask or blend-mode renderer
+  change needs a separate renderer-fix plan with before/after Arona comparison,
+  smoke/deep-smoke validation, and human visual review.
 
 ### Slice D: Particles, Bokeh, And Minor Effects
 

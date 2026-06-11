@@ -4,11 +4,14 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import math
 import os
 import shlex
+import signal
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -369,6 +372,23 @@ def scene_properties_json_for_scene(scene: dict[str, Any], source: Path) -> str 
     return json.dumps(merged, sort_keys=True, separators=(",", ":"))
 
 
+def project_properties_json_for_web(scene: dict[str, Any], source: Path) -> str | None:
+    if "scenePropertiesJson" in scene:
+        return scene.get("scenePropertiesJson")
+
+    properties = load_project_scene_properties(source)
+    if "scenePropertyOverrides" in scene:
+        overrides = scene["scenePropertyOverrides"]
+        if not isinstance(overrides, dict):
+            raise ValueError(f"scene {scene.get('id', '<unknown>')} scenePropertyOverrides must be an object")
+        properties = apply_scene_property_overrides(properties, overrides)
+
+    if not properties:
+        return None
+
+    return json.dumps(properties, sort_keys=True, separators=(",", ":"))
+
+
 def scene_result_metadata(
     scene: dict[str, Any],
     manifest: dict[str, Any],
@@ -382,7 +402,14 @@ def scene_result_metadata(
     if workshop_override:
         paths["workshop"] = workshop_override
     source = expand_manifest_path(scene["source"], paths, root)
-    return str(scene.get("sourceSceneId", scene["id"])), scene_properties_json_for_scene(scene, source)
+    project_type = project_type_for_scene(scene)
+    if project_type == "scene":
+        scene_properties_json = scene_properties_json_for_scene(scene, source)
+    elif project_type == "web":
+        scene_properties_json = project_properties_json_for_web(scene, source)
+    else:
+        scene_properties_json = scene.get("scenePropertiesJson")
+    return str(scene.get("sourceSceneId", scene["id"])), scene_properties_json
 
 
 def select_scenes(manifest: dict[str, Any], suite: str) -> list[dict[str, Any]]:
@@ -438,6 +465,17 @@ def read_text_command(command: list[str]) -> str:
     if completed.returncode != 0:
         raise RuntimeError((completed.stderr or completed.stdout).strip())
     return completed.stdout.strip()
+
+
+def describe_return_code(returncode: int) -> str:
+    if returncode >= 0:
+        return f"exit {returncode}"
+    signal_number = -returncode
+    try:
+        signal_name = signal.Signals(signal_number).name
+    except ValueError:
+        signal_name = "UNKNOWN"
+    return f"signal {signal_number} {signal_name}"
 
 
 def image_dimensions(commands: ImageMagickCommands, image: Path) -> str:
@@ -524,6 +562,21 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def project_type_for_scene(scene: dict[str, Any]) -> str:
+    project_type = str(scene.get("projectType", "scene")).strip().lower()
+    if project_type not in {"scene", "video", "web"}:
+        raise ValueError(f"unsupported projectType for {scene.get('id', '<unknown>')}: {project_type}")
+    return project_type
+
+
+def backend_for_project_type(project_type: str, scene: dict[str, Any]) -> str:
+    if "backend" in scene:
+        return str(scene["backend"])
+    if project_type == "scene":
+        return "paper"
+    return project_type
+
+
 def build_harness_base_command(
     harness: Path,
     scene: dict[str, Any],
@@ -532,10 +585,11 @@ def build_harness_base_command(
     capture_size: dict[str, int] | None = None,
     scene_properties_json: str | None = None,
 ) -> list[str]:
+    project_type = project_type_for_scene(scene)
     command = [
         str(harness),
         "--backend",
-        scene.get("backend", "paper"),
+        backend_for_project_type(project_type, scene),
         "--source",
         str(source),
         "--assets",
@@ -548,6 +602,10 @@ def build_harness_base_command(
         command += ["--window-size", f"{capture_size['width']}x{capture_size['height']}"]
     if scene_properties_json is not None:
         command += ["--scene-properties-json", scene_properties_json]
+    harness_args = scene.get("harnessArgs", [])
+    if not isinstance(harness_args, list) or not all(isinstance(arg, str) for arg in harness_args):
+        raise ValueError(f"scene {scene.get('id', '<unknown>')} harnessArgs must be a list of strings")
+    command += harness_args
     return command
 
 
@@ -565,9 +623,46 @@ def expected_sequence_paths(sequence_dir: Path, sequence: dict[str, Any]) -> lis
     ]
 
 
+def live_review_video_request(scene: dict[str, Any]) -> dict[str, int | str] | None:
+    request = scene.get("reviewVideo")
+    if request is None:
+        return None
+    if not isinstance(request, dict):
+        raise ValueError(f"scene {scene.get('id', '<unknown>')} reviewVideo must be an object")
+
+    name = str(request.get("name", "live"))
+    if not name or "/" in name or "\\" in name or name in {".", ".."}:
+        raise ValueError(f"scene {scene.get('id', '<unknown>')} reviewVideo name must be a contained file stem")
+
+    try:
+        duration_ms = int(request.get("durationMs", 10000))
+        fps = int(request.get("fps", 30))
+        start_delay_ms = int(request.get("startDelayMs", 0))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"scene {scene.get('id', '<unknown>')} reviewVideo durationMs, fps, and startDelayMs must be integers") from exc
+
+    if duration_ms <= 0:
+        raise ValueError(f"scene {scene.get('id', '<unknown>')} reviewVideo durationMs must be positive")
+    if fps <= 0:
+        raise ValueError(f"scene {scene.get('id', '<unknown>')} reviewVideo fps must be positive")
+    if start_delay_ms < 0:
+        raise ValueError(f"scene {scene.get('id', '<unknown>')} reviewVideo startDelayMs must be non-negative")
+
+    return {
+        "name": name,
+        "durationMs": duration_ms,
+        "fps": fps,
+        "startDelayMs": start_delay_ms,
+    }
+
+
 def run_command(command: list[str], log_path: Path, timeout_seconds: float) -> int:
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
     with log_path.open("w", encoding="utf-8", errors="replace") as log:
+        log.write(f"COMMAND: {shlex.join(command)}\n")
+        log.write(f"TIMEOUT_SECONDS: {timeout_seconds}\n\n")
+        log.flush()
         try:
             completed = subprocess.run(
                 command,
@@ -577,11 +672,17 @@ def run_command(command: list[str], log_path: Path, timeout_seconds: float) -> i
                 check=False,
             )
         except subprocess.TimeoutExpired:
+            elapsed = time.monotonic() - started
             log.write(f"\nTIMEOUT after {timeout_seconds}s: {shlex.join(command)}\n")
+            log.write(f"EXIT: exit 124 elapsedSeconds={elapsed:.3f}\n")
             return 124
         except FileNotFoundError:
+            elapsed = time.monotonic() - started
             log.write(f"COMMAND NOT FOUND: {shlex.join(command)}\n")
+            log.write(f"EXIT: exit 127 elapsedSeconds={elapsed:.3f}\n")
             return 127
+        elapsed = time.monotonic() - started
+        log.write(f"\nEXIT: {describe_return_code(completed.returncode)} elapsedSeconds={elapsed:.3f}\n")
     return completed.returncode
 
 
@@ -617,6 +718,7 @@ def run_scene_captures(
     capture_dir = scene_dir / "captures"
     log_path = scene_dir / "harness.log"
     notes: list[str] = []
+    project_type = project_type_for_scene(scene)
 
     if not harness.exists():
         return "fail", None, [], [f"harness not found: {harness}"]
@@ -626,17 +728,28 @@ def run_scene_captures(
         return "fail", None, [], [f"assets directory not found: {assets}"]
 
     if scene_properties_json is _UNRESOLVED_SCENE_PROPERTIES_JSON:
-        try:
-            scene_properties_json = scene_properties_json_for_scene(scene, source)
-        except ValueError as exc:
-            return "fail", None, [], [str(exc)]
+        if project_type == "scene":
+            try:
+                scene_properties_json = scene_properties_json_for_scene(scene, source)
+            except ValueError as exc:
+                return "fail", None, [], [str(exc)]
+        elif project_type == "web":
+            try:
+                scene_properties_json = project_properties_json_for_web(scene, source)
+            except ValueError as exc:
+                return "fail", None, [], [str(exc)]
+        else:
+            scene_properties_json = scene.get("scenePropertiesJson")
 
     capture_size = merged_capture_size(manifest, scene)
     captures = scene.get("captures", [])
     times = [str(capture["timeMs"]) for capture in captures]
     actuals: list[Path] = []
     if times:
-        command = build_harness_base_command(harness, scene, source, assets, capture_size, scene_properties_json)
+        try:
+            command = build_harness_base_command(harness, scene, source, assets, capture_size, scene_properties_json)
+        except ValueError as exc:
+            return "fail", None, [], [str(exc)]
         command += ["--capture-dir", str(capture_dir / "stills"), "--capture-times-ms", ",".join(times)]
         timeout = harness_capture_timeout_seconds(max(int(value) for value in times))
         code = run_command(command, log_path, timeout)
@@ -654,7 +767,10 @@ def run_scene_captures(
         sequence_dir = capture_dir / sequence["name"]
         sequence_log_path = scene_dir / f"{sequence['name']}.log"
         sequence_arg = f"{sequence['startMs']}:{sequence['frames']}:{sequence['intervalMs']}"
-        command = build_harness_base_command(harness, scene, source, assets, capture_size, scene_properties_json)
+        try:
+            command = build_harness_base_command(harness, scene, source, assets, capture_size, scene_properties_json)
+        except ValueError as exc:
+            return "fail", None, actuals, [str(exc)]
         command += ["--capture-dir", str(sequence_dir), "--capture-sequence", sequence_arg]
         capture_end_ms = sequence["startMs"] + sequence["frames"] * sequence["intervalMs"]
         timeout = harness_capture_timeout_seconds(capture_end_ms)
@@ -671,6 +787,35 @@ def run_scene_captures(
                 f"missing sequence {sequence['name']} frames: {', '.join(missing_sequence)}"
             ]
         actuals.extend(sequence_actuals)
+
+    try:
+        live_review_video = live_review_video_request(scene)
+    except ValueError as exc:
+        return "fail", None, actuals, [str(exc)]
+    if live_review_video is not None:
+        try:
+            command = build_harness_base_command(harness, scene, source, assets, capture_size, scene_properties_json)
+        except ValueError as exc:
+            return "fail", None, actuals, [str(exc)]
+        clip_path = scene_dir / "review-clips" / f"{live_review_video['name']}.mp4"
+        command += [
+            "--record",
+            str(clip_path),
+            "--record-duration-ms",
+            str(live_review_video["durationMs"]),
+            "--record-fps",
+            str(live_review_video["fps"]),
+            "--record-start-delay-ms",
+            str(live_review_video["startDelayMs"]),
+        ]
+        live_review_log_path = scene_dir / f"{live_review_video['name']}.log"
+        timeout = harness_capture_timeout_seconds(int(live_review_video["startDelayMs"]) + int(live_review_video["durationMs"]))
+        code = run_command(command, live_review_log_path, timeout)
+        log_path = live_review_log_path
+        if code != 0:
+            return "fail", live_review_log_path, actuals, [f"harness live review video {live_review_video['name']} exited {code}"]
+        if not clip_path.exists():
+            return "fail", live_review_log_path, actuals, [f"missing live review video: {clip_path.name}"]
 
     return "pass", log_path, actuals, notes
 
@@ -855,7 +1000,18 @@ def dataclass_to_json(value: Any) -> Any:
     return value
 
 
-def write_review_clip(ffmpeg: str | None, frames_dir: Path, output: Path, fps: int = 30) -> str | None:
+def review_clip_framerate_for_interval_ms(interval_ms: int) -> str:
+    if interval_ms <= 0:
+        raise ValueError("review clip intervalMs must be positive")
+    divisor = math.gcd(1000, interval_ms)
+    numerator = 1000 // divisor
+    denominator = interval_ms // divisor
+    if denominator == 1:
+        return str(numerator)
+    return f"{numerator}/{denominator}"
+
+
+def write_review_clip(ffmpeg: str | None, frames_dir: Path, output: Path, fps: int | str = 30) -> str | None:
     if ffmpeg is None:
         return None
     if not sorted(frames_dir.glob("frame-*.png")):
@@ -1099,6 +1255,7 @@ def main(argv: list[str] | None = None) -> int:
                 ffmpeg,
                 frames_dir,
                 run_dir / scene["id"] / "review-clips" / f"{sequence['name']}.mp4",
+                fps=review_clip_framerate_for_interval_ms(int(sequence["intervalMs"])),
             )
             if clip:
                 print(f"  review clip: {clip}")

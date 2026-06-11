@@ -20,8 +20,9 @@ Coverage buckets track source Workshop ids. Smoke variants use case-specific ids
 | scene-script-bindings | SceneScript Bindings And Runtime | candidate | active | yes | 3301291394, 3326873240 |
 | overlay-video-texture | Overlay Or Small Embedded Video Texture | candidate | active | yes | 2788691565 |
 | static-model-material-lighting | Static Model, Material, And Lighting | candidate | active | yes | 1576514332 |
-| we-web-wallpaper | Wallpaper Engine Web Project | requiresHarness | requiresHarness | yes | 1509243786 |
-| we-video-wallpaper | Wallpaper Engine Video Project | requiresHarness | requiresHarness | yes | 2478419118 |
+| we-web-wallpaper | Wallpaper Engine Web Project And Audio Shim | candidate | candidate | yes | 1509243786, 893418273 |
+| we-web-video-wallpaper | Wallpaper Engine Web Project With Video Element | candidate | candidate | yes | 779812076 |
+| we-video-wallpaper | Wallpaper Engine Video Project | candidate | candidate | yes | 2478419118, 874499201 |
 
 ## Active Baselines
 
@@ -35,7 +36,11 @@ Coverage buckets track source Workshop ids. Smoke variants use case-specific ids
 
 ## Candidate Fixtures
 
-No local scene-package candidates are currently waiting for deep promotion.
+- `1509243786` CWAV Engine: WE web project candidate using the web harness, WE viewport/property compatibility, and harness-only synthetic audio for visible visualizer motion. Real Linux audio capture remains deferred. Local review on 2026-06-09 showed the authored defaults can place the clock and date tightly enough to overlap at the 1280x720 harness size; keep tests on the authored defaults and do not add fixture-only placement overrides. A far-future Plasma settings feature should expose or import WE Web user properties so users can adjust values such as `DateY` themselves.
+- `893418273` Audio Visualizer: WE web/audio stress candidate with canvas visualizer logic, Wallpaper Engine audio listener usage, and optional HTML video background.
+- `779812076` Rain Drops (heavy rain): preferred WE web-video candidate with local video media plus visible WebGL/canvas rain animation. It does not require the user interaction that makes `823274093` Silk a far-future interactive-web candidate.
+- `2478419118` Blue Archive Shiroko Live2D: WE video decode candidate using the video harness against `shiroko.mp4`; sampled windows showed motion, but the source is visually calm and is not the strong-motion fixture.
+- `874499201` TIMDRIFT II Mountains/Clouds Timelapse: preferred plain WE video motion candidate after a quick source-frame probe showed stronger normal-speed motion than Shiroko.
 
 ## Phase 1 Probe Notes
 
@@ -48,8 +53,7 @@ No local scene-package candidates are currently waiting for deep promotion.
 
 ## Harness Gaps
 
-- `1509243786` CWAV Engine: Wallpaper Engine web project; requires a web or Plasma-live capture harness.
-- `2478419118` Blue Archive Shiroko Live2D: Wallpaper Engine video project; requires a video wallpaper or Plasma-live capture harness.
+No current harness-only blocker remains for the tracked WE Web and WE Video candidates. They still need reviewed PNG baselines before entering active deep or release suites. Interactive-web wallpapers such as `823274093` Silk remain deferred until the harness can synthesize input.
 
 ## Promotion Rule
 

@@ -10,6 +10,8 @@ Why it exists:
 Current backends:
 - `system`: uses the currently installed `com.github.catsout.wallpaperEngineKde` `SceneViewer`
 - `paper`: uses the repo-owned `io.team7.scene` native backend module
+- `video`: uses the package `VideoBackground.qml` adapter for plain video wallpaper sources
+- `web`: uses the package `WebBackground.qml` adapter for Wallpaper Engine web wallpaper sources
 
 Example usage after building:
 
@@ -21,9 +23,33 @@ Example usage after building:
   --fill crop
 ```
 
+Minimal video backend example:
+
+```bash
+./yakkai_scene_harness \
+  --backend video \
+  --source /path/to/wallpaper.mp4 \
+  --fill crop \
+  --hide-info-overlay
+```
+
+Minimal web backend example:
+
+```bash
+./yakkai_scene_harness \
+  --backend web \
+  --source /path/to/index.html \
+  --scene-properties-json '{}' \
+  --hide-info-overlay
+```
+
+The web backend installs the Wallpaper Engine compatibility script before loading the page URL. The shim forwards WE user/general properties, exposes WE-style viewport globals (`window.width`/`window.height`), and provides registration-compatible audio/media listener APIs so web projects that initialize media modules can still reach `wallpaperPropertyListener`. Runtime diagnostics remain available through backend status/logs, but the on-wallpaper diagnostics overlay is hidden by default during capture runs so valid web pages without a property listener are not covered by Yakkai status text.
+
+WE Web candidates are promotion-ready only when capture sequences exit cleanly and reviewed clips show full web content without Yakkai status overlays. If a smoke-runner launch reports a negative signal-style exit while the same command succeeds when run directly through the harness, treat that as a QtWebEngine harness launch/teardown blocker instead of promoting the candidate.
+
 Useful flags:
-- `--backend system|paper`
-- `--source /absolute/path/to/scene.json`
+- `--backend system|paper|video|web`
+- `--source /absolute/path/to/scene.json`, `/absolute/path/to/scene.pkg`, a local video file, or a web wallpaper `index.html`
 - `--assets /absolute/path/to/wallpaper_engine/assets`
 - `--fill crop|fit|stretch`
 - `--window-size WIDTHxHEIGHT` (defaults to `1600x900`; smoke tests set this from `scenes.json`)
@@ -32,11 +58,15 @@ Useful flags:
 - `--unmuted`
 
 Capture flags:
-- `--capture path --capture-delay-ms ms` waits for the backend's first rendered frame, then saves one capture after the requested delay.
-- `--capture-dir path --capture-times-ms 1000,3000,8000` waits for the backend's first rendered frame, then captures fixed timestamps in one harness process and writes `frame-00001000ms.png`, `frame-00003000ms.png`, and `frame-00008000ms.png`.
-- `--capture-dir path --capture-sequence 5000:60:33` waits for the backend's first rendered frame, then captures a sequence starting at 5000ms with 60 frames spaced 33ms apart and writes `frame-0000.png`, `frame-0001.png`, and so on.
+- `--capture path --capture-delay-ms ms` waits for the backend readiness signal, then saves one capture after the requested delay.
+- `--capture-dir path --capture-times-ms 1000,3000,8000` waits for the backend readiness signal, then captures fixed timestamps in one harness process and writes `frame-00001000ms.png`, `frame-00003000ms.png`, and `frame-00008000ms.png`.
+- `--capture-dir path --capture-sequence 5000:60:33` waits for the backend readiness signal, then captures a sequence starting at 5000ms with 60 frames spaced 33ms apart and writes `frame-0000.png`, `frame-0001.png`, and so on.
+- `--capture-exit-mode graceful|immediate` controls harness-only shutdown after capture. `graceful` is the default and runs the backend shutdown hook before normal Qt exit. `immediate` exits the process after the final capture save returns and is intended only for QtWebEngine smoke/debug captures where teardown is known to trip after frames are already written. Do not use it with `--debug-effect-captures`.
+- `--record path --record-duration-ms ms --record-fps fps` waits for backend readiness, repeatedly grabs the harness window, and pipes raw RGBA frames to `ffmpeg` for a live MP4 review artifact. `--record-start-delay-ms ms` waits after readiness before the first recorded frame. Recording cannot be combined with PNG capture flags; PNG captures remain the regression baseline source of truth.
 
 Debug flags:
+- `--debug-synthetic-audio` emits harness-only synthetic Wallpaper Engine web audio data into `window.wpeQml.sigAudio`. Use it only with `--backend web` when validating audio-reactive web wallpaper behavior; it does not capture real Linux audio and does not change Plasma wallpaper behavior.
+- `--debug-synthetic-audio-bins count` and `--debug-synthetic-audio-interval-ms ms` tune the synthetic web audio payload shape and timer interval.
 - `--debug-effect-captures path` writes effect-chain diagnostic captures and `manifest.json` for the repo-owned `paper` backend. The flag is rejected for `--backend system`.
 - `--debug-effect-capture-delay-ms ms` waits for the requested scene time before dumping debug effect captures. Use the same value as `--capture-delay-ms` when a PNG and TGA evidence need to describe the same delayed frame.
 - `--debug-effect-probe-layers ids` renders specific stripped puppet mixed-chain layer IDs only for debug capture. It requires `--debug-effect-captures`; comma-separated IDs such as `168,22` are accepted.
@@ -52,8 +82,8 @@ The debug manifest records scene id, layer id/name/type, `EffectPolicy` preserve
 
 Use multi-capture with `--hide-info-overlay` for render regression tests so timing and scene setup stay inside one process and baselines are not tied to local absolute paths. Capture sequences are limited to 3600 frames.
 Invalid multi-capture schedules are rejected, including empty fixed-time elements, duplicate fixed timestamps, negative values, overflow, and sequences over 3600 frames.
-Capture mode exits with status `7` if no backend first-frame signal arrives within 60 seconds. That usually means the scene failed before rendering, the backend wrapper did not forward a first-frame signal, or the selected backend does not expose one.
-After the final capture, the harness asks the loaded backend to pause and waits briefly before exiting. This gives the render thread time to drain before Qt tears down the window and graphics context.
+Capture and recording modes exit with status `7` if no backend readiness signal arrives within 60 seconds. That usually means the scene failed before rendering, a video source did not decode a frame, a web source did not finish loading, the backend wrapper did not forward a readiness signal, or the selected backend does not expose one.
+In the default graceful capture exit mode, the harness asks the loaded backend to pause and waits briefly before exiting. This gives the render thread time to drain before Qt tears down the window and graphics context. Immediate capture exit mode intentionally skips that shutdown hook and Qt teardown path after the PNG capture or MP4 recording has been finalized.
 
 The harness is expected to evolve faster than the Plasma package. Keep backend experiments here first, then move stable behavior back into `Wallpaper Engine Scene Native`.
 

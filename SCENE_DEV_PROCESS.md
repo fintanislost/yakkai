@@ -210,6 +210,80 @@ whose metadata includes active physics controls while leaving default Plasma beh
 comparison artifacts until the focused scene and regression gates have passed
 and a human visual review has approved default-on behavior.
 
+### `tools/arona_layer405_fresh_publish_compare.py`
+
+Fresh Windows final-publish evidence comparator for Arona layer `405`. It
+validates the ignored local archive
+`yakkai_arona/layer405_final_publish_composite_fresh.zip`, checks that the
+Day/Sunset/Night entries are fresh capture-session-labeled RDC exports, parses
+Windows final-publish blend/SRV state and pixel-history rows, and optionally
+correlates that evidence with Yakkai debug-effect manifests.
+
+Run it against the Windows package alone when checking the package shape and
+layer-local-to-default-target registration:
+
+```bash
+python3 tools/arona_layer405_fresh_publish_compare.py \
+  --windows yakkai_arona/layer405_final_publish_composite_fresh.zip \
+  --output /tmp/yakkai-layer405-fresh-publish-compare
+```
+
+Run it with a fresh Arona comparator output root when checking Yakkai's
+final-publish pass state:
+
+```bash
+python3 tools/arona_layer405_fresh_publish_compare.py \
+  --windows yakkai_arona/layer405_final_publish_composite_fresh.zip \
+  --yakkai-root /tmp/yakkai-layer405-fresh-yakkai-rerun \
+  --output /tmp/yakkai-layer405-default-delta-locator
+```
+
+Current fresh Windows evidence publishes a `4160x2923` layer target into the
+`2560x1440` default target with final-publish `writeMask=7`, which is RGB-only.
+After rebuilding the backend plugin and harness, Yakkai debug manifests classify
+the matching `_rt_default` final-publish pass as
+`yakkai-final-publish-rgb-mask`; the earlier `unexpected-mask` result came from
+a stale backend manifest without `debugEffectPassStates` or `colorMaskBits`.
+When changing this area, rebuild the backend module directly:
+
+```bash
+cmake --build build/native/scene_backend --target yakkai_scene_backend yakkai_scene_backendplugin
+cmake --build build/native/scene_harness --target yakkai_scene_harness
+```
+
+The current image registration is intentionally conservative and reports
+`weak-or-unregistered-match` for all three fresh Windows variants. Treat that as
+evidence that the next diagnostic target is stronger pixel-history/default-delta
+registration keyed to final-publish sample points, not another color-mask patch.
+When `--yakkai-root` is supplied, the report writes
+`yakkaiDefaultDeltaOracle` and `yakkaiDefaultDeltaLocator` to `summary.json` and
+sample-level Markdown tables. The oracle samples Yakkai layer `405`
+`default-before-effect` and `default-after-effect` captures at the Windows
+final-publish pixel-history coordinates and compares Yakkai's RGB delta against
+Windows `pre_mod_rgba` to `post_mod_rgba` for `lowerRibbon` and
+`transparentEdge`. The locator searches the Yakkai default-target delta map for
+sample, nearest, and peak RGB changes and writes before/after/delta crop sheets
+under `locator-crops/`.
+
+Interpret locator results this way:
+
+| Locator result | Meaning | Next target |
+| --- | --- | --- |
+| `delta-at-windows-sample` | Exact coordinate has Yakkai delta | shader/blend/value parity at the point |
+| `delta-nearby` | Yakkai contribution exists near the Windows coordinate | projection, viewport, transform, or sample-coordinate mapping |
+| `delta-elsewhere` | Contribution exists far from the Windows point | layer/default-target registration or wrong source region |
+| `missing-default-delta` plus `boundaryAfterToFinalPublish=delta-*` | `default-after-effect` capture is too early, or final-publish capture is later | debug capture timing/final-publish boundary |
+| `missing-default-delta` with no boundary delta | Yakkai is not publishing the expected contribution | render graph/final-publish route |
+
+The current real run at `/tmp/yakkai-layer405-default-delta-locator` classifies
+every variant/sample as `missing-default-delta` from `default-before-effect` to
+`default-after-effect`, while `boundaryAfterToFinalPublish` is
+`delta-at-windows-sample` for Day/Sunset/Night. That routes the next
+investigation to the debug capture timing/final-publish boundary.
+The tool extracts local diagnostic archives and is intended for trusted local
+RenderDoc exports; it is not a general-purpose untrusted zip scanner. Full
+registration over the real package can take a few minutes.
+
 ### `tools/arona_ribbon_tip_boundary.py`
 
 Frame-sequence motion boundary helper for subtle Arona ribbon/bow defects. Pass

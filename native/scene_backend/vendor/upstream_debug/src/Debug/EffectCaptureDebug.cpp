@@ -971,10 +971,15 @@ bool writeEffectCaptureManifest(const Scene& scene)
             {"loadOp", state.loadOp},
             {"depthLoadOp", state.depthLoadOp},
             {"colorMask", state.colorMask},
+            {"colorMaskBits", state.colorMaskBits},
             {"blendMode", state.blendMode},
             {"blendEnabled", state.blendEnabled},
             {"preserveOutput", state.preserveOutput},
             {"usesDepth", state.usesDepth},
+            {"camera", state.camera},
+            {"nodeId", state.nodeId},
+            {"materialName", state.materialName},
+            {"debugPurpose", state.debugPurpose},
         });
     }
 
@@ -1012,6 +1017,7 @@ bool writeEffectCaptureManifest(const Scene& scene)
         {"captureCount", scene.debugEffectCaptureRecords.size()},
         {"captures", captures},
         {"passStates", passStates},
+        {"debugEffectPassStates", passStates},
         {"strippedCandidates", strippedCandidates},
         {"protectedPuppetDiagnostics", protectedPuppetDiagnostics},
         {"puppetAnimationLayerInventory", puppetAnimationLayerInventory},

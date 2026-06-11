@@ -12,13 +12,25 @@ Item {
 
     property url webSource: ""
     property bool muted: true
+    property bool captureExiting: false
     property string emptyMessage: qsTr("Select a Wallpaper Engine web wallpaper in the wallpaper settings.")
     property string projectTitle: ""
     property string userPropertiesJson: "{}"
     property bool pageLoaded: false
     property bool propertiesSent: false
+    property int propertyPushAttempts: 0
+    property bool compatScriptInstalled: false
     property string loadErrorText: ""
+    property string runtimeDiagnostics: ""
+    property bool showDiagnosticsOverlay: false
+    property bool debugSyntheticAudioEnabled: false
+    property int debugSyntheticAudioBins: 128
+    property int debugSyntheticAudioIntervalMs: 33
+    property int syntheticAudioStartAttempts: 0
+    property real debugSyntheticAudioRate: 0.18
     readonly property string logPrefix: "[Yakkai]"
+    readonly property int maxPropertyPushAttempts: 80
+    readonly property int maxSyntheticAudioStartAttempts: 40
     readonly property var generalProperties: ({ fps: 24 })
     readonly property var parsedUserProperties: parseUserProperties(userPropertiesJson)
     readonly property string statusText: {
@@ -41,18 +53,26 @@ Item {
         return ""
     }
     readonly property string diagnosticText: {
-        if (statusText.length === 0 && pageLoaded) {
+        if (statusText.length === 0 && pageLoaded && propertiesSent && runtimeDiagnostics.length === 0) {
             return ""
         }
+
+        const diagnostics = runtimeDiagnostics.length > 0
+            ? " | " + runtimeDiagnostics
+            : ""
 
         return qsTr("Title: %1 | URL: %2 | Properties sent: %3")
             .arg(projectTitle.length > 0 ? projectTitle : qsTr("Unknown"))
             .arg(String(webSource))
-            .arg(propertiesSent ? qsTr("yes") : qsTr("no"))
+            .arg(propertiesSent ? qsTr("yes") : qsTr("no")) + diagnostics
     }
 
     function log(message) {
         console.log(logPrefix + " " + message)
+    }
+
+    function shouldShowDiagnosticOverlay() {
+        return showDiagnosticsOverlay && diagnosticText.length > 0
     }
 
     function parseUserProperties(source) {
@@ -72,10 +92,11 @@ Item {
     }
 
     function pushProperties() {
-        if (!pageLoaded) {
+        if (captureExiting || !pageLoaded) {
             return
         }
 
+        propertyPushAttempts += 1
         const generalJson = JSON.stringify(generalProperties)
         const userJson = JSON.stringify(parsedUserProperties)
         const script = `
@@ -84,33 +105,249 @@ Item {
                     return false;
                 }
 
-                window.__paperGradientSetProperties(${generalJson}, ${userJson});
-                return true;
+                return window.__paperGradientSetProperties(${generalJson}, ${userJson}) === true;
             })();
         `
 
         webView.runJavaScript(script, function(result) {
+            if (captureExiting) {
+                return
+            }
+
             propertiesSent = result === true
 
             if (propertiesSent) {
-                log("sent WE web property payload for " + projectTitle)
+                propertyRetryTimer.stop()
+                runtimeDiagnostics = ""
+                log("sent WE web property payload for " + projectTitle + " after " + propertyPushAttempts + " attempt(s)")
             } else {
-                log("WE web property shim was not ready when payload was sent")
+                log("WE web property shim did not accept payload on attempt " + propertyPushAttempts)
+                schedulePropertyRetry()
             }
         })
     }
 
+    function schedulePropertyRetry() {
+        if (captureExiting || !pageLoaded || propertiesSent) {
+            propertyRetryTimer.stop()
+            return
+        }
+
+        if (propertyPushAttempts >= maxPropertyPushAttempts) {
+            propertyRetryTimer.stop()
+            log("WE web property payload was not accepted after " + propertyPushAttempts + " attempt(s)")
+            return
+        }
+
+        propertyRetryTimer.restart()
+    }
+
+    function loadWebSource() {
+        if (!compatScriptInstalled) {
+            return
+        }
+
+        webView.url = webSource
+    }
+
+    function updateRuntimeDiagnostics() {
+        if (!pageLoaded) {
+            runtimeDiagnostics = ""
+            return
+        }
+
+        const script = `
+            (function() {
+                function moduleState(name) {
+                    const target = window[name];
+                    if (!target) {
+                        return null;
+                    }
+
+                    let loaded = null;
+                    try {
+                        loaded = typeof target.loaded === "function" ? target.loaded() : null;
+                    } catch (error) {
+                        loaded = "error:" + String(error);
+                    }
+
+                    return {
+                        load: target.load || null,
+                        loaded: loaded
+                    };
+                }
+
+                const loaderElement = document.querySelector("#loader");
+                const loaderStyle = loaderElement ? window.getComputedStyle(loaderElement) : null;
+                const latest = window.__paperGradientLatestProperties || {};
+                const latestUser = latest.user || {};
+
+                return JSON.stringify({
+                    readyState: document.readyState,
+                    hasShim: typeof window.__paperGradientSetProperties === "function",
+                    hasListener: !!window.wallpaperPropertyListener,
+                    latestUserKeys: Object.keys(latestUser).length,
+                    loaderDisplay: loaderStyle ? loaderStyle.display : null,
+                    loaderOpacity: loaderElement ? (loaderElement.style.opacity || loaderStyle.opacity) : null,
+                    weather: moduleState("weather"),
+                    date: moduleState("date"),
+                    note: moduleState("note")
+                });
+            })();
+        `
+
+        webView.runJavaScript(script, function(result) {
+            runtimeDiagnostics = String(result ?? "")
+        })
+    }
+
+    function scheduleSyntheticAudioRetry() {
+        if (captureExiting || !pageLoaded || !debugSyntheticAudioEnabled) {
+            syntheticAudioRetryTimer.stop()
+            return
+        }
+
+        if (syntheticAudioStartAttempts >= maxSyntheticAudioStartAttempts) {
+            syntheticAudioRetryTimer.stop()
+            log("WE web synthetic audio did not start after " + syntheticAudioStartAttempts + " attempt(s)")
+            return
+        }
+
+        syntheticAudioRetryTimer.restart()
+    }
+
+    function startSyntheticAudio() {
+        if (captureExiting || !pageLoaded) {
+            syntheticAudioRetryTimer.stop()
+            return
+        }
+
+        if (!debugSyntheticAudioEnabled) {
+            stopSyntheticAudio()
+            return
+        }
+
+        syntheticAudioStartAttempts += 1
+        const bins = Math.max(8, debugSyntheticAudioBins)
+        const interval = Math.max(16, debugSyntheticAudioIntervalMs)
+        const phaseRate = debugSyntheticAudioRate
+        webView.runJavaScript(`
+            (function() {
+                if (!window.wpeQml || !window.wpeQml.sigAudio) {
+                    return false;
+                }
+
+                if (window.__yakkaiSyntheticAudioTimer) {
+                    clearInterval(window.__yakkaiSyntheticAudioTimer);
+                }
+
+                window.__yakkaiSyntheticAudioPhase = window.__yakkaiSyntheticAudioPhase || 0;
+                window.__yakkaiSyntheticAudioTimer = setInterval(function() {
+                    window.__yakkaiSyntheticAudioPhase += ${phaseRate};
+                    const values = [];
+                    for (let index = 0; index < ${bins}; ++index) {
+                        const wave = Math.sin(window.__yakkaiSyntheticAudioPhase + index * 0.21);
+                        const pulse = Math.sin(window.__yakkaiSyntheticAudioPhase * 0.37 + index * 0.07);
+                        values.push(Math.max(0, Math.min(1, 0.55 + wave * 0.35 + pulse * 0.10)));
+                    }
+                    window.wpeQml.sigAudio.emit(values);
+                }, ${interval});
+                return true;
+            })();
+        `, function(result) {
+            if (captureExiting) {
+                return
+            }
+
+            if (result === true) {
+                syntheticAudioRetryTimer.stop()
+                syntheticAudioStartAttempts = 0
+            } else {
+                scheduleSyntheticAudioRetry()
+            }
+        })
+    }
+
+    function stopSyntheticAudio() {
+        syntheticAudioRetryTimer.stop()
+        syntheticAudioStartAttempts = 0
+
+        if (!compatScriptInstalled) {
+            return
+        }
+
+        webView.runJavaScript(`
+            (function() {
+                if (window.__yakkaiSyntheticAudioTimer) {
+                    clearInterval(window.__yakkaiSyntheticAudioTimer);
+                    window.__yakkaiSyntheticAudioTimer = null;
+                }
+                return true;
+            })();
+        `)
+    }
+
+    function prepareForCaptureExit() {
+        captureExiting = true
+        propertyRetryTimer.stop()
+        runtimeDiagnosticsTimer.stop()
+        syntheticAudioRetryTimer.stop()
+        syntheticAudioStartAttempts = 0
+        webView.runJavaScript(`
+            (function() {
+                if (window.__yakkaiSyntheticAudioTimer) {
+                    clearInterval(window.__yakkaiSyntheticAudioTimer);
+                    window.__yakkaiSyntheticAudioTimer = null;
+                }
+                document.querySelectorAll("video,audio").forEach(function(element) {
+                    try {
+                        element.pause();
+                    } catch (error) {
+                    }
+                });
+                return true;
+            })();
+        `)
+    }
+
     onWebSourceChanged: {
+        stopSyntheticAudio()
         pageLoaded = false
         propertiesSent = false
+        propertyPushAttempts = 0
+        runtimeDiagnostics = ""
+        propertyRetryTimer.stop()
         loadErrorText = ""
         log("webSource=" + String(webSource))
+        loadWebSource()
     }
     onUserPropertiesJsonChanged: {
         propertiesSent = false
+        propertyPushAttempts = 0
+        runtimeDiagnostics = ""
 
         if (pageLoaded) {
             pushProperties()
+        }
+    }
+    onDebugSyntheticAudioEnabledChanged: {
+        syntheticAudioStartAttempts = 0
+        if (debugSyntheticAudioEnabled) {
+            startSyntheticAudio()
+        } else {
+            stopSyntheticAudio()
+        }
+    }
+    onDebugSyntheticAudioBinsChanged: {
+        if (debugSyntheticAudioEnabled) {
+            syntheticAudioStartAttempts = 0
+            startSyntheticAudio()
+        }
+    }
+    onDebugSyntheticAudioIntervalMsChanged: {
+        if (debugSyntheticAudioEnabled) {
+            syntheticAudioStartAttempts = 0
+            startSyntheticAudio()
         }
     }
     onMutedChanged: log("web audio muted=" + muted)
@@ -123,8 +360,8 @@ Item {
     WebEngineView {
         id: webView
         anchors.fill: parent
-        url: root.webSource
-        audioMuted: root.muted
+        url: ""
+        audioMuted: root.captureExiting || root.muted
         activeFocusOnPress: false
 
         Component.onCompleted: {
@@ -176,13 +413,21 @@ Item {
                             const signalGeneral = createSignal();
                             const signalUser = createSignal();
                             const signalAudio = createSignal();
+                            const signalMediaProperties = createSignal();
+                            const signalMediaThumbnail = createSignal();
+                            const signalMediaTimeline = createSignal();
+                            const signalMediaPlayback = createSignal();
 
                             if (!window.wpeQml) {
                                 window.wpeQml = {
                                     loaded: true,
                                     sigGeneralProperties: signalGeneral,
                                     sigUserProperties: signalUser,
-                                    sigAudio: signalAudio
+                                    sigAudio: signalAudio,
+                                    sigMediaProperties: signalMediaProperties,
+                                    sigMediaThumbnail: signalMediaThumbnail,
+                                    sigMediaTimeline: signalMediaTimeline,
+                                    sigMediaPlayback: signalMediaPlayback
                                 };
                             } else {
                                 window.wpeQml.loaded = true;
@@ -195,6 +440,18 @@ Item {
                                 if (!window.wpeQml.sigAudio) {
                                     window.wpeQml.sigAudio = signalAudio;
                                 }
+                                if (!window.wpeQml.sigMediaProperties) {
+                                    window.wpeQml.sigMediaProperties = signalMediaProperties;
+                                }
+                                if (!window.wpeQml.sigMediaThumbnail) {
+                                    window.wpeQml.sigMediaThumbnail = signalMediaThumbnail;
+                                }
+                                if (!window.wpeQml.sigMediaTimeline) {
+                                    window.wpeQml.sigMediaTimeline = signalMediaTimeline;
+                                }
+                                if (!window.wpeQml.sigMediaPlayback) {
+                                    window.wpeQml.sigMediaPlayback = signalMediaPlayback;
+                                }
                             }
 
                             window.__paperGradientLatestProperties = {
@@ -202,8 +459,32 @@ Item {
                                 user: {}
                             };
 
+                            function updateWallpaperEngineViewportGlobals() {
+                                window.width = window.innerWidth;
+                                window.height = window.innerHeight;
+                            }
+
+                            updateWallpaperEngineViewportGlobals();
+                            window.addEventListener("resize", updateWallpaperEngineViewportGlobals);
+
                             window.wallpaperRegisterAudioListener = function(listener) {
                                 window.wpeQml.sigAudio.connect(listener);
+                            };
+
+                            window.wallpaperRegisterMediaPropertiesListener = function(listener) {
+                                window.wpeQml.sigMediaProperties.connect(listener);
+                            };
+
+                            window.wallpaperRegisterMediaThumbnailListener = function(listener) {
+                                window.wpeQml.sigMediaThumbnail.connect(listener);
+                            };
+
+                            window.wallpaperRegisterMediaTimelineListener = function(listener) {
+                                window.wpeQml.sigMediaTimeline.connect(listener);
+                            };
+
+                            window.wallpaperRegisterMediaPlaybackListener = function(listener) {
+                                window.wpeQml.sigMediaPlayback.connect(listener);
                             };
 
                             function deliverToPropertyListener() {
@@ -212,15 +493,20 @@ Item {
                                     return false;
                                 }
 
-                                if (propertyListener.applyGeneralProperties) {
-                                    propertyListener.applyGeneralProperties(window.__paperGradientLatestProperties.general);
-                                }
+                                try {
+                                    if (propertyListener.applyGeneralProperties) {
+                                        propertyListener.applyGeneralProperties(window.__paperGradientLatestProperties.general);
+                                    }
 
-                                if (propertyListener.applyUserProperties) {
-                                    propertyListener.applyUserProperties(window.__paperGradientLatestProperties.user);
-                                }
+                                    if (propertyListener.applyUserProperties) {
+                                        propertyListener.applyUserProperties(window.__paperGradientLatestProperties.user);
+                                    }
 
-                                return true;
+                                    return true;
+                                } catch (error) {
+                                    console.error("[Yakkai] WE web property listener failed", error);
+                                    return false;
+                                }
                             }
 
                             window.__paperGradientSetProperties = function(generalProperties, userProperties) {
@@ -261,28 +547,46 @@ Item {
                 + settings.webGLEnabled
                 + " canvas2d="
                 + settings.accelerated2dCanvasEnabled)
+            root.compatScriptInstalled = true
+            root.loadWebSource()
         }
 
         onLoadingChanged: function(loadRequest) {
             if (loadRequest.status === WebEngineView.LoadStartedStatus) {
+                root.stopSyntheticAudio()
                 root.pageLoaded = false
                 root.propertiesSent = false
+                root.propertyPushAttempts = 0
+                root.runtimeDiagnostics = ""
+                propertyRetryTimer.stop()
                 root.loadErrorText = ""
                 root.log("WE web loading started url=" + String(root.webSource))
                 return
             }
 
             if (loadRequest.status === WebEngineView.LoadSucceededStatus) {
+                if (root.captureExiting) {
+                    return
+                }
+
                 root.pageLoaded = true
                 root.loadErrorText = ""
+                root.propertyPushAttempts = 0
+                root.syntheticAudioStartAttempts = 0
                 root.log("WE web load succeeded title=" + root.projectTitle)
                 root.pushProperties()
+                root.updateRuntimeDiagnostics()
+                root.startSyntheticAudio()
                 return
             }
 
             if (loadRequest.status === WebEngineView.LoadFailedStatus) {
+                root.stopSyntheticAudio()
                 root.pageLoaded = false
                 root.propertiesSent = false
+                root.propertyPushAttempts = 0
+                root.runtimeDiagnostics = ""
+                propertyRetryTimer.stop()
                 root.loadErrorText = loadRequest.errorString && loadRequest.errorString.length > 0
                     ? loadRequest.errorString
                     : qsTr("QtWebEngine could not load this Wallpaper Engine web wallpaper.")
@@ -293,6 +597,31 @@ Item {
         onJavaScriptConsoleMessage: function(level, message, lineNumber, sourceID) {
             root.log("WE web console level=" + level + " source=" + sourceID + ":" + lineNumber + " message=" + message)
         }
+    }
+
+    Timer {
+        id: propertyRetryTimer
+        interval: 250
+        repeat: false
+
+        onTriggered: root.pushProperties()
+    }
+
+    Timer {
+        id: runtimeDiagnosticsTimer
+        interval: 1000
+        repeat: true
+        running: root.pageLoaded && root.showDiagnosticsOverlay && !root.propertiesSent
+
+        onTriggered: root.updateRuntimeDiagnostics()
+    }
+
+    Timer {
+        id: syntheticAudioRetryTimer
+        interval: Math.max(100, root.debugSyntheticAudioIntervalMs)
+        repeat: false
+
+        onTriggered: root.startSyntheticAudio()
     }
 
     Rectangle {
@@ -332,6 +661,6 @@ Item {
         color: "#d0d0d0"
         font.pixelSize: Math.max(11, statusTextLabel.font.pixelSize - 1)
         text: root.diagnosticText
-        visible: text.length > 0
+        visible: root.shouldShowDiagnosticOverlay()
     }
 }

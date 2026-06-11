@@ -1793,6 +1793,22 @@ void testEffectCaptureDebug()
         material.materialOutputCaptureStage = "material-output-1-0";
         layer.effectMaterials.push_back(material);
 
+        wallpaper::debug::recordEffectPassState(scene, {
+            .output = "_rt_default",
+            .loadOp = "LOAD",
+            .depthLoadOp = "DONT_CARE",
+            .colorMask = "RGB",
+            .colorMaskBits = 7,
+            .blendMode = "0",
+            .blendEnabled = true,
+            .preserveOutput = true,
+            .usesDepth = false,
+            .camera = "global",
+            .nodeId = 405,
+            .materialName = "ARONA_CROP_SHEET",
+            .debugPurpose = "effect-pass",
+        });
+
         wallpaper::debug::refreshEffectCaptureLayerInfo(scene, layer);
 
         check(wallpaper::debug::writeEffectCaptureManifest(scene),
@@ -1875,6 +1891,18 @@ void testEffectCaptureDebug()
               "manifest includes effect final mesh bounds");
         check(manifest.find("\"standaloneFinalMeshBounds\"") != std::string::npos,
               "manifest includes standalone final mesh bounds");
+        check(manifest.find("\"debugEffectPassStates\"") != std::string::npos,
+              "manifest includes debug effect pass states");
+        check(manifest.find("\"colorMaskBits\": 7") != std::string::npos,
+              "manifest includes pass state color mask bits");
+        check(manifest.find("\"camera\": \"global\"") != std::string::npos,
+              "manifest includes pass state camera");
+        check(manifest.find("\"nodeId\": 405") != std::string::npos,
+              "manifest includes pass state node id");
+        check(manifest.find("\"materialName\": \"ARONA_CROP_SHEET\"") != std::string::npos,
+              "manifest includes pass state material name");
+        check(manifest.find("\"debugPurpose\": \"effect-pass\"") != std::string::npos,
+              "manifest includes pass state debug purpose");
 
         std::filesystem::remove_all(outDir);
     }

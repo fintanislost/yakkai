@@ -14,7 +14,7 @@ These Workshop scenes are used by the local render regression harness. Install t
 
 Candidate and deferred fixtures are tracked in `smoke-tests/COVERAGE.md` and `smoke-tests/coverage-matrix.json`. Keep this file focused on active smoke-test assets; move a candidate here only after baseline promotion.
 
-Future fixtures should be added only after a local candidate is reviewed and baselines are promoted. Useful gaps are SceneScript-heavy scenes, static model/material/light scenes, small overlay video texture scenes, and separate WE Web or WE Video harness coverage.
+Future fixtures should be added only after a local candidate is reviewed and baselines are promoted. Useful gaps are additional SceneScript-heavy scenes, static model/material/light scenes, small overlay video texture scenes, and broader WE Web or WE Video harness coverage beyond the current candidates.
 
 Default Steam paths used by the harness:
 

@@ -122,6 +122,20 @@ class AronaReferenceComparatorTests(unittest.TestCase):
 
         self.assertEqual(args.debug_puppet_animation_layer_overrides, "405:781:paused=false")
 
+    def test_parse_args_exposes_harness_timeout_extra_seconds(self):
+        args = comparator.parse_args(["--harness-timeout-extra-seconds", "90"])
+
+        self.assertEqual(args.harness_timeout_extra_seconds, 90)
+
+    def test_main_rejects_negative_harness_timeout_extra_seconds(self):
+        with mock.patch.object(comparator, "compare_all") as compare_all, \
+             mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            code = comparator.main(["--harness-timeout-extra-seconds", "-1"])
+
+        self.assertEqual(code, 1)
+        self.assertIn("--harness-timeout-extra-seconds must be non-negative", stderr.getvalue())
+        compare_all.assert_not_called()
+
     def test_main_rejects_debug_puppet_animation_layer_overrides_without_effect_captures(self):
         with mock.patch.object(comparator, "compare_all") as compare_all, \
              mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
@@ -430,6 +444,40 @@ class AronaReferenceComparatorTests(unittest.TestCase):
         self.assertTrue(result.effectManifest.endswith("sunset/effect-captures/manifest.json"))
         self.assertTrue(str(log_path).endswith("sunset/harness.log"))
         self.assertEqual(timeout_seconds, 38)
+
+    def test_render_variant_uses_configured_harness_timeout_extra_seconds(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            harness = root / "harness"
+            source = root / "scene.pkg"
+            assets = root / "assets"
+            harness.write_text("harness", encoding="utf-8")
+            source.write_text("scene", encoding="utf-8")
+            assets.mkdir()
+            commands = []
+
+            def fake_run(command, log_path, timeout_seconds):
+                commands.append((command, log_path, timeout_seconds))
+                Path(command[command.index("--capture") + 1]).write_text("png", encoding="utf-8")
+                return 0
+
+            result = comparator.render_variant(
+                comparator.VARIANTS[0],
+                comparator.CompareConfig(
+                    repo_root=root,
+                    reference_root=root / "yakkai_arona",
+                    output_root=root / "out",
+                    capture_delay_ms=8100,
+                    harness_timeout_extra_seconds=90,
+                ),
+                harness=harness,
+                source=source,
+                assets=assets,
+                run_command=fake_run,
+            )
+
+        self.assertEqual(result.status, "pass")
+        self.assertEqual(commands[0][2], 99)
 
     def test_render_variant_does_not_forward_quarantined_channelmap_slots(self):
         with tempfile.TemporaryDirectory() as temp:

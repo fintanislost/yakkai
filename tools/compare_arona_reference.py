@@ -35,6 +35,7 @@ class CompareConfig:
     reference_root: Path
     output_root: Path
     capture_delay_ms: int = 8000
+    harness_timeout_extra_seconds: int = 30
     width: int = 1280
     height: int = 720
     debug_effect_captures: bool = False
@@ -651,7 +652,7 @@ def render_variant(
                 "--debug-puppet-animation-layer-overrides",
                 config.debug_puppet_animation_layer_overrides,
             ]
-    timeout_seconds = math.ceil(config.capture_delay_ms / 1000) + 30
+    timeout_seconds = math.ceil(config.capture_delay_ms / 1000) + config.harness_timeout_extra_seconds
     try:
         code = run_command(command, log_path, timeout_seconds)
     except OSError as exc:
@@ -804,6 +805,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--reference-root", default=str(root / "yakkai_arona"))
     parser.add_argument("--output-root", default=str(Path("/tmp/yakkai-arona-reference") / timestamp()))
     parser.add_argument("--capture-delay-ms", type=int, default=8000)
+    parser.add_argument(
+        "--harness-timeout-extra-seconds",
+        type=int,
+        default=30,
+        help="Extra seconds added to the capture delay for each harness run timeout. Increase for heavy debug-effect probes.",
+    )
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
     parser.add_argument(
@@ -879,12 +886,16 @@ def main(argv: list[str]) -> int:
         if not debug_effect_probe_layers:
             print("fail: --debug-effect-probe-max-effects requires --debug-effect-probe-layers", file=sys.stderr)
             return 1
+    if args.harness_timeout_extra_seconds < 0:
+        print("fail: --harness-timeout-extra-seconds must be non-negative", file=sys.stderr)
+        return 1
     result = compare_all(
         CompareConfig(
             repo_root=root,
             reference_root=Path(args.reference_root),
             output_root=Path(args.output_root),
             capture_delay_ms=args.capture_delay_ms,
+            harness_timeout_extra_seconds=args.harness_timeout_extra_seconds,
             width=args.width,
             height=args.height,
             debug_effect_captures=args.debug_effect_captures,

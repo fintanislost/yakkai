@@ -59,6 +59,16 @@ std::string ColorMaskText(VkColorComponentFlags mask)
     return value.empty() ? "none" : value;
 }
 
+uint32_t ColorMaskBits(VkColorComponentFlags mask)
+{
+    uint32_t value = 0;
+    if ((mask & VK_COLOR_COMPONENT_R_BIT) != 0) value |= 1u;
+    if ((mask & VK_COLOR_COMPONENT_G_BIT) != 0) value |= 2u;
+    if ((mask & VK_COLOR_COMPONENT_B_BIT) != 0) value |= 4u;
+    if ((mask & VK_COLOR_COMPONENT_A_BIT) != 0) value |= 8u;
+    return value;
+}
+
 bool IsInterestingModelUniform(std::string_view name) {
     return name == "g_ModelViewProjectionMatrix" || name == "g_Time" ||
            name == "g_Texture0Rotation" || name == "g_Texture0Translation" ||
@@ -570,10 +580,15 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             .loadOp = LoadOpText(loadOp),
             .depthLoadOp = LoadOpText(depthLoadOp),
             .colorMask = ColorMaskText(color_blend.colorWriteMask),
+            .colorMaskBits = ColorMaskBits(color_blend.colorWriteMask),
             .blendMode = std::to_string(static_cast<int>(blendmode)),
             .blendEnabled = color_blend.blendEnable == VK_TRUE,
             .preserveOutput = m_desc.preserve_output,
             .usesDepth = m_desc.use_depth,
+            .camera = m_desc.node ? m_desc.node->Camera() : "",
+            .nodeId = m_desc.node ? m_desc.node->ID() : -1,
+            .materialName = mesh.Material() ? mesh.Material()->name : "",
+            .debugPurpose = "effect-pass",
         });
         auto opt = CreateRenderPass(device.handle(),
                                     VK_FORMAT_R8G8B8A8_UNORM,

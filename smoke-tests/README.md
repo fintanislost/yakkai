@@ -2,7 +2,7 @@
 
 The smoke-test harness is the local visual regression gate for Wallpaper Engine scene rendering.
 
-`quick` and `release` keep stable required coverage. `deep` can include additional visual variants for renderer-risk states. Arona is split into deterministic Day/Sunset/Night variants so LUT changes are tested without depending on the local clock; Night keeps a slightly wider still review threshold for observed animated-particle timing drift while the motion sequence remains temporally matched. Spider-Verse `1591277437` is a deep-only still fixture for godrays, shake, pulse, and stale final-presentation artifact replay. Elaina `3326873240` is split into deep-only Morning/Day/Dusk/Night/Day Night Gradient candidates for SceneScript and time-mode review, with a wider review threshold for expected animated sky/video phase drift in still captures. Alya `3301291394` is a deep-only still fixture for Clock/Date SceneScript text binding discovery and generated text-layer representation. Girl and Fluorescent Beach `2788691565` is a deep-only sequence fixture for overlay video texture, water-effect motion, and particle coverage. Cyber City Parkour `1576514332` is a deep-only still fixture for static model, material, lighting, composelayer, and particle sprite coverage. CWAV `1509243786`, Audio Visualizer `893418273`, Rain Drops `779812076`, Shiroko Live2D `2478419118`, and TIMDRIFT II `874499201` are harness-backed candidates for WE Web/audio, WE web-video, and WE Video project coverage until reviewed baselines are promoted. Silk `823274093` is deferred as an interactive-web candidate because it needs synthesized input before it produces useful motion.
+`quick` and `release` keep stable required coverage. `deep` can include additional visual variants for renderer-risk states. Arona is split into deterministic Day/Sunset/Night variants so LUT changes are tested without depending on the local clock; Night keeps a slightly wider still review threshold for observed animated-particle timing drift while the motion sequence remains temporally matched. Spider-Verse `1591277437` is a deep-only still fixture for godrays, shake, pulse, and stale final-presentation artifact replay. Elaina `3326873240` is split into deep-only Morning/Day/Dusk/Night/Day Night Gradient candidates for SceneScript and time-mode review, with a wider review threshold for expected animated sky/video phase drift in still captures. Alya `3301291394` is a deep-only still fixture for Clock/Date SceneScript text binding discovery and generated text-layer representation. Girl and Fluorescent Beach `2788691565` is a deep-only sequence fixture for overlay video texture, water-effect motion, and particle coverage. Cyber City Parkour `1576514332` is a deep-only still fixture for static model, material, lighting, composelayer, and particle sprite coverage. Rain Drops `779812076`, Audio Visualizer `893418273`, and TIMDRIFT II `874499201` are active deep-only sequence fixtures for WE web-video, WE Web/audio with synthetic audio, and plain WE Video motion coverage. CWAV `1509243786` and Shiroko Live2D `2478419118` remain harness-backed candidates, and Silk `823274093` is deferred as an interactive-web candidate because it needs synthesized input before it produces useful motion.
 
 ## Commands
 
@@ -11,7 +11,7 @@ The smoke-test harness is the local visual regression gate for Wallpaper Engine 
 ./smoke-tests/run.sh --suite deep
 ./smoke-tests/run.sh --suite release --strict --require-assets
 ./smoke-tests/run.sh --suite deep --write-candidates
-./smoke-tests/run.sh --promote /tmp/yakkai-smoke/<run-id>
+./smoke-tests/run.sh --promote smoke-tests/artifacts/tmp/yakkai-smoke/<run-id>
 ./smoke-tests/run.sh --coverage
 ./smoke-tests/run.sh --list
 ```
@@ -29,7 +29,7 @@ Scene entries in `scenes.json` can define `variants`. Variants inherit base fiel
 
 `scenePropertyOverrides` values are raw Wallpaper Engine user-property values. The runner loads the project `project.json` defaults for scene and web entries, merges the overrides over those defaults, and passes compact JSON to the harness with `--scene-properties-json`.
 
-Candidate manifests can use `projectType: "scene" | "video" | "web"`. Use `harnessArgs` only for narrow harness flags needed by a candidate, such as `--debug-synthetic-audio` for deterministic WE Web audio visualizer coverage or `--capture-exit-mode immediate` for QtWebEngine sequence captures whose frames are complete before browser teardown. A candidate can also define `reviewVideo` with `name`, `durationMs`, `fps`, and optional `startDelayMs` to ask the harness for a live MP4 recording artifact in addition to PNG regression captures.
+Candidate manifests can use `projectType: "scene" | "video" | "web"`. Use `harnessArgs` only for narrow harness flags needed by a candidate, such as `--debug-synthetic-audio` for WE Web audio visualizer motion coverage or `--capture-exit-mode immediate` for QtWebEngine sequence captures whose frames are complete before browser teardown. Audio visualizer fixtures should keep motion thresholds strict but may need wider RMSE thresholds than scene/video fixtures because browser animation timing and audio smoothing can change the exact bar shape between otherwise valid runs. A candidate can also define `reviewVideo` with `name`, `durationMs`, `fps`, and optional `startDelayMs` to ask the harness for a live MP4 recording artifact in addition to PNG regression captures.
 
 `baselinePrefix` moves inherited capture and sequence baseline paths into a variant-specific directory, so related cases can share schedules without sharing PNG baselines.
 
@@ -44,7 +44,7 @@ Baseline updates are two-step:
 
 ```bash
 ./smoke-tests/run.sh --suite deep --write-candidates
-./smoke-tests/run.sh --promote /tmp/yakkai-smoke/<run-id>
+./smoke-tests/run.sh --promote smoke-tests/artifacts/tmp/yakkai-smoke/<run-id>
 ```
 
 Review the artifact bundle before promotion. Check camera angle, visible elements, character position, color balance, composition, effect intensity, and motion.

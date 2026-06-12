@@ -105,9 +105,9 @@
         },
         {
           "sceneId": "893418273",
-          "status": "candidate",
-          "source": "docs/superpowers/plans/2026-06-08-web-video-audio-coverage.md",
-          "notes": "Audio Visualizer is a WE web project with a canvas visualizer, Wallpaper Engine audio listener usage, and optional HTML video background. It should be used as a stronger web/audio stress candidate than CWAV after synthetic-audio review artifacts are generated."
+          "status": "active",
+          "source": "smoke-tests/scenes.json",
+          "notes": "Audio Visualizer is active deep-only WE web/audio sequence coverage with canvas visualizer logic, Wallpaper Engine audio listener usage, and harness-only synthetic audio. The active fixture uses PNG sequence capture, generated review clips, motion enforcement, and a wider RMSE band because browser animation timing and visualizer smoothing can shift the exact bar shape between valid runs. Optional live recording is not part of the gate after signal exits were observed in the live recording path."
         }
       ]
     },
@@ -119,9 +119,9 @@
       "coverage": [
         {
           "sceneId": "779812076",
-          "status": "candidate",
-          "source": "docs/superpowers/plans/2026-06-08-web-video-audio-coverage.md",
-          "notes": "Rain Drops (heavy rain) is a WE web project that includes local video media plus WebGL/canvas rain rendering. It is the preferred web-video candidate because it exercises QtWebEngine media loading and visible web animation without requiring user input."
+          "status": "active",
+          "source": "smoke-tests/scenes.json",
+          "notes": "Rain Drops (heavy rain) is active deep-only WE web-video coverage with local video media plus WebGL/canvas rain rendering. It exercises QtWebEngine media loading and visible web animation without requiring user input."
         }
       ]
     },
@@ -139,9 +139,9 @@
         },
         {
           "sceneId": "874499201",
-          "status": "candidate",
-          "source": "docs/superpowers/plans/2026-06-08-web-video-audio-coverage.md",
-          "notes": "TIMDRIFT II Mountains/Clouds Timelapse is the preferred plain WE video motion candidate. A quick source-frame probe showed stronger normal-speed motion than Shiroko while still looking like wallpaper-style video rather than a hard scene transition."
+          "status": "active",
+          "source": "smoke-tests/scenes.json",
+          "notes": "TIMDRIFT II Mountains/Clouds Timelapse is active deep-only plain WE video motion coverage. The active fixture uses a 90000ms normal-speed sequence that showed stronger motion than Shiroko while still looking like wallpaper-style video rather than a hard scene transition."
         }
       ]
     }

@@ -546,7 +546,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Yakkai smoke-test render regression runner")
     parser.add_argument("--manifest", default="smoke-tests/scenes.json")
     parser.add_argument("--suite", choices=["quick", "deep", "release"], default="quick")
-    parser.add_argument("--artifacts", default="/tmp/yakkai-smoke")
+    parser.add_argument("--artifacts", default="smoke-tests/artifacts/tmp/yakkai-smoke")
     parser.add_argument("--assets")
     parser.add_argument("--workshop")
     parser.add_argument("--strict", action="store_true")

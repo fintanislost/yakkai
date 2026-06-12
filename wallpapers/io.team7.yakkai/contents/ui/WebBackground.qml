@@ -26,6 +26,7 @@ Item {
     property bool debugSyntheticAudioEnabled: false
     property int debugSyntheticAudioBins: 128
     property int debugSyntheticAudioIntervalMs: 33
+    property real debugSyntheticAudioOriginMs: 0
     property int syntheticAudioStartAttempts: 0
     property real debugSyntheticAudioRate: 0.18
     readonly property string logPrefix: "[Yakkai]"
@@ -231,6 +232,7 @@ Item {
         const bins = Math.max(8, debugSyntheticAudioBins)
         const interval = Math.max(16, debugSyntheticAudioIntervalMs)
         const phaseRate = debugSyntheticAudioRate
+        const originMs = debugSyntheticAudioOriginMs > 0 ? debugSyntheticAudioOriginMs : Date.now()
         webView.runJavaScript(`
             (function() {
                 if (!window.wpeQml || !window.wpeQml.sigAudio) {
@@ -241,17 +243,21 @@ Item {
                     clearInterval(window.__yakkaiSyntheticAudioTimer);
                 }
 
-                window.__yakkaiSyntheticAudioPhase = window.__yakkaiSyntheticAudioPhase || 0;
-                window.__yakkaiSyntheticAudioTimer = setInterval(function() {
-                    window.__yakkaiSyntheticAudioPhase += ${phaseRate};
+                window.__yakkaiSyntheticAudioOriginMs = ${originMs};
+                function emitSyntheticAudio() {
+                    const elapsedIntervals = Math.max(0, (Date.now() - window.__yakkaiSyntheticAudioOriginMs) / ${interval});
+                    const phase = elapsedIntervals * ${phaseRate};
                     const values = [];
                     for (let index = 0; index < ${bins}; ++index) {
-                        const wave = Math.sin(window.__yakkaiSyntheticAudioPhase + index * 0.21);
-                        const pulse = Math.sin(window.__yakkaiSyntheticAudioPhase * 0.37 + index * 0.07);
+                        const wave = Math.sin(phase + index * 0.21);
+                        const pulse = Math.sin(phase * 0.37 + index * 0.07);
                         values.push(Math.max(0, Math.min(1, 0.55 + wave * 0.35 + pulse * 0.10)));
                     }
                     window.wpeQml.sigAudio.emit(values);
-                }, ${interval});
+                }
+
+                emitSyntheticAudio();
+                window.__yakkaiSyntheticAudioTimer = setInterval(emitSyntheticAudio, ${interval});
                 return true;
             })();
         `, function(result) {

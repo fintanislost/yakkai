@@ -13,6 +13,11 @@ import runner
 
 
 class RunnerCoreTests(unittest.TestCase):
+    def test_default_artifacts_path_is_repo_local(self):
+        args = runner.build_parser().parse_args([])
+
+        self.assertEqual(args.artifacts, "smoke-tests/artifacts/tmp/yakkai-smoke")
+
     def test_expand_path_replaces_home_and_manifest_tokens(self):
         paths = {
             "workshop": "${HOME}/Steam/workshop",
@@ -2004,6 +2009,52 @@ class RunnerCoreTests(unittest.TestCase):
             ],
         )
 
+    def test_manifest_includes_web_and_video_candidates_as_deep_fixtures(self):
+        manifest_path = Path(__file__).resolve().parent / "scenes.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+        cases = {case["id"]: case for case in runner.expand_manifest_scenes(manifest)}
+
+        rain = cases.get("779812076")
+        visualizer = cases.get("893418273")
+        timedrift = cases.get("874499201")
+        cwav = cases.get("1509243786")
+
+        self.assertIsNotNone(rain)
+        self.assertEqual(rain["name"], "Rain Drops")
+        self.assertEqual(rain["projectType"], "web")
+        self.assertEqual(rain["gates"], ["deep"])
+        self.assertEqual(rain["features"], ["web-wallpaper", "web-video", "canvas-animation"])
+        self.assertEqual(rain["source"], "${workshop}/779812076/index.html")
+        self.assertEqual(rain["sequences"][0]["baselineDir"], "779812076/sequences/rain-10000")
+        self.assertNotIn("reviewVideo", rain)
+
+        self.assertIsNotNone(visualizer)
+        self.assertEqual(visualizer["name"], "Audio Visualizer")
+        self.assertEqual(visualizer["projectType"], "web")
+        self.assertEqual(visualizer["gates"], ["deep"])
+        self.assertIn("--debug-synthetic-audio", visualizer["harnessArgs"])
+        self.assertEqual(visualizer["features"], ["web-wallpaper", "audio-visualizer", "synthetic-audio"])
+        self.assertEqual(visualizer["sequences"][0]["baselineDir"], "893418273/sequences/audio-10000")
+        self.assertGreaterEqual(visualizer["thresholds"]["rmseReview"], 0.18)
+        self.assertGreaterEqual(visualizer["thresholds"]["rmseFail"], 0.26)
+        self.assertEqual(visualizer["thresholds"]["minMotionRmse"], 0.004)
+        self.assertNotIn("reviewVideo", visualizer)
+
+        self.assertIsNotNone(timedrift)
+        self.assertEqual(timedrift["name"], "TIMDRIFT II Mountains Clouds")
+        self.assertEqual(timedrift["projectType"], "video")
+        self.assertEqual(timedrift["gates"], ["deep"])
+        self.assertEqual(timedrift["features"], ["we-video-wallpaper", "video-motion"])
+        self.assertEqual(
+            timedrift["source"],
+            "${workshop}/874499201/TIMEDRIFT II - DOLOMITES 4K.mp4",
+        )
+        self.assertEqual(timedrift["sequences"][0]["baselineDir"], "874499201/sequences/video-90000")
+        self.assertNotIn("reviewVideo", timedrift)
+
+        self.assertIsNone(cwav)
+
     def test_coverage_bucket_summary_accepts_candidate_for_phase_one(self):
         matrix = {
             "version": 1,
@@ -2168,6 +2219,19 @@ class WebBackgroundQmlTests(unittest.TestCase):
         self.assertLess(load_failed_body.index("root.stopSyntheticAudio()"), load_failed_body.index("root.pageLoaded = false"))
         self.assertNotIn("id: syntheticAudioTimer", source)
 
+    def test_web_background_synthetic_audio_phase_is_deterministic_from_origin(self):
+        source = self.web_background_source()
+        start_synthetic_body = source.split("function startSyntheticAudio()", 1)[1].split("\n    function stopSyntheticAudio()", 1)[0]
+
+        self.assertIn("property real debugSyntheticAudioOriginMs: 0", source)
+        self.assertIn("const originMs = debugSyntheticAudioOriginMs > 0 ? debugSyntheticAudioOriginMs : Date.now()", start_synthetic_body)
+        self.assertIn("window.__yakkaiSyntheticAudioOriginMs = ${originMs};", start_synthetic_body)
+        self.assertIn("function emitSyntheticAudio()", start_synthetic_body)
+        self.assertIn("const elapsedIntervals = Math.max(0, (Date.now() - window.__yakkaiSyntheticAudioOriginMs) / ${interval});", start_synthetic_body)
+        self.assertIn("const phase = elapsedIntervals * ${phaseRate};", start_synthetic_body)
+        self.assertNotIn("window.__yakkaiSyntheticAudioPhase = window.__yakkaiSyntheticAudioPhase || 0", start_synthetic_body)
+        self.assertNotIn("window.__yakkaiSyntheticAudioPhase += ${phaseRate}", start_synthetic_body)
+
     def test_web_background_has_capture_exit_cleanup(self):
         source = self.web_background_source()
         push_properties_body = source.split("function pushProperties()", 1)[1].split("\n    function schedulePropertyRetry()", 1)[0]
@@ -2217,6 +2281,19 @@ class WebBackgroundQmlTests(unittest.TestCase):
         self.assertIn("sceneHarnessDebugSyntheticAudioEnabled", main_source)
         self.assertIn("sceneHarnessDebugSyntheticAudioBins", main_source)
         self.assertIn("sceneHarnessDebugSyntheticAudioIntervalMs", main_source)
+
+    def test_web_harness_arms_synthetic_audio_at_capture_ready_boundary(self):
+        root = Path(__file__).resolve().parents[1]
+        harness_source = (root / "native/scene_harness/qml/WebWallpaperHarness.qml").read_text(encoding="utf-8")
+        settle_trigger_body = harness_source.split("onTriggered:", 1)[1].split("\n    WebBackground", 1)[0]
+
+        self.assertIn("property bool syntheticAudioArmed: false", harness_source)
+        self.assertIn("property real syntheticAudioOriginMs: 0", harness_source)
+        self.assertIn("debugSyntheticAudioEnabled: root.debugSyntheticAudioEnabled && root.syntheticAudioArmed", harness_source)
+        self.assertIn("debugSyntheticAudioOriginMs: root.syntheticAudioOriginMs", harness_source)
+        self.assertIn("root.syntheticAudioOriginMs = Date.now()", settle_trigger_body)
+        self.assertIn("root.syntheticAudioArmed = true", settle_trigger_body)
+        self.assertLess(settle_trigger_body.index("root.syntheticAudioArmed = true"), settle_trigger_body.index("root.firstFrameReady()"))
 
 class SceneHarnessSourceTests(unittest.TestCase):
     def scene_harness_source(self) -> str:

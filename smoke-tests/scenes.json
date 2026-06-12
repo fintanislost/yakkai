@@ -289,6 +289,95 @@
         "motion": false,
         "manualReview": ["camera framing", "runner silhouette", "foreground models", "city lights", "cloud/sky composition", "particle lightning"]
       }
+    },
+    {
+      "id": "779812076",
+      "name": "Rain Drops",
+      "workshopUrl": "https://steamcommunity.com/sharedfiles/filedetails/?id=779812076",
+      "source": "${workshop}/779812076/index.html",
+      "projectType": "web",
+      "gates": ["deep"],
+      "required": false,
+      "features": ["web-wallpaper", "web-video", "canvas-animation"],
+      "harnessArgs": ["--capture-exit-mode", "immediate"],
+      "sequences": [
+        {
+          "name": "rain-10000",
+          "startMs": 10000,
+          "frames": 60,
+          "intervalMs": 33,
+          "baselineDir": "779812076/sequences/rain-10000",
+          "temporalToleranceFrames": 4
+        }
+      ],
+      "thresholds": {
+        "rmseReview": 0.07,
+        "rmseFail": 0.13,
+        "minMotionRmse": 0.004
+      },
+      "expectations": {
+        "motion": true,
+        "manualReview": ["rain animation", "background video/media load", "full web content", "no Yakkai status overlay"]
+      }
+    },
+    {
+      "id": "893418273",
+      "name": "Audio Visualizer",
+      "workshopUrl": "https://steamcommunity.com/sharedfiles/filedetails/?id=893418273",
+      "source": "${workshop}/893418273/index.html",
+      "projectType": "web",
+      "gates": ["deep"],
+      "required": false,
+      "features": ["web-wallpaper", "audio-visualizer", "synthetic-audio"],
+      "harnessArgs": ["--capture-exit-mode", "immediate", "--debug-synthetic-audio"],
+      "sequences": [
+        {
+          "name": "audio-10000",
+          "startMs": 10000,
+          "frames": 60,
+          "intervalMs": 33,
+          "baselineDir": "893418273/sequences/audio-10000",
+          "temporalToleranceFrames": 4
+        }
+      ],
+      "thresholds": {
+        "rmseReview": 0.18,
+        "rmseFail": 0.26,
+        "minMotionRmse": 0.004
+      },
+      "expectations": {
+        "motion": true,
+        "manualReview": ["audio-reactive bars", "synthetic audio motion", "background content", "no Yakkai status overlay"]
+      }
+    },
+    {
+      "id": "874499201",
+      "name": "TIMDRIFT II Mountains Clouds",
+      "workshopUrl": "https://steamcommunity.com/sharedfiles/filedetails/?id=874499201",
+      "source": "${workshop}/874499201/TIMEDRIFT II - DOLOMITES 4K.mp4",
+      "projectType": "video",
+      "gates": ["deep"],
+      "required": false,
+      "features": ["we-video-wallpaper", "video-motion"],
+      "sequences": [
+        {
+          "name": "video-90000",
+          "startMs": 90000,
+          "frames": 90,
+          "intervalMs": 33,
+          "baselineDir": "874499201/sequences/video-90000",
+          "temporalToleranceFrames": 6
+        }
+      ],
+      "thresholds": {
+        "rmseReview": 0.08,
+        "rmseFail": 0.14,
+        "minMotionRmse": 0.004
+      },
+      "expectations": {
+        "motion": true,
+        "manualReview": ["normal-speed timelapse motion", "mountain/cloud composition", "video frame progression", "color balance"]
+      }
     }
   ]
 }

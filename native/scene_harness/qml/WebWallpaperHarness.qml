@@ -23,6 +23,8 @@ Item {
     property bool debugSyntheticAudioEnabled: false
     property int debugSyntheticAudioBins: 128
     property int debugSyntheticAudioIntervalMs: 33
+    property bool syntheticAudioArmed: false
+    property real syntheticAudioOriginMs: 0
     property string scenePropertiesJson: "{}"
     property bool firstFrameEmitted: false
     readonly property string backendStatus: "web loaded=" + web.pageLoaded
@@ -44,6 +46,8 @@ Item {
 
         onTriggered: {
             if (!root.firstFrameEmitted) {
+                root.syntheticAudioOriginMs = Date.now()
+                root.syntheticAudioArmed = true
                 root.firstFrameEmitted = true
                 root.firstFrameReady()
             }
@@ -56,13 +60,19 @@ Item {
         webSource: root.sceneSource
         userPropertiesJson: root.scenePropertiesJson.length > 0 ? root.scenePropertiesJson : "{}"
         muted: root.muted
-        debugSyntheticAudioEnabled: root.debugSyntheticAudioEnabled
+        debugSyntheticAudioEnabled: root.debugSyntheticAudioEnabled && root.syntheticAudioArmed
         debugSyntheticAudioBins: root.debugSyntheticAudioBins
         debugSyntheticAudioIntervalMs: root.debugSyntheticAudioIntervalMs
+        debugSyntheticAudioOriginMs: root.syntheticAudioOriginMs
 
         onPageLoadedChanged: {
             if (pageLoaded) {
                 settleTimer.restart()
+            } else {
+                settleTimer.stop()
+                root.firstFrameEmitted = false
+                root.syntheticAudioArmed = false
+                root.syntheticAudioOriginMs = 0
             }
         }
     }

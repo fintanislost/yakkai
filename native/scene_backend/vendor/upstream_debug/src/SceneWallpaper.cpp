@@ -170,6 +170,7 @@ private:
     std::string m_debug_effect_captures;
     std::string m_debug_effect_capture_command;
     int32_t     m_debug_effect_capture_delay_ms { 0 };
+    std::string m_debug_effect_capture_layers;
     std::string m_debug_effect_probe_layers;
     std::string m_debug_effect_probe_high_risk_layers;
     std::string m_debug_effect_probe_channelmap_slots;
@@ -443,6 +444,8 @@ MHANDLER_CMD_IMPL(MainHandler, SET_PROPERTY) {
             msg->findString("value", &m_debug_effect_capture_command);
         } else if (property == PROPERTY_DEBUG_EFFECT_CAPTURE_DELAY_MS) {
             msg->findInt32("value", &m_debug_effect_capture_delay_ms);
+        } else if (property == PROPERTY_DEBUG_EFFECT_CAPTURE_LAYERS) {
+            msg->findString("value", &m_debug_effect_capture_layers);
         } else if (property == PROPERTY_DEBUG_EFFECT_PROBE_LAYERS) {
             msg->findString("value", &m_debug_effect_probe_layers);
         } else if (property == PROPERTY_DEBUG_EFFECT_PROBE_HIGH_RISK_LAYERS) {
@@ -564,6 +567,7 @@ void MainHandler::loadScene() {
         m_scene_parser.SetDebugEffectCaptureConfig({
             .outputDir = m_debug_effect_captures,
             .commandLine = m_debug_effect_capture_command,
+            .captureLayerIds = wallpaper::debug::parseCaptureLayerIdList(m_debug_effect_capture_layers),
             .probeLayerIds = wallpaper::debug::parseProbeLayerIdList(m_debug_effect_probe_layers),
             .captureDelayMs = std::max<int32_t>(0, m_debug_effect_capture_delay_ms),
             .highRiskProbeLayerIds = wallpaper::debug::parseProbeLayerIdList(m_debug_effect_probe_high_risk_layers),

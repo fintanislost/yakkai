@@ -12,6 +12,7 @@ Item {
     property string debugEffectCapturesPath: ""
     property string debugEffectCaptureCommand: ""
     property int debugEffectCaptureDelayMs: 0
+    property string debugEffectCaptureLayers: ""
     property string debugEffectProbeLayers: ""
     property string debugEffectProbeHighRiskLayers: ""
     property string debugEffectProbeChannelMapSlots: ""
@@ -70,6 +71,7 @@ Item {
         debugEffectCapturesPath: root.debugEffectCapturesPath
         debugEffectCaptureCommand: root.debugEffectCaptureCommand
         debugEffectCaptureDelayMs: root.debugEffectCaptureDelayMs
+        debugEffectCaptureLayers: root.debugEffectCaptureLayers
         debugEffectProbeLayers: root.debugEffectProbeLayers
         debugEffectProbeHighRiskLayers: root.debugEffectProbeHighRiskLayers
         debugEffectProbeChannelMapSlots: root.debugEffectProbeChannelMapSlots

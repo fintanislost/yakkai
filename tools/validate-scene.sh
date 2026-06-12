@@ -22,7 +22,7 @@ set -uo pipefail
 HARNESS="build/native/scene_harness/yakkai_scene_harness"
 ASSETS="$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/wallpaper_engine/assets"
 WORKSHOP="$HOME/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/workshop/content/431960"
-OUTDIR="/tmp/yakkai-debug"
+OUTDIR="${YAKKAI_VALIDATE_OUTDIR:-smoke-tests/artifacts/tmp/yakkai-debug}"
 CACHE_ROOT="$HOME/.cache/wescene-renderer"
 
 SCENE_ID="${1:?Usage: $0 <scene_id>}"

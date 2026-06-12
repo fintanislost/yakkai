@@ -31,6 +31,7 @@ struct PuppetAnimationLayerOverride {
 struct EffectCaptureConfig {
     std::string outputDir;
     std::string commandLine;
+    std::vector<int> captureLayerIds;
     std::vector<int> probeLayerIds;
     int captureDelayMs { 0 };
     std::vector<int> highRiskProbeLayerIds;
@@ -41,6 +42,7 @@ struct EffectCaptureConfig {
     bool puppetEffectRouteOnly { false };
 
     bool enabled() const { return !outputDir.empty(); }
+    bool shouldCaptureLayer(int layerId) const;
     bool shouldProbeLayer(int layerId) const;
     bool shouldProbeHighRiskLayer(int layerId) const;
     std::filesystem::path manifestPath() const;
@@ -263,6 +265,8 @@ std::string sanitizeCapturePathSegment(std::string_view value);
 
 std::vector<int> parseProbeLayerIdList(std::string_view value);
 
+std::vector<int> parseCaptureLayerIdList(std::string_view value);
+
 std::vector<int> parseProbeChannelMapSlotList(std::string_view value);
 
 int parseProbeMaxEffects(std::string_view value);
@@ -306,6 +310,12 @@ registerFinalDisplayBoundaryCapture(Scene& scene,
                                     const EffectCaptureLayerInfo& layer,
                                     const SceneNode& node,
                                     std::string_view suffix);
+
+EffectCaptureFinalDisplayBoundaryTargets
+registerEffectLayerFinalPublishBoundaryCapture(Scene& scene,
+                                               EffectCaptureLayerInfo& layer,
+                                               const SceneNode& node,
+                                               std::string_view suffix);
 
 void refreshEffectCaptureLayerInfo(Scene& scene, const EffectCaptureLayerInfo& layer);
 

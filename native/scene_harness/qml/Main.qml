@@ -21,6 +21,7 @@ Window {
     property string debugEffectCapturesPath: sceneHarnessDebugEffectCapturesPath
     property string debugEffectCaptureCommand: sceneHarnessDebugEffectCaptureCommand
     property int debugEffectCaptureDelayMs: sceneHarnessDebugEffectCaptureDelayMs
+    property string debugEffectCaptureLayers: sceneHarnessDebugEffectCaptureLayers
     property string debugEffectProbeLayers: sceneHarnessDebugEffectProbeLayers
     property string debugEffectProbeHighRiskLayers: sceneHarnessDebugEffectProbeHighRiskLayers
     property string debugEffectProbeChannelMapSlots: sceneHarnessDebugEffectProbeChannelMapSlots
@@ -86,6 +87,9 @@ Window {
             })
             item.debugEffectCaptureDelayMs = Qt.binding(function() {
                 return root.debugEffectCaptureDelayMs
+            })
+            item.debugEffectCaptureLayers = Qt.binding(function() {
+                return root.debugEffectCaptureLayers
             })
             item.debugEffectProbeLayers = Qt.binding(function() {
                 return root.debugEffectProbeLayers

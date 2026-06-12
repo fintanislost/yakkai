@@ -3580,7 +3580,9 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             effectCaptureInfo.debugProbeRouteOnly &&
             effectObjects.empty();
         const bool debugEffectCaptures =
-            scene.debugEffectCaptures.enabled() && (! effectObjects.empty() || debugRouteOnlyCapture);
+            scene.debugEffectCaptures.enabled() &&
+            scene.debugEffectCaptures.shouldCaptureLayer(wpimgobj.id) &&
+            (! effectObjects.empty() || debugRouteOnlyCapture);
         std::string debugEffectInputTarget;
         std::string debugEffectOutputSourceTarget;
         std::string debugEffectOutputTarget;
@@ -3749,6 +3751,12 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
 
         int32_t i_eff = -1;
         int32_t debug_eff_total = effectObjects.size();
+        int32_t debug_visible_eff_total = 0;
+        for (const auto& effectObject : effectObjects) {
+            if (effectObject.visible) {
+                debug_visible_eff_total++;
+            }
+        }
         for (const auto& wpeffobj : effectObjects) {
             i_eff++;
             if (! wpeffobj.visible) {
@@ -3857,6 +3865,10 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 if (wpmat.textures.at(0).empty()) {
                     wpmat.textures[0] = inRT;
                 }
+                const bool isFinalPublishedMaterialNode =
+                    sstart_with(matOutRT, WE_EFFECT_PPONG_PREFIX_B) &&
+                    ! useStandalonePuppetFinalDisplay && i_eff == debug_visible_eff_total - 1 &&
+                    i_mat + 1 == wpeffobj.materials.size();
                 if (puppet && useStandalonePuppetFinalDisplay &&
                     !usePuppetChannelMapPrepass && ShouldPreservePuppetSourceAlphaForShader(wpmat.shader)) {
                     // Keep this compatibility patch limited to shaders with
@@ -3910,10 +3922,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                         const int materialIndex = static_cast<int>(i_mat);
                         const bool isLutMaterial =
                             wpmat.shader.find("lut_loader") != std::string::npos;
-                        const bool isFinalPublishedMaterial =
-                            sstart_with(matOutRT, WE_EFFECT_PPONG_PREFIX_B) &&
-                            ! useStandalonePuppetFinalDisplay && i_eff == count_eff - 1 &&
-                            i_mat + 1 == wpeffobj.materials.size();
+                        const bool isFinalPublishedMaterial = isFinalPublishedMaterialNode;
                         const std::string debugFinalOutputSource =
                             std::string(WE_DEBUG_EFFECT_FINAL_OUTPUT_PREFIX) + nodeAddr;
                         std::string sourceRenderTarget = matOutRT;
@@ -4005,6 +4014,13 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                                  : "");
                 }
                 auto spMesh = std::make_shared<SceneMesh>();
+                if (debugEffectCaptures && isFinalPublishedMaterialNode) {
+                    wallpaper::debug::registerEffectLayerFinalPublishBoundaryCapture(
+                        scene,
+                        effectCaptureInfo,
+                        *spEffNode,
+                        nodeAddr + "_effect_final");
+                }
                 const bool preservePuppetMesh =
                     puppetEffectRoutePlan.preservePuppetMeshForEffectPasses &&
                     puppet && wpmat.use_puppet;

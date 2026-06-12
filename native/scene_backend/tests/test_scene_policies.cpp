@@ -1390,6 +1390,10 @@ void testEffectCaptureDebug()
               "probe layer id parser trims whitespace and removes duplicates");
         check(wallpaper::debug::parseProbeLayerIdList("abc,22,-1,0").empty(),
               "probe layer id parser rejects invalid lists");
+        check(equalsInts(wallpaper::debug::parseCaptureLayerIdList("405,239,405"), {405, 239}),
+              "capture layer id parser trims duplicates");
+        check(wallpaper::debug::parseCaptureLayerIdList("abc,405,-1,0").empty(),
+              "capture layer id parser rejects invalid lists");
         check(equalsInts(wallpaper::debug::parseProbeChannelMapSlotList("0, 2,2,15"), {0, 2, 15}),
               "probe channelmap slot parser accepts zero and removes duplicates");
         check(wallpaper::debug::parseProbeChannelMapSlotList("-1,2").empty(),
@@ -1527,6 +1531,60 @@ void testEffectCaptureDebug()
         check(config.puppetAnimationLayerOverrides.size() == 1 &&
                   config.puppetAnimationLayerOverrides.front().layerId == 405,
               "effect capture config stores puppet animation layer overrides");
+    }
+
+    {
+        const wallpaper::debug::EffectCaptureConfig unrestricted {
+            .outputDir = "unit",
+            .commandLine = "unit --debug-effect-captures unit",
+        };
+        check(unrestricted.shouldCaptureLayer(405),
+              "empty capture layer filter captures listed layers by default");
+        check(unrestricted.shouldCaptureLayer(42),
+              "empty capture layer filter captures every layer by default");
+
+        const wallpaper::debug::EffectCaptureConfig filtered {
+            .outputDir = "unit",
+            .commandLine = "unit --debug-effect-captures unit --debug-effect-capture-layers 405,239",
+            .captureLayerIds = {405, 239},
+        };
+        check(filtered.shouldCaptureLayer(405),
+              "capture layer filter includes explicitly listed layer ids");
+        check(filtered.shouldCaptureLayer(239),
+              "capture layer filter includes every explicitly listed layer id");
+        check(!filtered.shouldCaptureLayer(42),
+              "capture layer filter excludes unlisted layer ids");
+
+        wallpaper::Scene scene;
+        scene.scene_id = "unit-scene";
+        scene.debugEffectCaptures = {
+            .outputDir = "unit",
+            .commandLine = "unit",
+            .captureLayerIds = {405},
+        };
+        scene.renderTargets["_rt_debug_effect_input"] = {
+            .width = 256,
+            .height = 16,
+            .allowReuse = false,
+        };
+
+        wallpaper::debug::EffectCaptureLayerInfo skippedLayer;
+        skippedLayer.sceneId = "unit-scene";
+        skippedLayer.layerName = "skipped";
+        skippedLayer.layerId = 42;
+        wallpaper::debug::registerEffectCapture(
+            scene, skippedLayer, "effect-input", "_rt_debug_effect_input");
+        check(scene.debugEffectCaptureRecords.empty(),
+              "capture layer filter skips nonmatching layer records");
+
+        wallpaper::debug::EffectCaptureLayerInfo keptLayer;
+        keptLayer.sceneId = "unit-scene";
+        keptLayer.layerName = "ARONA_CROP_SHEET";
+        keptLayer.layerId = 405;
+        wallpaper::debug::registerEffectCapture(
+            scene, keptLayer, "effect-input", "_rt_debug_effect_input");
+        check(scene.debugEffectCaptureRecords.size() == 1,
+              "capture layer filter keeps matching layer records");
     }
 
     {
@@ -2034,6 +2092,63 @@ void testEffectCaptureDebug()
               "manifest includes final display before render target");
         check(manifest.find("\"finalDisplayAfterRenderTarget\": \"_rt_debug_final_display_after_node_final\"") != std::string::npos,
               "manifest includes final display after render target");
+
+        std::filesystem::remove_all(outDir);
+    }
+
+    {
+        const auto outDir =
+            std::filesystem::temp_directory_path() / "yakkai-effect-layer-final-publish-boundary-capture-test";
+        std::filesystem::remove_all(outDir);
+
+        wallpaper::Scene scene;
+        scene.scene_id = "unit-scene";
+        scene.debugEffectCaptures = {
+            .outputDir = outDir.string(),
+            .commandLine = "unit --debug-effect-captures " + outDir.string(),
+        };
+        scene.renderTargets[wallpaper::SpecTex_Default.data()] = {
+            .width = 1280,
+            .height = 720,
+            .allowReuse = true,
+        };
+
+        auto finalPublishNode = std::make_shared<wallpaper::SceneNode>();
+
+        wallpaper::debug::EffectCaptureLayerInfo layer;
+        layer.sceneId = "unit-scene";
+        layer.layerName = "effect layer final publish";
+        layer.layerId = 405;
+        layer.publish.enabled = true;
+        layer.publish.finalPublishRenderTarget = wallpaper::SpecTex_Default;
+        layer.publish.finalDisplayRoute = "effect-layer-node-final-publish";
+
+        const auto targets = wallpaper::debug::registerEffectLayerFinalPublishBoundaryCapture(
+            scene, layer, *finalPublishNode, "node/final");
+
+        check(targets.beforeTarget == "_rt_debug_final_display_before_node_final",
+              "effect layer final publish before target is stable and sanitized");
+        check(targets.afterTarget == "_rt_debug_final_display_after_node_final",
+              "effect layer final publish after target is stable and sanitized");
+        check(layer.publish.finalDisplayBoundaryCaptureTiming ==
+                  "render-graph-copy-around-effect-layer-final-publish-node",
+              "effect layer final publish boundary timing is explicit");
+        check(layer.publish.finalDisplayBeforeRenderTarget == targets.beforeTarget,
+              "effect layer final publish stores before render target");
+        check(layer.publish.finalDisplayAfterRenderTarget == targets.afterTarget,
+              "effect layer final publish stores after render target");
+
+        wallpaper::debug::refreshEffectCaptureLayerInfo(scene, layer);
+        check(wallpaper::debug::writeEffectCaptureManifest(scene),
+              "manifest writes effect layer final publish boundary captures");
+
+        const std::string manifest = readTextFile(scene.debugEffectCaptures.manifestPath());
+        check(manifest.find("\"stage\": \"final-display-before\"") != std::string::npos,
+              "manifest includes effect layer final publish before stage");
+        check(manifest.find("\"stage\": \"final-display-after\"") != std::string::npos,
+              "manifest includes effect layer final publish after stage");
+        check(manifest.find("\"finalDisplayBoundaryCaptureTiming\": \"render-graph-copy-around-effect-layer-final-publish-node\"") != std::string::npos,
+              "manifest includes effect layer final publish boundary timing");
 
         std::filesystem::remove_all(outDir);
     }

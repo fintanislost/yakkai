@@ -75,6 +75,7 @@ class YakkaiSceneViewer : public QQuickItem
     Q_PROPERTY(QString debugEffectCapturesPath READ debugEffectCapturesPath WRITE setDebugEffectCapturesPath NOTIFY debugEffectCapturesPathChanged)
     Q_PROPERTY(QString debugEffectCaptureCommand READ debugEffectCaptureCommand WRITE setDebugEffectCaptureCommand NOTIFY debugEffectCaptureCommandChanged)
     Q_PROPERTY(int debugEffectCaptureDelayMs READ debugEffectCaptureDelayMs WRITE setDebugEffectCaptureDelayMs NOTIFY debugEffectCaptureDelayMsChanged)
+    Q_PROPERTY(QString debugEffectCaptureLayers READ debugEffectCaptureLayers WRITE setDebugEffectCaptureLayers NOTIFY debugEffectCaptureLayersChanged)
     Q_PROPERTY(QString debugEffectProbeLayers READ debugEffectProbeLayers WRITE setDebugEffectProbeLayers NOTIFY debugEffectProbeLayersChanged)
     Q_PROPERTY(QString debugEffectProbeHighRiskLayers READ debugEffectProbeHighRiskLayers WRITE setDebugEffectProbeHighRiskLayers NOTIFY debugEffectProbeHighRiskLayersChanged)
     Q_PROPERTY(QString debugEffectProbeChannelMapSlots READ debugEffectProbeChannelMapSlots WRITE setDebugEffectProbeChannelMapSlots NOTIFY debugEffectProbeChannelMapSlotsChanged)
@@ -133,6 +134,9 @@ public:
     int debugEffectCaptureDelayMs() const;
     void setDebugEffectCaptureDelayMs(int value);
 
+    QString debugEffectCaptureLayers() const;
+    void setDebugEffectCaptureLayers(const QString& value);
+
     QString debugEffectProbeLayers() const;
     void setDebugEffectProbeLayers(const QString& value);
 
@@ -173,6 +177,7 @@ signals:
     void debugEffectCapturesPathChanged();
     void debugEffectCaptureCommandChanged();
     void debugEffectCaptureDelayMsChanged();
+    void debugEffectCaptureLayersChanged();
     void debugEffectProbeLayersChanged();
     void debugEffectProbeHighRiskLayersChanged();
     void debugEffectProbeChannelMapSlotsChanged();
@@ -199,6 +204,7 @@ private:
     QString m_debugEffectCapturesPath;
     QString m_debugEffectCaptureCommand;
     int m_debugEffectCaptureDelayMs = 0;
+    QString m_debugEffectCaptureLayers;
     QString m_debugEffectProbeLayers;
     QString m_debugEffectProbeHighRiskLayers;
     QString m_debugEffectProbeChannelMapSlots;

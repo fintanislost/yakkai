@@ -491,6 +491,11 @@ bool EffectCaptureConfig::shouldProbeLayer(int layerId) const
     return containsLayerId(probeLayerIds, layerId);
 }
 
+bool EffectCaptureConfig::shouldCaptureLayer(int layerId) const
+{
+    return captureLayerIds.empty() || containsLayerId(captureLayerIds, layerId);
+}
+
 bool EffectCaptureConfig::shouldProbeHighRiskLayer(int layerId) const
 {
     return containsLayerId(highRiskProbeLayerIds, layerId);
@@ -614,7 +619,7 @@ std::string sanitizeCapturePathSegment(std::string_view value)
     return safe;
 }
 
-std::vector<int> parseProbeLayerIdList(std::string_view value)
+std::vector<int> parsePositiveLayerIdList(std::string_view value)
 {
     std::vector<int> ids;
     value = trimAsciiWhitespace(value);
@@ -645,6 +650,16 @@ std::vector<int> parseProbeLayerIdList(std::string_view value)
         }
         value.remove_prefix(comma + 1);
     }
+}
+
+std::vector<int> parseProbeLayerIdList(std::string_view value)
+{
+    return parsePositiveLayerIdList(value);
+}
+
+std::vector<int> parseCaptureLayerIdList(std::string_view value)
+{
+    return parsePositiveLayerIdList(value);
 }
 
 std::vector<int> parseProbeChannelMapSlotList(std::string_view value)
@@ -811,7 +826,8 @@ void registerEffectCapture(Scene& scene,
                            std::string_view stage,
                            std::string_view renderTarget)
 {
-    if (!scene.debugEffectCaptures.enabled()) {
+    if (!scene.debugEffectCaptures.enabled() ||
+        !scene.debugEffectCaptures.shouldCaptureLayer(layer.layerId)) {
         return;
     }
 
@@ -884,6 +900,22 @@ registerFinalDisplayBoundaryCapture(Scene& scene,
         .beforeTarget = targets.beforeTarget,
         .afterTarget = targets.afterTarget,
     });
+    return targets;
+}
+
+EffectCaptureFinalDisplayBoundaryTargets
+registerEffectLayerFinalPublishBoundaryCapture(Scene& scene,
+                                               EffectCaptureLayerInfo& layer,
+                                               const SceneNode& node,
+                                               std::string_view suffix)
+{
+    auto targets = registerFinalDisplayBoundaryCapture(scene, layer, node, suffix);
+    layer.publish.finalDisplayBoundaryCaptureTiming =
+        targets.beforeTarget.empty()
+            ? std::string()
+            : "render-graph-copy-around-effect-layer-final-publish-node";
+    layer.publish.finalDisplayBeforeRenderTarget = targets.beforeTarget;
+    layer.publish.finalDisplayAfterRenderTarget = targets.afterTarget;
     return targets;
 }
 
@@ -1002,6 +1034,7 @@ bool writeEffectCaptureManifest(const Scene& scene)
         {"status", failed ? "failed" : "ok"},
         {"sceneId", scene.scene_id},
         {"commandLine", scene.debugEffectCaptures.commandLine},
+        {"captureLayerIds", scene.debugEffectCaptures.captureLayerIds},
         {"probeLayerIds", scene.debugEffectCaptures.probeLayerIds},
         {"captureDelayMs", scene.debugEffectCaptures.captureDelayMs},
         {"shaderTimeSeconds", scene.elapsingTime},

@@ -24,6 +24,7 @@ constexpr std::string_view PROPERTY_SCENE_PROPERTIES_JSON = "scene_properties_js
 constexpr std::string_view PROPERTY_DEBUG_EFFECT_CAPTURES = "debug_effect_captures";
 constexpr std::string_view PROPERTY_DEBUG_EFFECT_CAPTURE_COMMAND = "debug_effect_capture_command";
 constexpr std::string_view PROPERTY_DEBUG_EFFECT_CAPTURE_DELAY_MS = "debug_effect_capture_delay_ms";
+constexpr std::string_view PROPERTY_DEBUG_EFFECT_CAPTURE_LAYERS = "debug_effect_capture_layers";
 constexpr std::string_view PROPERTY_DEBUG_EFFECT_PROBE_LAYERS = "debug_effect_probe_layers";
 constexpr std::string_view PROPERTY_DEBUG_EFFECT_PROBE_HIGH_RISK_LAYERS = "debug_effect_probe_high_risk_layers";
 constexpr std::string_view PROPERTY_DEBUG_EFFECT_PROBE_CHANNELMAP_SLOTS = "debug_effect_probe_channelmap_slots";

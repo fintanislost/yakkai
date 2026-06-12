@@ -22,6 +22,7 @@ class SceneObject : public QQuickItem {
     Q_PROPERTY(QString debugEffectCapturesPath READ debugEffectCapturesPath WRITE setDebugEffectCapturesPath NOTIFY debugEffectCapturesPathChanged)
     Q_PROPERTY(QString debugEffectCaptureCommand READ debugEffectCaptureCommand WRITE setDebugEffectCaptureCommand NOTIFY debugEffectCaptureCommandChanged)
     Q_PROPERTY(int debugEffectCaptureDelayMs READ debugEffectCaptureDelayMs WRITE setDebugEffectCaptureDelayMs NOTIFY debugEffectCaptureDelayMsChanged)
+    Q_PROPERTY(QString debugEffectCaptureLayers READ debugEffectCaptureLayers WRITE setDebugEffectCaptureLayers NOTIFY debugEffectCaptureLayersChanged)
     Q_PROPERTY(QString debugEffectProbeLayers READ debugEffectProbeLayers WRITE setDebugEffectProbeLayers NOTIFY debugEffectProbeLayersChanged)
     Q_PROPERTY(QString debugEffectProbeHighRiskLayers READ debugEffectProbeHighRiskLayers WRITE setDebugEffectProbeHighRiskLayers NOTIFY debugEffectProbeHighRiskLayersChanged)
     Q_PROPERTY(QString debugEffectProbeChannelMapSlots READ debugEffectProbeChannelMapSlots WRITE setDebugEffectProbeChannelMapSlots NOTIFY debugEffectProbeChannelMapSlotsChanged)
@@ -52,6 +53,7 @@ public:
     QString debugEffectCapturesPath() const;
     QString debugEffectCaptureCommand() const;
     int debugEffectCaptureDelayMs() const;
+    QString debugEffectCaptureLayers() const;
     QString debugEffectProbeLayers() const;
     QString debugEffectProbeHighRiskLayers() const;
     QString debugEffectProbeChannelMapSlots() const;
@@ -65,6 +67,7 @@ public:
     void setDebugEffectCapturesPath(const QString& value);
     void setDebugEffectCaptureCommand(const QString& value);
     void setDebugEffectCaptureDelayMs(int value);
+    void setDebugEffectCaptureLayers(const QString& value);
     void setDebugEffectProbeLayers(const QString& value);
     void setDebugEffectProbeHighRiskLayers(const QString& value);
     void setDebugEffectProbeChannelMapSlots(const QString& value);
@@ -109,6 +112,7 @@ signals:
     void debugEffectCapturesPathChanged();
     void debugEffectCaptureCommandChanged();
     void debugEffectCaptureDelayMsChanged();
+    void debugEffectCaptureLayersChanged();
     void debugEffectProbeLayersChanged();
     void debugEffectProbeHighRiskLayersChanged();
     void debugEffectProbeChannelMapSlotsChanged();
@@ -130,6 +134,7 @@ private:
     QString m_debugEffectCapturesPath;
     QString m_debugEffectCaptureCommand;
     int m_debugEffectCaptureDelayMs { 0 };
+    QString m_debugEffectCaptureLayers;
     QString m_debugEffectProbeLayers;
     QString m_debugEffectProbeHighRiskLayers;
     QString m_debugEffectProbeChannelMapSlots;

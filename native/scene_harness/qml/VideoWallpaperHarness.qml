@@ -12,6 +12,7 @@ Item {
     property string debugEffectCapturesPath: ""
     property string debugEffectCaptureCommand: ""
     property int debugEffectCaptureDelayMs: 0
+    property string debugEffectCaptureLayers: ""
     property string debugEffectProbeLayers: ""
     property string debugEffectProbeHighRiskLayers: ""
     property string debugEffectProbeChannelMapSlots: ""

@@ -382,6 +382,7 @@ QString SceneObject::scenePropertiesJson() const { return m_scenePropertiesJson;
 QString SceneObject::debugEffectCapturesPath() const { return m_debugEffectCapturesPath; }
 QString SceneObject::debugEffectCaptureCommand() const { return m_debugEffectCaptureCommand; }
 int SceneObject::debugEffectCaptureDelayMs() const { return m_debugEffectCaptureDelayMs; }
+QString SceneObject::debugEffectCaptureLayers() const { return m_debugEffectCaptureLayers; }
 QString SceneObject::debugEffectProbeLayers() const { return m_debugEffectProbeLayers; }
 QString SceneObject::debugEffectProbeHighRiskLayers() const { return m_debugEffectProbeHighRiskLayers; }
 QString SceneObject::debugEffectProbeChannelMapSlots() const { return m_debugEffectProbeChannelMapSlots; }
@@ -444,6 +445,15 @@ void SceneObject::setDebugEffectCaptureDelayMs(int value) {
                  wallpaper::PROPERTY_DEBUG_EFFECT_CAPTURE_DELAY_MS,
                  m_debugEffectCaptureDelayMs);
     Q_EMIT debugEffectCaptureDelayMsChanged();
+}
+
+void SceneObject::setDebugEffectCaptureLayers(const QString& value) {
+    if (m_debugEffectCaptureLayers == value) return;
+    m_debugEffectCaptureLayers = value;
+    SET_PROPERTY(String,
+                 wallpaper::PROPERTY_DEBUG_EFFECT_CAPTURE_LAYERS,
+                 m_debugEffectCaptureLayers.toStdString());
+    Q_EMIT debugEffectCaptureLayersChanged();
 }
 
 void SceneObject::setDebugEffectProbeLayers(const QString& value) {

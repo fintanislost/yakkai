@@ -763,6 +763,11 @@ int main(int argc, char* argv[])
         QStringLiteral("ms"),
         QStringLiteral("0")
     );
+    QCommandLineOption debugEffectCaptureLayersOption(
+        QStringList{QStringLiteral("debug-effect-capture-layers")},
+        QStringLiteral("Only register and dump normal debug effect captures for the listed layer IDs. Requires --debug-effect-captures."),
+        QStringLiteral("ids")
+    );
     QCommandLineOption debugEffectProbeLayersOption(
         QStringList{QStringLiteral("debug-effect-probe-layers")},
         QStringLiteral("Layer IDs whose stripped puppet mixed effect chains should be rendered only for debug capture. Requires --debug-effect-captures."),
@@ -844,6 +849,7 @@ int main(int argc, char* argv[])
     parser.addOption(recordStartDelayOption);
     parser.addOption(debugEffectCapturesOption);
     parser.addOption(debugEffectCaptureDelayOption);
+    parser.addOption(debugEffectCaptureLayersOption);
     parser.addOption(debugEffectProbeLayersOption);
     parser.addOption(debugEffectProbeHighRiskLayersOption);
     parser.addOption(debugEffectProbeChannelMapSlotsOption);
@@ -879,6 +885,7 @@ int main(int argc, char* argv[])
     const QString recordStartDelayValue = parser.value(recordStartDelayOption).trimmed();
     const QString debugEffectCapturesPath = parser.value(debugEffectCapturesOption).trimmed();
     const QString debugEffectCaptureDelayValue = parser.value(debugEffectCaptureDelayOption).trimmed();
+    const QString debugEffectCaptureLayersValue = parser.value(debugEffectCaptureLayersOption).trimmed();
     const QString debugEffectProbeLayersValue = parser.value(debugEffectProbeLayersOption).trimmed();
     const QString debugEffectProbeHighRiskLayersValue = parser.value(debugEffectProbeHighRiskLayersOption).trimmed();
     const QString debugEffectProbeChannelMapSlotsValue = parser.value(debugEffectProbeChannelMapSlotsOption).trimmed();
@@ -895,6 +902,7 @@ int main(int argc, char* argv[])
     const QString debugSyntheticAudioIntervalValue = parser.value(debugSyntheticAudioIntervalOption).trimmed();
     const bool debugEffectCapturesRequested = !debugEffectCapturesPath.isEmpty();
     const bool debugEffectCaptureDelayRequested = parser.isSet(debugEffectCaptureDelayOption);
+    const bool debugEffectCaptureLayersRequested = !debugEffectCaptureLayersValue.isEmpty();
     const bool debugEffectProbeLayersRequested = !debugEffectProbeLayersValue.isEmpty();
     const bool debugEffectProbeHighRiskLayersRequested = !debugEffectProbeHighRiskLayersValue.isEmpty();
     const bool debugEffectProbeChannelMapSlotsRequested = !debugEffectProbeChannelMapSlotsValue.isEmpty();
@@ -910,6 +918,8 @@ int main(int argc, char* argv[])
     const QString debugEffectCaptureCommand = app.arguments().join(QLatin1Char(' '));
     const std::optional<int> debugEffectCaptureDelayMs =
         debugEffectCaptureDelayRequested ? parseNonNegativeInt(debugEffectCaptureDelayValue) : std::optional<int>(0);
+    const std::optional<QString> debugEffectCaptureLayers =
+        debugEffectCaptureLayersRequested ? parsePositiveIdList(debugEffectCaptureLayersValue) : std::optional<QString>(QString());
     const std::optional<QString> debugEffectProbeLayers =
         debugEffectProbeLayersRequested ? parsePositiveIdList(debugEffectProbeLayersValue) : std::optional<QString>(QString());
     const std::optional<QString> debugEffectProbeHighRiskLayers =
@@ -978,6 +988,10 @@ int main(int argc, char* argv[])
     }
     if (debugEffectCaptureDelayRequested && !debugEffectCapturesRequested) {
         qWarning() << "yakkai_scene_harness: --debug-effect-capture-delay-ms requires --debug-effect-captures";
+        return 2;
+    }
+    if (debugEffectCaptureLayersRequested && !debugEffectCapturesRequested) {
+        qWarning() << "yakkai_scene_harness: --debug-effect-capture-layers requires --debug-effect-captures";
         return 2;
     }
     if (debugEffectProbeLayersRequested && !debugEffectCapturesRequested) {
@@ -1061,6 +1075,10 @@ int main(int argc, char* argv[])
         qWarning() << "yakkai_scene_harness: invalid --debug-effect-capture-delay-ms value" << debugEffectCaptureDelayValue;
         return 2;
     }
+    if (!debugEffectCaptureLayers) {
+        qWarning() << "yakkai_scene_harness: invalid --debug-effect-capture-layers value" << debugEffectCaptureLayersValue;
+        return 2;
+    }
     if (debugEffectCapturesRequested && !QDir().mkpath(debugEffectCapturesDir)) {
         qWarning() << "yakkai_scene_harness: failed to create debug effect capture directory" << debugEffectCapturesDir;
         return 5;
@@ -1132,6 +1150,7 @@ int main(int argc, char* argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugEffectCapturesPath"), debugEffectCapturesDir);
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugEffectCaptureCommand"), debugEffectCaptureCommand);
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugEffectCaptureDelayMs"), *debugEffectCaptureDelayMs);
+    engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugEffectCaptureLayers"), *debugEffectCaptureLayers);
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugEffectProbeLayers"), *debugEffectProbeLayers);
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugEffectProbeHighRiskLayers"), *debugEffectProbeHighRiskLayers);
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugEffectProbeChannelMapSlots"), *debugEffectProbeChannelMapSlots);

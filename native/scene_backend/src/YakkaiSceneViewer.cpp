@@ -393,6 +393,21 @@ void YakkaiSceneViewer::setDebugEffectCaptureDelayMs(int value)
     emit debugEffectCaptureDelayMsChanged();
 }
 
+QString YakkaiSceneViewer::debugEffectCaptureLayers() const
+{
+    return m_debugEffectCaptureLayers;
+}
+
+void YakkaiSceneViewer::setDebugEffectCaptureLayers(const QString& value)
+{
+    if (m_debugEffectCaptureLayers == value) {
+        return;
+    }
+
+    m_debugEffectCaptureLayers = value;
+    emit debugEffectCaptureLayersChanged();
+}
+
 QString YakkaiSceneViewer::debugEffectProbeLayers() const
 {
     return m_debugEffectProbeLayers;

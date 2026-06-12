@@ -28,6 +28,8 @@ Automated validator that checks both structural rendering state and pixel output
 
 The validator clears `~/.cache/wescene-renderer/*/spvs01/` before each harness
 render so stale SPIR-V does not mask regressions.
+It writes validator artifacts to `smoke-tests/artifacts/tmp/yakkai-debug` by
+default; set `YAKKAI_VALIDATE_OUTDIR=/path/to/output` to override.
 
 When comparing delayed visual frames to effect-chain TGAs, pass
 `--debug-effect-capture-delay-ms <ms>` to the harness with the same timestamp as
@@ -225,7 +227,7 @@ layer-local-to-default-target registration:
 ```bash
 python3 tools/arona_layer405_fresh_publish_compare.py \
   --windows yakkai_arona/layer405_final_publish_composite_fresh.zip \
-  --output /tmp/yakkai-layer405-fresh-publish-compare
+  --output smoke-tests/artifacts/tmp/yakkai-layer405-fresh-publish-compare
 ```
 
 Run it with a fresh Arona comparator output root when checking Yakkai's
@@ -234,8 +236,8 @@ final-publish pass state and isolated layer final-publish boundary:
 ```bash
 python3 tools/arona_layer405_fresh_publish_compare.py \
   --windows yakkai_arona/layer405_final_publish_composite_fresh.zip \
-  --yakkai-root /tmp/yakkai-layer405-fresh-yakkai-rerun \
-  --output /tmp/yakkai-layer405-default-delta-locator
+  --yakkai-root smoke-tests/artifacts/tmp/yakkai-layer405-fresh-yakkai-rerun \
+  --output smoke-tests/artifacts/tmp/yakkai-layer405-default-delta-locator
 ```
 
 Current fresh Windows evidence publishes a `4160x2923` layer target into the
@@ -339,35 +341,68 @@ Windows evidence. It asks for all internal pass outputs between Windows
 `prefix-3` and `prefix-7`, with replay event ids, XML draw/chunk ids,
 SRV/RTV bindings, constants, blend state, and full-resolution pass PNGs.
 
+### `tools/arona_layer405_full_pass_align.py`
+
+Full internal Windows pass-boundary alignment for Arona layer `405`. Use this
+after the Windows side provides `yakkai_arona/layer405_full_pass_export.zip`
+from fresh Day/Sunset/Night RenderDoc captures and after Yakkai has a matching
+debug-effect capture root:
+
+```bash
+python3 tools/arona_layer405_full_pass_align.py \
+  --windows yakkai_arona/layer405_full_pass_export.zip \
+  --yakkai-root smoke-tests/artifacts/tmp/arona-layer405 \
+  --output smoke-tests/artifacts/tmp/yakkai-layer405-full-pass-alignment
+```
+
+The tool maps Windows pass order `1` to Yakkai `effect-input` and later pass
+orders to `material-output-<passOrder-1>-0`, then writes per-pass RMSE,
+alpha-weighted RMSE, alpha RMSE, and adjacent-pass delta cosine to
+`alignment.json` and `alignment.md`. It can discover variant folders such as
+`day`, `sunset-buffered`, and `night-buffered` under the supplied local
+artifact root. Treat `close` rows as pass-boundary evidence only; subtle
+animated waterwaves or shake motion still needs the normal visual gate before a
+renderer behavior change is justified.
+
 The current real run at
-`/tmp/yakkai-layer405-final-publish-boundary-compare` classifies every
+`smoke-tests/artifacts/tmp/yakkai-layer405-final-publish-boundary-compare`
+classifies every
 variant/sample as `missing-default-delta` from `default-before-effect` to
 `default-after-effect`, while `layerFinalPublishBoundary` is
 `delta-at-windows-sample` for Day/Sunset/Night. That resolves the old
 default-delta miss as a capture-timing artifact. The current content-stage run
-at `/tmp/yakkai-layer405-content-stage-attribution` shows raw `effect-input` is
-near-exact, `prefix-3` is close, and `prefix-7`/`final-publish-input` diverge
-for all time variants. The transition run at
-`/tmp/yakkai-layer405-content-transition-attribution` narrows the worst block to
+at `smoke-tests/artifacts/tmp/yakkai-layer405-content-stage-attribution` shows
+raw `effect-input`/`prefix-3` remain close, Day and Night now classify as
+`content-stage-close`, and Sunset remains `content-stage-drift` at `prefix-7`.
+The transition run at
+`smoke-tests/artifacts/tmp/yakkai-layer405-content-transition-attribution`
+still narrows the worst block to
 `prefix-3 -> prefix-7` for all variants. The range run at
-`/tmp/yakkai-layer405-content-range-attribution` still classifies all variants
-as `content-range-mismatch`: Day remains closest to a single waterwaves step,
-Night to a pulse/pulse/LUT range, and Sunset to almost the full chain. The next
-microscope run at `/tmp/yakkai-layer405-middle-block-microscope` classifies all
-variants as `middle-block-incomplete-progress`: Day moves away at
-`material-output-2-0 -> material-output-3-0`, Sunset moves slightly toward at
-that same step but remains far off, and Night has a large helpful LUT step at
-`2 -> 3` followed by a smaller waterwaves regression at `4 -> 5`. The next
-selected-step metadata run at `/tmp/yakkai-layer405-selected-step-metadata`
-preserves material constants and texture bindings for those same steps and
-writes the current Windows internal-pass request. The next useful Arona target
-is finer evidence or effect-internal work inside the middle layer-local
-visible-effect block before final publish, not color masks,
-source-coordinate mapping, layer loading, final-publish routing, choosing a
-wider Yakkai range, or another Windows capture request for this question.
-The tool extracts local diagnostic archives and is intended for trusted local
-RenderDoc exports; it is not a general-purpose untrusted zip scanner. Full
-registration over the real package can take a few minutes.
+`smoke-tests/artifacts/tmp/yakkai-layer405-content-range-attribution`
+classifies Day and Night as `content-range-close`, while Sunset remains
+`content-range-drift`. The current microscope run at
+`smoke-tests/artifacts/tmp/yakkai-layer405-middle-block-microscope` classifies
+Day and Night as `middle-block-close`, and Sunset as `middle-block-drift`.
+Selected targets are Day `material-output-10-0 -> material-output-11-0`
+(`shake -> shake`), Sunset `material-output-11-0 -> material-output-12-0`
+(`shake -> shake`), and Night `material-output-2-0 -> material-output-3-0`
+(`pulse -> lut_loader`). The selected-step metadata run at
+`smoke-tests/artifacts/tmp/yakkai-layer405-selected-step-metadata` preserves
+material constants and texture bindings for those same steps and writes the
+current Windows internal-pass request. The full-pass alignment run at
+`smoke-tests/artifacts/tmp/arona-layer405-full-pass-alignment` uses the completed
+Windows pass-boundary package and shows the extra Sunset/Night internal pass
+after `prefix-3` is present in Yakkai and close. Final layer-local outputs are
+also close for Day, Sunset, and Night, so the current evidence does not justify
+another broad Layer 405 renderer patch. Further Arona work should start from a
+new visible defect, stricter time-locked capture, or per-pass shader oracle
+rather than color masks, source-coordinate mapping, layer loading,
+final-publish routing, choosing a wider Yakkai range, or another Windows capture
+request for this question.
+These Layer 405 Windows-evidence tools read trusted local diagnostic archives
+from ignored workspace paths; they are not general-purpose untrusted zip
+scanners. Full registration over the real final-publish package can take a few
+minutes.
 
 ### `tools/arona_ribbon_tip_boundary.py`
 
@@ -447,8 +482,8 @@ class-level records:
 
 ```bash
 tools/effect-candidate-inventory.py \
-  /tmp/yakkai-debug/effect-captures-3228578419/manifest.json \
-  /tmp/yakkai-debug/effect-captures-3476236738/manifest.json
+  smoke-tests/artifacts/tmp/yakkai-debug/effect-captures-3228578419/manifest.json \
+  smoke-tests/artifacts/tmp/yakkai-debug/effect-captures-3476236738/manifest.json
 ```
 
 Use this before writing a new renderer allow predicate. The output groups
@@ -474,7 +509,7 @@ slice.
 Run the validator on the target scene before making changes:
 
 ```bash
-./tools/validate-scene.sh 3476236738 10000 | tee /tmp/yakkai-debug/baseline.txt
+./tools/validate-scene.sh 3476236738 10000 | tee smoke-tests/artifacts/tmp/yakkai-debug/baseline.txt
 ```
 
 Record key metrics: render nodes, effect passes, color variance, unique colors, average color.
@@ -500,7 +535,7 @@ Dump the scene JSON for analysis:
 # Or use the harness log to trace specific rendering paths.
 ```
 
-Use the validator log at `/tmp/yakkai-debug/validate-<id>.log` to trace:
+Use the validator log at `smoke-tests/artifacts/tmp/yakkai-debug/validate-<id>.log` to trace:
 - Which effects are being stripped vs kept
 - Which shaders fail to compile
 - Which materials fail to load

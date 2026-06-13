@@ -3,6 +3,7 @@
 #include "Policy/EffectPolicy.hpp"
 
 #include <cstdint>
+#include <array>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -40,11 +41,30 @@ struct EffectCaptureConfig {
     int probeMaxEffects { -1 };
     std::string puppetFinalMeshOverride;
     bool puppetEffectRouteOnly { false };
+    std::unordered_map<int, bool> layerVisibilityOverrides;
+
+    struct MouseParallax {
+        struct TimelinePoint {
+            int timeMs { 0 };
+            std::array<float, 2> position { 0.5f, 0.5f };
+        };
+
+        std::string inputSource { "default-center" };
+        bool hasRequestedPosition { false };
+        std::array<float, 2> requestedPosition { 0.5f, 0.5f };
+        std::vector<TimelinePoint> timeline;
+        std::optional<double> timelineElapsedMsAtCapture;
+        bool cameraEnabled { false };
+        float cameraAmount { 0.0f };
+        float cameraDelay { 0.0f };
+        float cameraMouseInfluence { 0.0f };
+    } mouseParallax;
 
     bool enabled() const { return !outputDir.empty(); }
     bool shouldCaptureLayer(int layerId) const;
     bool shouldProbeLayer(int layerId) const;
     bool shouldProbeHighRiskLayer(int layerId) const;
+    std::optional<bool> layerVisibilityOverrideFor(int layerId) const;
     std::filesystem::path manifestPath() const;
 };
 
@@ -229,6 +249,22 @@ struct EffectCaptureLayerInfo {
     int                      debugProbeKeptVisibleEffectCount { -1 };
     bool                     debugProbeEffectLimitTruncated { false };
     bool                     debugProbeRouteOnly { false };
+    bool                     debugLayerVisibilityOverrideRequested { false };
+    bool                     debugLayerVisibilityOverrideVisible { true };
+    bool                     debugLayerVisibilityOverrideOriginalVisible { true };
+    std::array<float, 2>     parallaxDepth { 0.0f, 0.0f };
+    bool                     parallaxDepthNonzero { false };
+};
+
+struct EffectCaptureMouseParallaxLayerInfo {
+    int layerId { 0 };
+    std::string layerName;
+    std::string layerKind;
+    std::array<float, 2> parallaxDepth { 0.0f, 0.0f };
+    int parentLayerId { 0 };
+    std::string parentLayerName;
+    bool childLookupAvailable { false };
+    std::vector<int> childLayerIds;
 };
 
 struct EffectCaptureRecord {
@@ -291,6 +327,8 @@ EffectProbeLimitDecision decideEffectProbeLimit(int originalVisibleEffectCount,
 std::optional<std::vector<PuppetAnimationLayerOverride>>
 parsePuppetAnimationLayerOverrideList(std::string_view value);
 
+std::unordered_map<int, bool> parseLayerVisibilityOverrideList(std::string_view value);
+
 std::filesystem::path capturePath(const EffectCaptureConfig& config,
                                   const EffectCaptureLayerInfo& layer,
                                   std::string_view stage);
@@ -324,6 +362,16 @@ void recordEffectPassState(Scene& scene, const EffectPassState& state);
 void recordStrippedEffectCandidate(Scene& scene, const EffectCaptureLayerInfo& layer);
 
 void recordPuppetAnimationLayerInventory(Scene& scene, const EffectCaptureLayerInfo& layer);
+
+void recordMouseParallaxLayer(Scene& scene,
+                              int layerId,
+                              std::string_view layerName,
+                              std::string_view layerKind,
+                              std::array<float, 2> parallaxDepth,
+                              int parentLayerId,
+                              std::string_view parentLayerName,
+                              const std::vector<int>& childLayerIds,
+                              bool childLookupAvailable);
 
 bool shouldProbeStrippedEffectLayer(const EffectCaptureConfig& config,
                                     const EffectCaptureLayerInfo& layer);

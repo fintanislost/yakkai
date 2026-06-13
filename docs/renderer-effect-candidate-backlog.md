@@ -144,6 +144,12 @@ Latest source artifacts used for this revision:
   `/tmp/yakkai-layer405-selected-step-metadata/summary.md`,
   `/tmp/yakkai-layer405-selected-step-metadata/selected-step-crops/`, and
   `/tmp/yakkai-layer405-selected-step-metadata/middle-block-windows-request.md`.
+- Arona 2026-06-12 disabled/gated layer audit:
+  `smoke-tests/artifacts/tmp/arona-disabled-layer-inventory/inventory.md`,
+  `smoke-tests/artifacts/tmp/arona-disabled-layer-inventory/inventory.json`,
+  `smoke-tests/artifacts/tmp/arona-disabled-layer-probes/layer-306-visible-02/final.png`,
+  and
+  `smoke-tests/artifacts/tmp/arona-disabled-layer-probes/layer-50-visible-02/final.png`.
 
 Those artifacts are generated diagnostics and are not committed baselines. If
 they are missing, regenerate them with `--debug-effect-captures` before changing
@@ -421,6 +427,10 @@ These are not candidates for broad re-enable work:
 
 - Sleeping Arona (`3228578419`) background LUT and blur layers.
 - Sleeping Arona `ARONA_CROP_SHEET` puppet effect chain.
+- Sleeping Arona disabled/gated overlay layers that only add authored sleep
+  visuals, such as layer `306` (`Shooting_Star_01`) and layer `50`
+  (`Full Composition Layer`), unless a future visual bug specifically names
+  that overlay content.
 - Fullscreen, composelayer, solidlayer, projectlayer, and utility carriers.
 - Audio visualizer layers.
 
@@ -429,7 +439,7 @@ narrow predicate and passes visual review.
 
 ## Recommended Follow-Up Order
 
-1. Arona layer `405` middle visible-effect block internals before final publish:
+1. Arona full-frame/visual drift after Layer `405` pass-boundary parity:
    fresh Windows intake under
    `yakkai_arona/layer405_final_publish_composite_fresh.zip` provides
    authoritative capture-session-labeled Day/Sunset/Night final-publish
@@ -440,19 +450,53 @@ narrow predicate and passes visual review.
    Windows sample points, and
    `/tmp/yakkai-layer405-isolated-publish-parity` classifies Day/Night as
    `isolated-publish-mismatch` plus Sunset as `isolated-publish-mixed`. The
-   content-stage, transition, and range attribution passes all point at the
-   Windows `prefix-3 -> prefix-7` checkpoint block. The range pass rules out a
-   simple adjacent-vs-cumulative Yakkai stage-selection mistake, and the
-   middle-block microscope narrows the next useful target to finer evidence or
-   shader/effect-internal work around the first post-pulse material step and
-   later waterwaves segment.
-2. Blur/LUT renderer parity for other scenes or non-regular classes: only after
+   content-stage, transition, and range attribution passes initially pointed at
+   the Windows `prefix-3 -> prefix-7` checkpoint block, but the corrected
+   full-chain evidence supersedes that selector. The first full-pass alignment
+   used Yakkai captures at `shaderTimeSeconds=0.0`; the first exact-time rerun
+   still prefix-sliced Layer `405` with `--debug-effect-probe-max-effects 7`,
+   which created a false material-output `8`/final-publish alpha mismatch by
+   truncating the authored shake tail. The no-probe full-chain rerun in
+   `smoke-tests/artifacts/tmp/arona-layer405-full-pass-align-gtime-full-chain-v2/alignment.md`
+   aligns Day/Sunset/Night Yakkai captures to the Windows pass times and
+   classifies every exported Layer `405` pass as `close` through final-publish
+   input. The disabled/gated-layer audit then probed layer `306`
+   (`Shooting_Star_01`) and layer `50` (`Full Composition Layer`) with
+   harness-only visibility overrides; both add intentional sleep/Z/rainbow
+   overlay content, while the remaining raw-off candidates are empty or
+   media/audio utility paths. Treat Layer `405` waterwaves, shake-tail, generic
+   final-publish pass-boundary work, and broad disabled-layer enablement as
+   closed for now; the next Arona target should come from full-frame/visual
+   drift evidence, not another internal pass patch.
+2. Centralized layer activation policy cleanup: turn the current scattered
+   decisions into an explicit pipeline:
+   `discover layer -> classify behavior -> resolve runtime visibility -> check
+   render/effect support -> render or skip with manifest reason`. This should
+   keep production behavior conservative while making future layer decisions
+   explainable in one place. The first design should preserve the existing
+   supported buckets (`authored-visible`, `script-gated`, `time-of-day`,
+   `user-property`, `media-runtime`, `audio-runtime`, `decorative-authored-off`,
+   `utility/carrier`, `empty`, and `diagnostic-only`) and include native tests
+   plus manifest evidence for every bucket.
+3. Arona media/runtime feature slice: inspect the deferred media/audio layers
+   from the disabled-layer audit, identify the Wallpaper Engine media APIs and
+   properties they require, and build a generic runtime model before enabling
+   any media widget or audio utility layer in production. This is separate from
+   effect-chain enablement and should start with diagnostics/harness fixtures
+   rather than forced visibility.
+4. Mouse-driven shift/parallax slice (active first slice): investigate Windows Wallpaper Engine's
+   desktop mouse listener behavior for Arona, especially camera parallax or
+   layer shift driven by mouse position across the desktop. The current first
+   slice adds harness-only `--debug-mouse-position` evidence, manifest
+   `mouseParallax` diagnostics, and `tools/arona_mouse_parallax_probe.py`
+   left/center/right captures before changing Plasma runtime behavior.
+5. Blur/LUT renderer parity for other scenes or non-regular classes: only after
    the harness can compare enough frames to detect washed-out output and
    alpha/load regressions.
-3. Puppet mixed-chain renderer repair: use the Phase 3.8 probe captures as
+6. Puppet mixed-chain renderer repair: use the Phase 3.8 probe captures as
    negative evidence, and only revisit policy after the offscreen puppet
    effect publish path no longer occludes the final frame.
-4. Audio-reactive utility layers: separate from effect-chain re-enable work.
+7. Audio-reactive utility layers: separate from effect-chain re-enable work.
 
 Each follow-up should include:
 
@@ -1080,6 +1124,20 @@ Acceptance:
   ask for every internal pass output between Windows `prefix-3` and `prefix-7`
   with event ids, SRV/RTV bindings, constants, blend state, and full-resolution
   pass PNGs.
+- the full-pass Windows evidence follow-up is now complete and corrected for
+  timing and prefix-slice artifacts. The initial run in
+  `smoke-tests/artifacts/tmp/arona-layer405-full-pass-align-selected` selected
+  waterwaves-looking rows, but the Yakkai captures were at shader time `0.0`.
+  The first exact-time run in
+  `smoke-tests/artifacts/tmp/arona-layer405-full-pass-align-gtime` still used a
+  seven-effect Layer `405` probe, so its material-output `8`
+  (`genericimage4`/final-publish) alpha mismatch was caused by truncating the
+  authored shake tail. The corrected no-probe full-chain run in
+  `smoke-tests/artifacts/tmp/arona-layer405-full-pass-align-gtime-full-chain-v2`
+  aligns `yakkai_arona/layer405_full_pass_export.zip` against Yakkai captures at
+  the Windows `g_Time` values and classifies every exported Layer `405` pass as
+  `close` for Day/Sunset/Night. That closes the current waterwaves, shake-tail,
+  and final-publish pass-boundary hypotheses for Layer `405`.
 - no additional Windows capture is currently required for the color-mask
   question. No renderer behavior change was made and no Arona-specific
   production logic was added. Any future color-mask or blend-mode renderer

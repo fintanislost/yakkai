@@ -65,6 +65,7 @@ Kirigami.FormLayout {
     property string cfg_WEScenePropertiesJson
     property bool cfg_WESceneExperimentalEnabled
     property bool cfg_WESceneMouseInput
+    property bool cfg_WESceneMouseDiagnosticsEnabled
     property string cfg_PlaylistsJson
     property int cfg_ActivePlaylistIndex
     property string cfg_UmbrellaSelectedType

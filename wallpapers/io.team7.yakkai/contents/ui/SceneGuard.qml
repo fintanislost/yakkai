@@ -18,6 +18,7 @@ Item {
     property string emptyMessage: qsTr("Select a Wallpaper Engine scene wallpaper in the wallpaper settings.")
     property bool experimentalEnabled: false
     property bool mouseInputEnabled: false
+    property bool mouseDiagnosticsEnabled: false
     property int fillModeValue: 0
     property bool muted: true
     property bool runtimeActive: false
@@ -27,6 +28,7 @@ Item {
     property string runtimeScenePropertiesJson: "{}"
     property int runtimeFillModeValue: 0
     property bool runtimeMouseInputEnabled: false
+    property bool runtimeMouseDiagnosticsEnabled: false
 
     readonly property bool openGlScenegraph: GraphicsInfo.api === GraphicsInfo.OpenGL
     readonly property string graphicsBackendName: graphicsApiName()
@@ -72,6 +74,7 @@ Item {
         runtimeScenePropertiesJson = scenePropertiesJson
         runtimeFillModeValue = fillModeValue
         runtimeMouseInputEnabled = mouseInputEnabled
+        runtimeMouseDiagnosticsEnabled = mouseDiagnosticsEnabled
     }
 
     function activateRuntime() {
@@ -126,6 +129,10 @@ Item {
         log("scene guard mouseInputEnabled=" + mouseInputEnabled)
         scheduleRuntimeRestartIfReady("mouseInputEnabledChanged")
     }
+    onMouseDiagnosticsEnabledChanged: {
+        runtimeMouseDiagnosticsEnabled = mouseDiagnosticsEnabled
+        log("scene guard mouseDiagnosticsEnabled=" + mouseDiagnosticsEnabled)
+    }
     onFillModeValueChanged: {
         log("scene guard fillModeValue=" + fillModeValue)
         scheduleRuntimeRestartIfReady("fillModeValueChanged")
@@ -145,6 +152,7 @@ Item {
             + " assets=" + assetsPath
             + " experimentalEnabled=" + experimentalEnabled
             + " mouseInputEnabled=" + mouseInputEnabled
+            + " mouseDiagnosticsEnabled=" + mouseDiagnosticsEnabled
             + " fillModeValue=" + fillModeValue
             + " graphicsApi=" + graphicsBackendName
             + " openGlScenegraph=" + openGlScenegraph)
@@ -191,6 +199,7 @@ Item {
             fillModeValue: root.runtimeFillModeValue
             muted: root.muted
             mouseInputEnabled: root.runtimeMouseInputEnabled
+            mouseDiagnosticsEnabled: root.runtimeMouseDiagnosticsEnabled
         }
     }
 

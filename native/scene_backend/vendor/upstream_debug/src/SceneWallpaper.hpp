@@ -32,6 +32,10 @@ constexpr std::string_view PROPERTY_DEBUG_EFFECT_PROBE_MAX_EFFECTS = "debug_effe
 constexpr std::string_view PROPERTY_DEBUG_PUPPET_EFFECT_FINAL_MESH = "debug_puppet_effect_final_mesh";
 constexpr std::string_view PROPERTY_DEBUG_PUPPET_EFFECT_ROUTE_ONLY = "debug_puppet_effect_route_only";
 constexpr std::string_view PROPERTY_DEBUG_PUPPET_ANIMATION_LAYER_OVERRIDES = "debug_puppet_animation_layer_overrides";
+constexpr std::string_view PROPERTY_DEBUG_LAYER_VISIBILITY_OVERRIDES = "debug_layer_visibility_overrides";
+constexpr std::string_view PROPERTY_DEBUG_MOUSE_POSITION = "debug_mouse_position";
+constexpr std::string_view PROPERTY_DEBUG_MOUSE_TIMELINE = "debug_mouse_timeline";
+constexpr std::string_view PROPERTY_DEBUG_INTERACTIVE_MOUSE = "debug_interactive_mouse";
 
 #include "Core/NoCopyMove.hpp"
 class MainHandler;

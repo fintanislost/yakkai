@@ -21,6 +21,10 @@ Item {
     property string debugPuppetEffectFinalMesh: ""
     property bool debugPuppetEffectRouteOnly: false
     property string debugPuppetAnimationLayerOverrides: ""
+    property string debugLayerVisibilityOverrides: ""
+    property string debugMousePosition: ""
+    property string debugMouseTimeline: ""
+    property bool debugInteractiveMouse: false
     property string scenePropertiesJson: ""
 
     signal firstFrameReady()

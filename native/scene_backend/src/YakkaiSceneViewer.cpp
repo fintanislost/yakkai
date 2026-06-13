@@ -322,6 +322,30 @@ void YakkaiSceneViewer::setMouseInputEnabled(bool value)
     emit mouseInputEnabledChanged();
 }
 
+bool YakkaiSceneViewer::mouseDiagnosticsEnabled() const
+{
+    return m_mouseDiagnosticsEnabled;
+}
+
+void YakkaiSceneViewer::setMouseDiagnosticsEnabled(bool value)
+{
+    if (m_mouseDiagnosticsEnabled == value) {
+        return;
+    }
+
+    m_mouseDiagnosticsEnabled = value;
+    if (!value && !m_lastMouseDiagnostic.isEmpty()) {
+        m_lastMouseDiagnostic.clear();
+        emit lastMouseDiagnosticChanged();
+    }
+    emit mouseDiagnosticsEnabledChanged();
+}
+
+QString YakkaiSceneViewer::lastMouseDiagnostic() const
+{
+    return m_lastMouseDiagnostic;
+}
+
 bool YakkaiSceneViewer::validationLayersEnabled() const
 {
     return m_validationLayersEnabled;
@@ -511,6 +535,66 @@ void YakkaiSceneViewer::setDebugPuppetAnimationLayerOverrides(const QString& val
 
     m_debugPuppetAnimationLayerOverrides = value;
     emit debugPuppetAnimationLayerOverridesChanged();
+}
+
+QString YakkaiSceneViewer::debugLayerVisibilityOverrides() const
+{
+    return m_debugLayerVisibilityOverrides;
+}
+
+void YakkaiSceneViewer::setDebugLayerVisibilityOverrides(const QString& value)
+{
+    if (m_debugLayerVisibilityOverrides == value) {
+        return;
+    }
+
+    m_debugLayerVisibilityOverrides = value;
+    emit debugLayerVisibilityOverridesChanged();
+}
+
+QString YakkaiSceneViewer::debugMousePosition() const
+{
+    return m_debugMousePosition;
+}
+
+void YakkaiSceneViewer::setDebugMousePosition(const QString& value)
+{
+    if (m_debugMousePosition == value) {
+        return;
+    }
+
+    m_debugMousePosition = value;
+    emit debugMousePositionChanged();
+}
+
+QString YakkaiSceneViewer::debugMouseTimeline() const
+{
+    return m_debugMouseTimeline;
+}
+
+void YakkaiSceneViewer::setDebugMouseTimeline(const QString& value)
+{
+    if (m_debugMouseTimeline == value) {
+        return;
+    }
+
+    m_debugMouseTimeline = value;
+    emit debugMouseTimelineChanged();
+}
+
+bool YakkaiSceneViewer::debugInteractiveMouse() const
+{
+    return m_debugInteractiveMouse;
+}
+
+void YakkaiSceneViewer::setDebugInteractiveMouse(bool value)
+{
+    if (m_debugInteractiveMouse == value) {
+        return;
+    }
+
+    m_debugInteractiveMouse = value;
+    emit debugInteractiveMouseChanged();
 }
 
 QString YakkaiSceneViewer::scenePropertiesJson() const

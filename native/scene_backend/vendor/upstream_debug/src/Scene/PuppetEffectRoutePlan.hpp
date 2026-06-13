@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -33,5 +34,10 @@ struct PuppetEffectRoutePlan {
 };
 
 PuppetEffectRoutePlan decidePuppetEffectRoutePlan(const PuppetEffectRoutePlanInput& input);
+
+std::array<float, 2> decideEffectLayerMaterialParallaxDepth(
+    const PuppetEffectRoutePlan& routePlan,
+    bool isFinalPublishedMaterialNode,
+    std::array<float, 2> sourceParallaxDepth);
 
 } // namespace wallpaper

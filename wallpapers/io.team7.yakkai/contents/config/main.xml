@@ -142,6 +142,10 @@
       <label>Enable direct mouse and hover input for the experimental scene renderer</label>
       <default>false</default>
     </entry>
+    <entry name="WESceneMouseDiagnosticsEnabled" type="Bool">
+      <label>Enable hidden mouse coordinate diagnostics for the experimental scene renderer</label>
+      <default>false</default>
+    </entry>
     <entry name="PlaylistsJson" type="String">
       <label>Legacy per-monitor playlist JSON migrated into the shared playlist library</label>
       <default></default>

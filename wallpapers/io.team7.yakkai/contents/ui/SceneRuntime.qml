@@ -18,6 +18,7 @@ Item {
     property int fillModeValue: 0
     property bool muted: true
     property bool mouseInputEnabled: false
+    property bool mouseDiagnosticsEnabled: false
     property bool firstFrameSeen: false
 
     function assetsUrl(path) {
@@ -75,7 +76,8 @@ Item {
             + " graphicsApi=" + graphicsApiName()
             + " graphicsVersion=" + GraphicsInfo.majorVersion + "." + GraphicsInfo.minorVersion
             + " fillModeValue=" + fillModeValue
-            + " mouseInputEnabled=" + mouseInputEnabled)
+            + " mouseInputEnabled=" + mouseInputEnabled
+            + " mouseDiagnosticsEnabled=" + mouseDiagnosticsEnabled)
     }
 
     function sceneFillModeEnum() {
@@ -113,6 +115,11 @@ Item {
         log("scene runtime mouseInputEnabled=" + mouseInputEnabled)
     }
 
+    function applyMouseDiagnostics() {
+        player.mouseDiagnosticsEnabled = mouseDiagnosticsEnabled
+        log("scene runtime mouseDiagnosticsEnabled=" + mouseDiagnosticsEnabled)
+    }
+
     onSceneSourceChanged: {
         firstFrameSeen = false
         firstFrameWatchdog.restart()
@@ -123,6 +130,7 @@ Item {
     onMutedChanged: log("scene runtime muted=" + muted)
     onFillModeValueChanged: applyFillMode()
     onMouseInputEnabledChanged: applyMouseInput()
+    onMouseDiagnosticsEnabledChanged: applyMouseDiagnostics()
     onWidthChanged: logGeometry("widthChanged")
     onHeightChanged: logGeometry("heightChanged")
     onFirstFrameSeenChanged: {
@@ -163,11 +171,13 @@ Item {
         muted: root.muted
         volume: root.muted ? 0.0 : 1.0
         mouseInputEnabled: root.mouseInputEnabled
+        mouseDiagnosticsEnabled: root.mouseDiagnosticsEnabled
 
         Component.onCompleted: {
             root.log("scene runtime component completed")
             root.applyFillMode()
             root.applyMouseInput()
+            root.applyMouseDiagnostics()
             root.logGeometry("playerCompleted")
             if (String(root.sceneSource).length > 0) {
                 root.log("scene runtime initial source=" + String(root.sceneSource))
@@ -194,6 +204,12 @@ Item {
             function onBackendStatusChanged() {
                 root.log("scene viewer backendStatus=" + player.backendStatus)
             }
+
+            function onLastMouseDiagnosticChanged() {
+                if (root.mouseDiagnosticsEnabled) {
+                    root.log("scene viewer " + player.lastMouseDiagnostic)
+                }
+            }
         }
     }
 
@@ -202,7 +218,8 @@ Item {
             + " assets=" + assetsPath
             + " muted=" + muted
             + " fillModeValue=" + fillModeValue
-            + " mouseInputEnabled=" + mouseInputEnabled)
+            + " mouseInputEnabled=" + mouseInputEnabled
+            + " mouseDiagnosticsEnabled=" + mouseDiagnosticsEnabled)
         logGeometry("wrapperCompleted")
     }
 

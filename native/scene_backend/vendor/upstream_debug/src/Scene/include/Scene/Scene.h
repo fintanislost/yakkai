@@ -49,6 +49,8 @@ public:
     std::vector<wallpaper::debug::EffectCaptureLayerInfo> debugEffectStrippedCandidates;
     std::vector<wallpaper::debug::EffectCaptureLayerInfo> debugEffectProtectedPuppetDiagnostics;
     std::vector<wallpaper::debug::EffectCaptureLayerInfo> debugPuppetAnimationLayerInventory;
+    std::vector<wallpaper::debug::EffectCaptureMouseParallaxLayerInfo>
+        debugMouseParallaxLayerInventory;
     std::vector<wallpaper::debug::EffectCaptureFinalDisplayBoundaryHook>
         debugEffectFinalDisplayBoundaryCaptures;
 

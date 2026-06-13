@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <atomic>
 #include <array>
+#include <cmath>
 #include <functional>
 
 #include "glExtra.hpp"
@@ -390,6 +391,12 @@ QString SceneObject::debugEffectProbeMaxEffects() const { return m_debugEffectPr
 QString SceneObject::debugPuppetEffectFinalMesh() const { return m_debugPuppetEffectFinalMesh; }
 bool SceneObject::debugPuppetEffectRouteOnly() const { return m_debugPuppetEffectRouteOnly; }
 QString SceneObject::debugPuppetAnimationLayerOverrides() const { return m_debugPuppetAnimationLayerOverrides; }
+QString SceneObject::debugLayerVisibilityOverrides() const { return m_debugLayerVisibilityOverrides; }
+QString SceneObject::debugMousePosition() const { return m_debugMousePosition; }
+QString SceneObject::debugMouseTimeline() const { return m_debugMouseTimeline; }
+bool SceneObject::debugInteractiveMouse() const { return m_debugInteractiveMouse; }
+bool SceneObject::mouseDiagnosticsEnabled() const { return m_mouseDiagnosticsEnabled; }
+QString SceneObject::lastMouseDiagnostic() const { return m_lastMouseDiagnostic; }
 
 int   SceneObject::fps() const { return m_fps; }
 int   SceneObject::fillMode() const { return m_fillMode; }
@@ -519,6 +526,54 @@ void SceneObject::setDebugPuppetAnimationLayerOverrides(const QString& value) {
     Q_EMIT debugPuppetAnimationLayerOverridesChanged();
 }
 
+void SceneObject::setDebugLayerVisibilityOverrides(const QString& value) {
+    if (m_debugLayerVisibilityOverrides == value) return;
+    m_debugLayerVisibilityOverrides = value;
+    SET_PROPERTY(String,
+                 wallpaper::PROPERTY_DEBUG_LAYER_VISIBILITY_OVERRIDES,
+                 m_debugLayerVisibilityOverrides.toStdString());
+    Q_EMIT debugLayerVisibilityOverridesChanged();
+}
+
+void SceneObject::setDebugMousePosition(const QString& value) {
+    if (m_debugMousePosition == value) return;
+    m_debugMousePosition = value;
+    SET_PROPERTY(String,
+                 wallpaper::PROPERTY_DEBUG_MOUSE_POSITION,
+                 m_debugMousePosition.toStdString());
+    Q_EMIT debugMousePositionChanged();
+}
+
+void SceneObject::setDebugMouseTimeline(const QString& value) {
+    if (m_debugMouseTimeline == value) return;
+    m_debugMouseTimeline = value;
+    SET_PROPERTY(String,
+                 wallpaper::PROPERTY_DEBUG_MOUSE_TIMELINE,
+                 m_debugMouseTimeline.toStdString());
+    Q_EMIT debugMouseTimelineChanged();
+}
+
+void SceneObject::setDebugInteractiveMouse(bool value) {
+    if (m_debugInteractiveMouse == value) return;
+    m_debugInteractiveMouse = value;
+    SET_PROPERTY(Bool,
+                 wallpaper::PROPERTY_DEBUG_INTERACTIVE_MOUSE,
+                 m_debugInteractiveMouse);
+    Q_EMIT debugInteractiveMouseChanged();
+}
+
+void SceneObject::setMouseDiagnosticsEnabled(bool value) {
+    if (m_mouseDiagnosticsEnabled == value) return;
+    m_mouseDiagnosticsEnabled = value;
+    if (value) {
+        m_mouseDiagnosticLogTimer = QElapsedTimer();
+    } else if (! m_lastMouseDiagnostic.isEmpty()) {
+        m_lastMouseDiagnostic.clear();
+        Q_EMIT lastMouseDiagnosticChanged();
+    }
+    Q_EMIT mouseDiagnosticsEnabledChanged();
+}
+
 void SceneObject::setFps(int value) {
     if (m_fps == value) return;
     m_fps = value;
@@ -566,13 +621,41 @@ void SceneObject::setAcceptMouse(bool value) {
 void SceneObject::setAcceptHover(bool value) { setAcceptHoverEvents(value); }
 
 void SceneObject::mousePressEvent(QMouseEvent* event) {}
+void SceneObject::recordMouseDiagnostic(double normalizedX, double normalizedY, const QString& source) {
+    if (! m_mouseDiagnosticsEnabled) return;
+    if (! std::isfinite(normalizedX) || ! std::isfinite(normalizedY)) return;
+
+    const QString normalizedXText = QString::number(normalizedX, 'f', 3);
+    const QString normalizedYText = QString::number(normalizedY, 'f', 3);
+    const QString snapshot = QStringLiteral("backend-normalized=%1,%2 source=%3")
+                                 .arg(normalizedXText, normalizedYText, source);
+
+    if (! m_mouseDiagnosticLogTimer.isValid() || m_mouseDiagnosticLogTimer.elapsed() >= 250) {
+        m_mouseDiagnosticLogTimer.restart();
+        if (m_lastMouseDiagnostic != snapshot) {
+            m_lastMouseDiagnostic = snapshot;
+            Q_EMIT lastMouseDiagnosticChanged();
+        }
+        qInfo().noquote() << QStringLiteral("[Yakkai] mouse-diagnostic %1").arg(snapshot);
+    }
+}
+
 void SceneObject::mouseMoveEvent(QMouseEvent* event) {
 #if (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
     auto pos = event->position();
 #else
     auto pos = event->localPos();
 #endif
-    m_scene->mouseInput(pos.x() / width(), pos.y() / height());
+    const qreal itemWidth = width();
+    const qreal itemHeight = height();
+    if (itemWidth <= 0 || itemHeight <= 0) return;
+
+    const double normalizedX = pos.x() / itemWidth;
+    const double normalizedY = pos.y() / itemHeight;
+    if (! std::isfinite(normalizedX) || ! std::isfinite(normalizedY)) return;
+
+    m_scene->mouseInput(normalizedX, normalizedY);
+    recordMouseDiagnostic(normalizedX, normalizedY, QStringLiteral("mouse"));
 }
 
 void SceneObject::hoverMoveEvent(QHoverEvent* event) {
@@ -581,7 +664,16 @@ void SceneObject::hoverMoveEvent(QHoverEvent* event) {
 #else
     auto pos = event->posF();
 #endif
-    m_scene->mouseInput(pos.x() / width(), pos.y() / height());
+    const qreal itemWidth = width();
+    const qreal itemHeight = height();
+    if (itemWidth <= 0 || itemHeight <= 0) return;
+
+    const double normalizedX = pos.x() / itemWidth;
+    const double normalizedY = pos.y() / itemHeight;
+    if (! std::isfinite(normalizedX) || ! std::isfinite(normalizedY)) return;
+
+    m_scene->mouseInput(normalizedX, normalizedY);
+    recordMouseDiagnostic(normalizedX, normalizedY, QStringLiteral("hover"));
 }
 
 std::string SceneObject::GetDefaultCachePath() {

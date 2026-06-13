@@ -132,6 +132,43 @@ counted separately as `text` when validator logs contain
 `QuickJS binding: ... text=...`, distinct from transform, color, and alpha
 bindings.
 
+### `tools/arona_mouse_parallax_probe.py`
+
+Harness-only Arona camera/mouse parallax diagnostic. It renders scene
+`3228578419` three times with synthetic normalized mouse positions
+left/center/right, writes captures and effect manifests under
+`smoke-tests/artifacts/tmp/arona-mouse-parallax-probe`, and produces a contact
+sheet plus `report.md`. Use it before changing Plasma runtime mouse behavior;
+it is a local preflight and still needs human visual review against Windows WE
+when deciding final parity.
+
+Motion-region registration uses a bounded downsampled candidate search for
+large captures and then scores the selected offset at full resolution. The JSON
+rows include `zeroShiftRmse`, `searchScale`, and `searchedMaxShift`; inspect
+those fields when a resolution sweep is unexpectedly slow or when a large
+capture produces marginal registration evidence.
+
+Add `--gate` when the probe should act as a strict local regression gate. It
+returns exit code `3` when any requested resolution is not
+`movement-detected`, center expected offsets exceed `0.01`, left/right
+expected offsets do not have an opposite-sign layer, Arona reports fewer than
+17 parallax layers, anchor propagation evidence is absent or classified outside
+`anchor-propagation-evidence-present`/`anchor-child-map-missing`, any expected
+motion-region row is missing or has an unknown classification, or any motion
+region is classified as `same-direction-motion`. Use `--window-sizes` with
+`--gate` for resolution/aspect sweeps. Passing this gate means the structural
+and still-frame mouse/parallax evidence is internally consistent; it does not
+replace human visual review of timeline MP4/contact-sheet artifacts.
+
+The gate also checks visible translation when transform-anchor manifests report
+large expected offsets. At least one registered region must show opposite-sign
+visible motion of 10% or more of the expected anchor offset; this prevents a
+false pass where manifests update but rendered child layers stay nearly static.
+Rows classified as `one-sided-motion` are allowed as detail-region evidence when
+the core visible-translation threshold passes. For Arona, pin
+`--scene-properties-json '{"timeofday":{"value":"1"}}'` during parallax sweeps
+so time-of-day color changes do not pollute registration metrics.
+
 ### `smoke-tests/run.sh`
 
 Regression tests for known-good scenes. Clears shader cache before each run. Used to verify existing scenes aren't broken by changes.

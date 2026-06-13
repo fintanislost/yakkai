@@ -20,6 +20,10 @@ Item {
     property string debugPuppetEffectFinalMesh: ""
     property bool debugPuppetEffectRouteOnly: false
     property string debugPuppetAnimationLayerOverrides: ""
+    property string debugLayerVisibilityOverrides: ""
+    property string debugMousePosition: ""
+    property string debugMouseTimeline: ""
+    property bool debugInteractiveMouse: false
     property bool debugSyntheticAudioEnabled: false
     property int debugSyntheticAudioBins: 128
     property int debugSyntheticAudioIntervalMs: 33

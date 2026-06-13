@@ -25,7 +25,12 @@
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <atomic>
+#include <charconv>
+#include <cctype>
+#include <cmath>
 #include <fstream>
+#include <optional>
+#include <vector>
 
 using namespace wallpaper;
 
@@ -97,6 +102,201 @@ bool ShouldLogHighFrequency(std::atomic<uint64_t>& counter,
 std::atomic<uint64_t> s_render_draw_begin_log_counter { 0 };
 std::atomic<uint64_t> s_render_draw_finish_log_counter { 0 };
 
+struct DebugMouseTimelinePoint {
+    int timeMs = 0;
+    float x = 0.5f;
+    float y = 0.5f;
+};
+
+std::string_view TrimAsciiWhitespace(std::string_view value) {
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front()))) {
+        value.remove_prefix(1);
+    }
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back()))) {
+        value.remove_suffix(1);
+    }
+    return value;
+}
+
+std::optional<std::array<float, 2>> ParseDebugMousePosition(std::string_view value) {
+    value = TrimAsciiWhitespace(value);
+    if (value.empty()) {
+        return std::nullopt;
+    }
+
+    const std::size_t comma = value.find(',');
+    if (comma == std::string_view::npos) {
+        return std::nullopt;
+    }
+    std::string_view rawX = TrimAsciiWhitespace(value.substr(0, comma));
+    std::string_view rawY = TrimAsciiWhitespace(value.substr(comma + 1));
+    if (rawX.empty() || rawY.empty() || rawY.find(',') != std::string_view::npos) {
+        return std::nullopt;
+    }
+
+    float x = 0.5f;
+    float y = 0.5f;
+    const auto parseFloat = [](std::string_view raw, float& out) {
+        const char* first = raw.data();
+        const char* last = raw.data() + raw.size();
+        const auto [ptr, ec] = std::from_chars(first, last, out);
+        return ec == std::errc() && ptr == last && std::isfinite(out);
+    };
+    if (!parseFloat(rawX, x) || !parseFloat(rawY, y) ||
+        x < 0.0f || x > 1.0f || y < 0.0f || y > 1.0f) {
+        return std::nullopt;
+    }
+    return std::array<float, 2> { x, y };
+}
+
+std::optional<int> ParseDebugNonNegativeInt(std::string_view value) {
+    value = TrimAsciiWhitespace(value);
+    if (value.empty()) {
+        return std::nullopt;
+    }
+
+    int out = 0;
+    const char* first = value.data();
+    const char* last = value.data() + value.size();
+    const auto [ptr, ec] = std::from_chars(first, last, out);
+    if (ec != std::errc() || ptr != last || out < 0) {
+        return std::nullopt;
+    }
+    return out;
+}
+
+bool ParseDebugNormalizedFloat(std::string_view value, float& out) {
+    value = TrimAsciiWhitespace(value);
+    if (value.empty()) {
+        return false;
+    }
+
+    const char* first = value.data();
+    const char* last = value.data() + value.size();
+    const auto [ptr, ec] = std::from_chars(first, last, out);
+    return ec == std::errc() && ptr == last && std::isfinite(out) &&
+           out >= 0.0f && out <= 1.0f;
+}
+
+std::optional<std::vector<DebugMouseTimelinePoint>> ParseDebugMouseTimeline(std::string_view value) {
+    value = TrimAsciiWhitespace(value);
+    if (value.empty()) {
+        return std::vector<DebugMouseTimelinePoint> {};
+    }
+
+    std::vector<DebugMouseTimelinePoint> timeline;
+    std::optional<int> previousTimeMs;
+    while (!value.empty()) {
+        const std::size_t separator = value.find(';');
+        std::string_view keyframe = separator == std::string_view::npos
+            ? value
+            : value.substr(0, separator);
+        value = separator == std::string_view::npos
+            ? std::string_view {}
+            : value.substr(separator + 1);
+
+        keyframe = TrimAsciiWhitespace(keyframe);
+        const std::size_t colon = keyframe.find(':');
+        if (colon == std::string_view::npos || keyframe.find(':', colon + 1) != std::string_view::npos) {
+            return std::nullopt;
+        }
+
+        const std::optional<int> timeMs = ParseDebugNonNegativeInt(keyframe.substr(0, colon));
+        if (!timeMs || (previousTimeMs && *timeMs <= *previousTimeMs)) {
+            return std::nullopt;
+        }
+
+        const std::string_view position = keyframe.substr(colon + 1);
+        const std::size_t comma = position.find(',');
+        if (comma == std::string_view::npos || position.find(',', comma + 1) != std::string_view::npos) {
+            return std::nullopt;
+        }
+
+        float x = 0.5f;
+        float y = 0.5f;
+        if (!ParseDebugNormalizedFloat(position.substr(0, comma), x) ||
+            !ParseDebugNormalizedFloat(position.substr(comma + 1), y)) {
+            return std::nullopt;
+        }
+
+        timeline.push_back(DebugMouseTimelinePoint { *timeMs, x, y });
+        previousTimeMs = *timeMs;
+    }
+
+    if (timeline.size() < 2) {
+        return std::nullopt;
+    }
+    return timeline;
+}
+
+std::array<float, 2> EvaluateDebugMouseTimeline(const std::vector<DebugMouseTimelinePoint>& timeline,
+                                                double elapsedMs) {
+    if (timeline.empty()) {
+        return { 0.5f, 0.5f };
+    }
+    if (elapsedMs <= static_cast<double>(timeline.front().timeMs)) {
+        return { timeline.front().x, timeline.front().y };
+    }
+    for (std::size_t i = 1; i < timeline.size(); ++i) {
+        const auto& previous = timeline[i - 1];
+        const auto& current = timeline[i];
+        if (elapsedMs <= static_cast<double>(current.timeMs)) {
+            const double span = static_cast<double>(current.timeMs - previous.timeMs);
+            const double t = span > 0.0
+                ? (elapsedMs - static_cast<double>(previous.timeMs)) / span
+                : 0.0;
+            return {
+                static_cast<float>(static_cast<double>(previous.x) +
+                                   (static_cast<double>(current.x) - static_cast<double>(previous.x)) * t),
+                static_cast<float>(static_cast<double>(previous.y) +
+                                   (static_cast<double>(current.y) - static_cast<double>(previous.y)) * t),
+            };
+        }
+    }
+    return { timeline.back().x, timeline.back().y };
+}
+
+void ClearDebugMouseTimelineManifest(wallpaper::debug::EffectCaptureConfig::MouseParallax& mouseParallax) {
+    mouseParallax.timeline.clear();
+    mouseParallax.timelineElapsedMsAtCapture.reset();
+}
+
+void ApplyDefaultCenterMouseManifest(wallpaper::debug::EffectCaptureConfig::MouseParallax& mouseParallax) {
+    mouseParallax.inputSource = "default-center";
+    mouseParallax.hasRequestedPosition = false;
+    mouseParallax.requestedPosition = { 0.5f, 0.5f };
+    ClearDebugMouseTimelineManifest(mouseParallax);
+}
+
+void ApplyDebugMousePositionManifest(wallpaper::debug::EffectCaptureConfig::MouseParallax& mouseParallax,
+                                     std::array<float, 2> position) {
+    mouseParallax.inputSource = "synthetic";
+    mouseParallax.hasRequestedPosition = true;
+    mouseParallax.requestedPosition = position;
+    ClearDebugMouseTimelineManifest(mouseParallax);
+}
+
+void ApplyDebugMouseTimelineManifest(wallpaper::debug::EffectCaptureConfig::MouseParallax& mouseParallax,
+                                     const std::vector<DebugMouseTimelinePoint>& timeline) {
+    mouseParallax.inputSource = timeline.empty() ? "default-center" : "synthetic-timeline";
+    mouseParallax.hasRequestedPosition = false;
+    ClearDebugMouseTimelineManifest(mouseParallax);
+    mouseParallax.timeline.reserve(timeline.size());
+    for (const auto& point : timeline) {
+        mouseParallax.timeline.push_back({
+            .timeMs = point.timeMs,
+            .position = { point.x, point.y },
+        });
+    }
+}
+
+void ApplyInteractiveMouseManifest(wallpaper::debug::EffectCaptureConfig::MouseParallax& mouseParallax) {
+    mouseParallax.inputSource = "interactive";
+    mouseParallax.hasRequestedPosition = false;
+    mouseParallax.requestedPosition = { 0.5f, 0.5f };
+    ClearDebugMouseTimelineManifest(mouseParallax);
+}
+
 template<typename T>
 void AddMsgCmd(looper::Message& msg, T cmd) {
     msg.setInt32("cmd", (int32_t)cmd);
@@ -154,6 +354,11 @@ public:
 
 private:
     void loadScene();
+    void postDefaultMouseInputToRender();
+    void postDebugMousePositionToRender(std::array<float, 2> position);
+    void postDebugMouseTimelineToRender(const std::vector<DebugMouseTimelinePoint>& timeline);
+    void postInteractiveMouseInputToRender();
+    void postCurrentDebugMouseInputToRender();
 
     MHANDLER_CMD(LOAD_SCENE);
     MHANDLER_CMD(SET_PROPERTY);
@@ -178,6 +383,12 @@ private:
     std::string m_debug_puppet_effect_final_mesh;
     bool        m_debug_puppet_effect_route_only { false };
     std::string m_debug_puppet_animation_layer_overrides;
+    std::string m_debug_layer_visibility_overrides;
+    std::string m_debug_mouse_position;
+    std::string m_debug_mouse_timeline;
+    bool        m_debug_mouse_position_active { false };
+    bool        m_debug_mouse_timeline_active { false };
+    bool        m_debug_interactive_mouse_active { false };
     bool        m_gen_graphviz { false };
 
     WPSceneParser                        m_scene_parser;
@@ -200,6 +411,10 @@ public:
         CMD_SET_SCENE,
         CMD_SET_FILLMODE,
         CMD_SET_SPEED,
+        CMD_SET_MOUSE_DEFAULT,
+        CMD_SET_MOUSE_POSITION,
+        CMD_SET_MOUSE_TIMELINE,
+        CMD_SET_MOUSE_INTERACTIVE,
         CMD_STOP,
         CMD_DRAW,
         CMD_NO
@@ -223,6 +438,10 @@ public:
                 CASE_CMD(SET_FILLMODE);
                 CASE_CMD(SET_SCENE);
                 CASE_CMD(SET_SPEED);
+                CASE_CMD(SET_MOUSE_DEFAULT);
+                CASE_CMD(SET_MOUSE_POSITION);
+                CASE_CMD(SET_MOUSE_TIMELINE);
+                CASE_CMD(SET_MOUSE_INTERACTIVE);
                 CASE_CMD(INIT_VULKAN);
             default: break;
             }
@@ -252,6 +471,18 @@ private:
                 LOG_INFO("render draw: begin speed=%.3f fillMode=%d", m_speed, static_cast<int>(m_fillmode));
             }
             // LOG_INFO("frame info, fps: %.1f, frametime: %.1f", 1.0f, 1000.0f*m_scene->frameTime);
+            const double frameSeconds = frame_timer.IdeaTime() * m_speed;
+            if (!m_mouse_timeline.empty()) {
+                // Intentionally match the debug capture gate, which observes scene.elapsingTime
+                // plus the previous scene.frameTime during drawFrame().
+                const double frameTimelineElapsedMs =
+                    std::max(0.0, m_scene->elapsingTime + std::max(0.0, m_scene->frameTime)) *
+                    1000.0;
+                const auto pos = EvaluateDebugMouseTimeline(m_mouse_timeline, frameTimelineElapsedMs);
+                m_mouse_pos.store(std::array { pos[0], pos[1] });
+                m_scene->debugEffectCaptures.mouseParallax.timelineElapsedMsAtCapture =
+                    frameTimelineElapsedMs;
+            }
             m_scene->shaderValueUpdater->FrameBegin();
             {
                 auto pos = m_mouse_pos.load();
@@ -264,7 +495,11 @@ private:
                 LOG_INFO("render draw: drawFrame finished");
             }
 
-            m_scene->PassFrameTime(frame_timer.IdeaTime() * m_speed);
+            m_scene->PassFrameTime(frameSeconds);
+            if (!m_mouse_timeline.empty()) {
+                m_mouse_timeline_elapsed_ms =
+                    m_scene->debugEffectCaptures.mouseParallax.timelineElapsedMsAtCapture.value_or(0.0);
+            }
 
             m_scene->shaderValueUpdater->FrameEnd();
             // fps_counter.RegisterFrame();
@@ -291,6 +526,17 @@ private:
     MHANDLER_CMD(SET_SCENE) {
         if (msg->findObject("scene", &m_scene)) {
             LOG_INFO("render set_scene: received scene");
+            m_mouse_timeline_elapsed_ms = 0.0;
+            if (!m_mouse_timeline.empty()) {
+                const auto pos = EvaluateDebugMouseTimeline(m_mouse_timeline, m_mouse_timeline_elapsed_ms);
+                m_mouse_pos.store(std::array { pos[0], pos[1] });
+                m_scene->debugEffectCaptures.mouseParallax.timelineElapsedMsAtCapture =
+                    m_mouse_timeline_elapsed_ms;
+            }
+            {
+                auto pos = m_mouse_pos.load();
+                m_scene->shaderValueUpdater->MouseInput(pos[0], pos[1]);
+            }
             if (m_rg) m_render->clearLastRenderGraph();
             LOG_INFO("render set_scene: building render graph");
             m_rg = sceneToRenderGraph(*m_scene);
@@ -304,6 +550,54 @@ private:
         }
     }
     MHANDLER_CMD(SET_SPEED) { msg->findFloat("value", &m_speed); }
+    MHANDLER_CMD(SET_MOUSE_DEFAULT) {
+        m_mouse_timeline.clear();
+        m_mouse_timeline_elapsed_ms = 0.0;
+        m_mouse_pos.store(std::array { 0.5f, 0.5f });
+        if (m_scene) {
+            ApplyDefaultCenterMouseManifest(m_scene->debugEffectCaptures.mouseParallax);
+        }
+    }
+    MHANDLER_CMD(SET_MOUSE_POSITION) {
+        float x = 0.5f;
+        float y = 0.5f;
+        if (msg->findFloat("x", &x) && msg->findFloat("y", &y)) {
+            m_mouse_timeline.clear();
+            m_mouse_timeline_elapsed_ms = 0.0;
+            m_mouse_pos.store(std::array { x, y });
+            if (m_scene) {
+                ApplyDebugMousePositionManifest(
+                    m_scene->debugEffectCaptures.mouseParallax,
+                    std::array<float, 2> { x, y });
+            }
+        }
+    }
+    MHANDLER_CMD(SET_MOUSE_TIMELINE) {
+        std::shared_ptr<std::vector<DebugMouseTimelinePoint>> timeline;
+        if (msg->findObject("value", &timeline)) {
+            m_mouse_timeline = *timeline;
+            m_mouse_timeline_elapsed_ms = 0.0;
+            if (m_scene) {
+                auto& mouseParallax = m_scene->debugEffectCaptures.mouseParallax;
+                if (mouseParallax.inputSource == "synthetic-timeline" || !m_mouse_timeline.empty()) {
+                    ApplyDebugMouseTimelineManifest(mouseParallax, m_mouse_timeline);
+                }
+            }
+            if (!m_mouse_timeline.empty()) {
+                const auto pos = EvaluateDebugMouseTimeline(m_mouse_timeline, m_mouse_timeline_elapsed_ms);
+                m_mouse_pos.store(std::array { pos[0], pos[1] });
+            } else {
+                m_mouse_pos.store(std::array { 0.5f, 0.5f });
+            }
+        }
+    }
+    MHANDLER_CMD(SET_MOUSE_INTERACTIVE) {
+        m_mouse_timeline.clear();
+        m_mouse_timeline_elapsed_ms = 0.0;
+        if (m_scene) {
+            ApplyInteractiveMouseManifest(m_scene->debugEffectCaptures.mouseParallax);
+        }
+    }
     MHANDLER_CMD(INIT_VULKAN) {
         std::shared_ptr<RenderInitInfo> info;
         if (msg->findObject("info", &info)) {
@@ -328,6 +622,8 @@ private:
     FillMode m_fillmode { FillMode::ASPECTCROP };
 
     std::atomic<std::array<float, 2>> m_mouse_pos { std::array { 0.5f, 0.5f } };
+    std::vector<DebugMouseTimelinePoint> m_mouse_timeline;
+    double m_mouse_timeline_elapsed_ms = 0.0;
 };
 } // namespace wallpaper
 
@@ -460,6 +756,58 @@ MHANDLER_CMD_IMPL(MainHandler, SET_PROPERTY) {
             msg->findBool("value", &m_debug_puppet_effect_route_only);
         } else if (property == PROPERTY_DEBUG_PUPPET_ANIMATION_LAYER_OVERRIDES) {
             msg->findString("value", &m_debug_puppet_animation_layer_overrides);
+        } else if (property == PROPERTY_DEBUG_LAYER_VISIBILITY_OVERRIDES) {
+            msg->findString("value", &m_debug_layer_visibility_overrides);
+        } else if (property == PROPERTY_DEBUG_MOUSE_POSITION) {
+            msg->findString("value", &m_debug_mouse_position);
+            if (const auto pos = ParseDebugMousePosition(m_debug_mouse_position)) {
+                m_debug_mouse_timeline.clear();
+                m_debug_mouse_timeline_active = false;
+                m_debug_interactive_mouse_active = false;
+                m_debug_mouse_position_active = true;
+                postDebugMousePositionToRender(*pos);
+            } else if (TrimAsciiWhitespace(m_debug_mouse_position).empty()) {
+                m_debug_mouse_position_active = false;
+                if (!m_debug_mouse_timeline_active && !m_debug_interactive_mouse_active) {
+                    postDefaultMouseInputToRender();
+                }
+            } else if (!TrimAsciiWhitespace(m_debug_mouse_position).empty()) {
+                LOG_ERROR("invalid debug mouse position: %s", m_debug_mouse_position.c_str());
+            }
+        } else if (property == PROPERTY_DEBUG_MOUSE_TIMELINE) {
+            msg->findString("value", &m_debug_mouse_timeline);
+            if (const auto timeline = ParseDebugMouseTimeline(m_debug_mouse_timeline)) {
+                if (!timeline->empty()) {
+                    m_debug_mouse_position.clear();
+                    m_debug_mouse_position_active = false;
+                    m_debug_interactive_mouse_active = false;
+                    m_debug_mouse_timeline_active = true;
+                    postDebugMouseTimelineToRender(*timeline);
+                } else if (m_debug_mouse_timeline_active) {
+                    m_debug_mouse_timeline_active = false;
+                    if (!m_debug_interactive_mouse_active) {
+                        postDefaultMouseInputToRender();
+                    }
+                } else {
+                    m_debug_mouse_timeline_active = false;
+                }
+            } else if (!TrimAsciiWhitespace(m_debug_mouse_timeline).empty()) {
+                LOG_ERROR("invalid debug mouse timeline: %s", m_debug_mouse_timeline.c_str());
+            }
+        } else if (property == PROPERTY_DEBUG_INTERACTIVE_MOUSE) {
+            bool value = false;
+            if (msg->findBool("value", &value)) {
+                m_debug_interactive_mouse_active = value;
+                if (value) {
+                    m_debug_mouse_position.clear();
+                    m_debug_mouse_timeline.clear();
+                    m_debug_mouse_position_active = false;
+                    m_debug_mouse_timeline_active = false;
+                    postInteractiveMouseInputToRender();
+                } else if (!m_debug_mouse_position_active && !m_debug_mouse_timeline_active) {
+                    postDefaultMouseInputToRender();
+                }
+            }
         } else if (property == PROPERTY_FIRST_FRAME_CALLBACK) {
             std::shared_ptr<FirstFrameCallback> cb;
             msg->findObject("value", &cb);
@@ -492,6 +840,50 @@ MHANDLER_CMD_IMPL(MainHandler, STOP) {
 
 MHANDLER_CMD_IMPL(MainHandler, FIRST_FRAME) {
     if (m_first_frame_callback) m_first_frame_callback();
+}
+
+void MainHandler::postDefaultMouseInputToRender() {
+    auto msg = CreateMsgWithCmd(m_render_handler, RenderHandler::CMD::CMD_SET_MOUSE_DEFAULT);
+    msg->post();
+}
+
+void MainHandler::postDebugMousePositionToRender(std::array<float, 2> position) {
+    auto msg = CreateMsgWithCmd(m_render_handler, RenderHandler::CMD::CMD_SET_MOUSE_POSITION);
+    msg->setFloat("x", position[0]);
+    msg->setFloat("y", position[1]);
+    msg->post();
+}
+
+void MainHandler::postDebugMouseTimelineToRender(const std::vector<DebugMouseTimelinePoint>& timeline) {
+    auto msg = CreateMsgWithCmd(m_render_handler, RenderHandler::CMD::CMD_SET_MOUSE_TIMELINE);
+    msg->setObject("value", std::make_shared<std::vector<DebugMouseTimelinePoint>>(timeline));
+    msg->post();
+}
+
+void MainHandler::postInteractiveMouseInputToRender() {
+    auto msg = CreateMsgWithCmd(m_render_handler, RenderHandler::CMD::CMD_SET_MOUSE_INTERACTIVE);
+    msg->post();
+}
+
+void MainHandler::postCurrentDebugMouseInputToRender() {
+    if (m_debug_mouse_timeline_active) {
+        if (const auto timeline = ParseDebugMouseTimeline(m_debug_mouse_timeline);
+            timeline && !timeline->empty()) {
+            postDebugMouseTimelineToRender(*timeline);
+            return;
+        }
+        m_debug_mouse_timeline_active = false;
+    }
+    if (m_debug_mouse_position_active) {
+        if (const auto pos = ParseDebugMousePosition(m_debug_mouse_position)) {
+            postDebugMousePositionToRender(*pos);
+            return;
+        }
+        m_debug_mouse_position_active = false;
+    }
+    if (m_debug_interactive_mouse_active) {
+        postInteractiveMouseInputToRender();
+    }
 }
 
 void MainHandler::loadScene() {
@@ -564,7 +956,7 @@ void MainHandler::loadScene() {
                       m_debug_puppet_animation_layer_overrides.c_str());
             puppetAnimationLayerOverrides = std::vector<wallpaper::debug::PuppetAnimationLayerOverride> {};
         }
-        m_scene_parser.SetDebugEffectCaptureConfig({
+        wallpaper::debug::EffectCaptureConfig debugEffectConfig {
             .outputDir = m_debug_effect_captures,
             .commandLine = m_debug_effect_capture_command,
             .captureLayerIds = wallpaper::debug::parseCaptureLayerIdList(m_debug_effect_capture_layers),
@@ -576,7 +968,19 @@ void MainHandler::loadScene() {
             .probeMaxEffects = wallpaper::debug::parseProbeMaxEffects(m_debug_effect_probe_max_effects),
             .puppetFinalMeshOverride = m_debug_puppet_effect_final_mesh,
             .puppetEffectRouteOnly = m_debug_puppet_effect_route_only,
-        });
+            .layerVisibilityOverrides = wallpaper::debug::parseLayerVisibilityOverrideList(m_debug_layer_visibility_overrides),
+        };
+        const auto debugMousePosition = ParseDebugMousePosition(m_debug_mouse_position);
+        const auto debugMouseTimeline = ParseDebugMouseTimeline(m_debug_mouse_timeline);
+        if (m_debug_mouse_position_active && !m_debug_mouse_timeline_active && debugMousePosition) {
+            ApplyDebugMousePositionManifest(debugEffectConfig.mouseParallax, *debugMousePosition);
+        }
+        if (m_debug_mouse_timeline_active && debugMouseTimeline && !debugMouseTimeline->empty()) {
+            ApplyDebugMouseTimelineManifest(debugEffectConfig.mouseParallax, *debugMouseTimeline);
+        } else if (!m_debug_mouse_position_active && m_debug_interactive_mouse_active) {
+            ApplyInteractiveMouseManifest(debugEffectConfig.mouseParallax);
+        }
+        m_scene_parser.SetDebugEffectCaptureConfig(std::move(debugEffectConfig));
         m_scene_parser.SetScenePropertiesJson(
             ResolveScenePropertiesJson(m_scene_properties_json, pkgDir));
         try {
@@ -600,6 +1004,7 @@ void MainHandler::loadScene() {
     }
 
     {
+        postCurrentDebugMouseInputToRender();
         LOG_INFO("main loadScene: posting scene to render thread");
         auto msg = CreateMsgWithCmd(m_render_handler, RenderHandler::CMD::CMD_SET_SCENE);
         msg->setObject("scene", scene);

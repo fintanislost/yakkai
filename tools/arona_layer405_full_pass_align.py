@@ -70,6 +70,27 @@ def rgba_array(path: Path, size: tuple[int, int]) -> np.ndarray:
         return np.asarray(rgba_image, dtype=np.float32) / 255.0
 
 
+def write_alignment_contact_sheet(
+    output_dir: Path,
+    variant: str,
+    pass_order: int,
+    yakkai_stage: str,
+    windows_image: np.ndarray,
+    yakkai_image: np.ndarray,
+) -> str:
+    crop_dir = output_dir / "full-pass-crops"
+    crop_dir.mkdir(parents=True, exist_ok=True)
+    diff = np.abs(windows_image[..., :3] - yakkai_image[..., :3])
+    diff_alpha = np.ones((*diff.shape[:2], 1), dtype=np.float32)
+    diff_rgba = np.concatenate([diff, diff_alpha], axis=2)
+    sheet = np.concatenate([windows_image, yakkai_image, diff_rgba], axis=1)
+    pixels = np.clip(sheet * 255.0, 0, 255).astype(np.uint8)
+    safe_stage = "".join(ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in yakkai_stage)
+    relative = Path("full-pass-crops") / f"{variant}-order{pass_order:02d}-{safe_stage}.png"
+    Image.fromarray(pixels, mode="RGBA").save(output_dir / relative)
+    return str(relative)
+
+
 def rmse(left: np.ndarray, right: np.ndarray) -> float:
     return float(np.sqrt(np.mean(np.square(left - right))))
 
@@ -120,6 +141,53 @@ def classify_row(row: dict[str, Any]) -> str:
     return "mismatch"
 
 
+def summarize_variant_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    first_non_close = next((row for row in rows if row.get("classification") != "close"), None)
+    worst = max(
+        (row for row in rows if "rmse" in row),
+        key=lambda row: (float(row.get("rmse", 0.0)), float(row.get("alphaWeightedRmse", 0.0))),
+        default=None,
+    )
+    summary: dict[str, Any] = {
+        "rowCount": len(rows),
+        "closeCount": sum(1 for row in rows if row.get("classification") == "close"),
+        "missingCount": sum(1 for row in rows if row.get("classification") == "missing-yakkai-capture"),
+    }
+    if first_non_close is not None:
+        summary.update(
+            {
+                "firstNonClosePassOrder": first_non_close["passOrder"],
+                "firstNonCloseReplayEventId": first_non_close["replayEventId"],
+                "firstNonCloseStage": first_non_close["yakkaiStage"],
+                "firstNonCloseClass": first_non_close["classification"],
+                "firstNonCloseRmse": first_non_close.get("rmse"),
+                "firstNonCloseDeltaCosine": first_non_close.get("deltaCosine"),
+            }
+        )
+    if worst is not None:
+        summary.update(
+            {
+                "worstPassOrder": worst["passOrder"],
+                "worstReplayEventId": worst["replayEventId"],
+                "worstStage": worst["yakkaiStage"],
+                "worstClass": worst["classification"],
+                "worstRmse": worst.get("rmse"),
+                "worstDeltaCosine": worst.get("deltaCosine"),
+            }
+        )
+    return summary
+
+
+def selected_rows_for_report(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = []
+    for variant in REQUIRED_VARIANTS:
+        variant_rows = [row for row in rows if row["variant"] == variant]
+        first_non_close = next((row for row in variant_rows if row.get("classification") != "close"), None)
+        if first_non_close is not None:
+            selected.append(first_non_close)
+    return selected
+
+
 def align_full_pass_export(
     windows_archive: Path,
     yakkai_root: Path,
@@ -128,6 +196,7 @@ def align_full_pass_export(
 ) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     variant_dirs: dict[str, str] = {}
+    selected_contact_variants: set[str] = set()
     with zipfile.ZipFile(windows_archive) as zip_file:
         root = zip_root(zip_file)
         manifest = load_manifest(zip_file, root)
@@ -156,6 +225,8 @@ def align_full_pass_export(
                 if not yakkai_path.is_file():
                     row["missingPath"] = str(yakkai_path)
                     row["classification"] = classify_row(row)
+                    if row["classification"] != "close":
+                        selected_contact_variants.add(variant)
                     rows.append(row)
                     previous_windows = windows_image
                     previous_yakkai = None
@@ -172,15 +243,35 @@ def align_full_pass_export(
                 if previous_windows is not None and previous_yakkai is not None:
                     row.update(delta_metrics(previous_windows, windows_image, previous_yakkai, yakkai_image))
                 row["classification"] = classify_row(row)
+                if (
+                    output_dir is not None
+                    and row["classification"] != "close"
+                    and variant not in selected_contact_variants
+                ):
+                    row["contactSheetFile"] = write_alignment_contact_sheet(
+                        output_dir,
+                        variant,
+                        order,
+                        stage,
+                        windows_image,
+                        yakkai_image,
+                    )
+                    selected_contact_variants.add(variant)
                 rows.append(row)
                 previous_windows = windows_image
                 previous_yakkai = yakkai_image
+    variant_summaries = {
+        variant: summarize_variant_rows([row for row in rows if row["variant"] == variant])
+        for variant in REQUIRED_VARIANTS
+    }
     report = {
         "status": "complete",
         "windowsArchive": str(windows_archive),
         "yakkaiRoot": str(yakkai_root),
         "comparisonDimensions": list(max_size),
         "variantCaptureDirs": variant_dirs,
+        "variantSummaries": variant_summaries,
+        "selectedRows": selected_rows_for_report(rows),
         "rows": rows,
     }
     if output_dir is not None:
@@ -207,6 +298,28 @@ def write_report(report: dict[str, Any], output_dir: Path) -> None:
         f"Comparison dimensions: `{report['comparisonDimensions'][0]}x{report['comparisonDimensions'][1]}`",
         "",
     ]
+    lines.extend(
+        [
+            "## Selected Rows",
+            "",
+            "| variant | order | event | Yakkai stage | class | RMSE | delta cosine | contact sheet |",
+            "| --- | ---: | ---: | --- | --- | ---: | ---: | --- |",
+        ]
+    )
+    for row in report.get("selectedRows", []):
+        lines.append(
+            "| {variant} | {order} | {event} | {stage} | {classification} | {rmse} | {delta_cosine} | {contact} |".format(
+                variant=row["variant"],
+                order=row["passOrder"],
+                event=row["replayEventId"],
+                stage=row["yakkaiStage"],
+                classification=row["classification"],
+                rmse=fmt(row.get("rmse")),
+                delta_cosine=fmt(row.get("deltaCosine")),
+                contact=row.get("contactSheetFile", ""),
+            )
+        )
+    lines.append("")
     for variant in REQUIRED_VARIANTS:
         lines.append(f"## {variant}")
         lines.append("| order | event | shaderRes | Yakkai stage | class | RMSE | alpha-weighted | alpha RMSE | delta RMSE | delta cosine |")

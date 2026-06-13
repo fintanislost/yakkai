@@ -39,9 +39,11 @@ class CompareConfig:
     width: int = 1280
     height: int = 720
     debug_effect_captures: bool = False
+    debug_effect_capture_delay_ms: int | None = None
     debug_effect_probe_layers: tuple[int, ...] = ()
     debug_effect_probe_channelmap_slots: tuple[int, ...] = ()
     debug_effect_probe_max_effects: int | None = None
+    debug_layer_visibility_overrides: str = ""
     debug_puppet_animation_layer_overrides: str = ""
     register_comparison: bool = True
 
@@ -637,6 +639,11 @@ def render_variant(
         effect_dir = variant_dir / "effect-captures"
         effect_manifest = effect_dir / "manifest.json"
         command += ["--debug-effect-captures", str(effect_dir)]
+        if config.debug_effect_capture_delay_ms is not None:
+            command += [
+                "--debug-effect-capture-delay-ms",
+                str(config.debug_effect_capture_delay_ms),
+            ]
         if config.debug_effect_probe_layers:
             command += [
                 "--debug-effect-probe-layers",
@@ -646,6 +653,11 @@ def render_variant(
             command += [
                 "--debug-effect-probe-max-effects",
                 str(config.debug_effect_probe_max_effects),
+            ]
+        if config.debug_layer_visibility_overrides:
+            command += [
+                "--debug-layer-visibility-overrides",
+                config.debug_layer_visibility_overrides,
             ]
         if config.debug_puppet_animation_layer_overrides:
             command += [
@@ -819,6 +831,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Write per-variant harness effect capture manifests beside comparator artifacts.",
     )
     parser.add_argument(
+        "--debug-effect-capture-delay-ms",
+        type=int,
+        default=None,
+        help="Delay debug effect TGA dumps so they line up with the delayed screenshot capture.",
+    )
+    parser.add_argument(
         "--debug-effect-probe-layers",
         default="",
         help="Comma-separated stripped puppet mixed-chain layer IDs to render only inside debug effect captures. Requires --debug-effect-captures.",
@@ -838,6 +856,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--debug-puppet-animation-layer-overrides",
         default="",
         help="Forward harness-only puppet animation layer overrides. Requires --debug-effect-captures.",
+    )
+    parser.add_argument(
+        "--debug-layer-visibility-overrides",
+        default="",
+        help="Forward harness-only layer visibility overrides. Requires --debug-effect-captures.",
     )
     parser.add_argument(
         "--skip-registration",
@@ -861,6 +884,13 @@ def main(argv: list[str]) -> int:
     if debug_effect_probe_layers and not args.debug_effect_captures:
         print("fail: --debug-effect-probe-layers requires --debug-effect-captures", file=sys.stderr)
         return 1
+    if args.debug_effect_capture_delay_ms is not None:
+        if args.debug_effect_capture_delay_ms < 0:
+            print("fail: --debug-effect-capture-delay-ms must be non-negative", file=sys.stderr)
+            return 1
+        if not args.debug_effect_captures:
+            print("fail: --debug-effect-capture-delay-ms requires --debug-effect-captures", file=sys.stderr)
+            return 1
     if debug_effect_probe_channelmap_slots and not args.debug_effect_captures:
         print("fail: --debug-effect-probe-channelmap-slots requires --debug-effect-captures", file=sys.stderr)
         return 1
@@ -875,6 +905,9 @@ def main(argv: list[str]) -> int:
         return 1
     if args.debug_puppet_animation_layer_overrides and not args.debug_effect_captures:
         print("fail: --debug-puppet-animation-layer-overrides requires --debug-effect-captures", file=sys.stderr)
+        return 1
+    if args.debug_layer_visibility_overrides and not args.debug_effect_captures:
+        print("fail: --debug-layer-visibility-overrides requires --debug-effect-captures", file=sys.stderr)
         return 1
     if args.debug_effect_probe_max_effects is not None:
         if args.debug_effect_probe_max_effects < 0:
@@ -899,9 +932,11 @@ def main(argv: list[str]) -> int:
             width=args.width,
             height=args.height,
             debug_effect_captures=args.debug_effect_captures,
+            debug_effect_capture_delay_ms=args.debug_effect_capture_delay_ms,
             debug_effect_probe_layers=debug_effect_probe_layers,
             debug_effect_probe_channelmap_slots=debug_effect_probe_channelmap_slots,
             debug_effect_probe_max_effects=args.debug_effect_probe_max_effects,
+            debug_layer_visibility_overrides=args.debug_layer_visibility_overrides,
             debug_puppet_animation_layer_overrides=args.debug_puppet_animation_layer_overrides,
             register_comparison=not args.skip_registration,
         )

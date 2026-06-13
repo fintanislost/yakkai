@@ -20,6 +20,10 @@ Item {
     property string debugPuppetEffectFinalMesh: ""
     property bool debugPuppetEffectRouteOnly: false
     property string debugPuppetAnimationLayerOverrides: ""
+    property string debugLayerVisibilityOverrides: ""
+    property string debugMousePosition: ""
+    property string debugMouseTimeline: ""
+    property bool debugInteractiveMouse: false
     property string scenePropertiesJson: ""
 
     signal firstFrameReady()
@@ -79,6 +83,10 @@ Item {
         debugPuppetEffectFinalMesh: root.debugPuppetEffectFinalMesh
         debugPuppetEffectRouteOnly: root.debugPuppetEffectRouteOnly
         debugPuppetAnimationLayerOverrides: root.debugPuppetAnimationLayerOverrides
+        debugLayerVisibilityOverrides: root.debugLayerVisibilityOverrides
+        debugMousePosition: root.debugMousePosition
+        debugMouseTimeline: root.debugMouseTimeline
+        debugInteractiveMouse: root.debugInteractiveMouse
         scenePropertiesJson: root.scenePropertiesJson
         source: root.sceneSource
         assets: root.assetsUrl(root.assetsPath)

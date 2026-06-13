@@ -22,6 +22,10 @@
 #include <QtQml/QQmlContext>
 
 #include "CaptureGate.hpp"
+#include "InteractiveMouseOption.hpp"
+#include "LayerVisibilityOverrideOption.hpp"
+#include "MousePositionOption.hpp"
+#include "MouseTimelineOption.hpp"
 #include "PuppetSimulationOption.hpp"
 #include "ScenePropertiesOption.hpp"
 
@@ -41,7 +45,8 @@ constexpr int MaxCaptureSequenceFrames = 3600;
 constexpr int CaptureExitDrainMs = 500;
 constexpr int CaptureReadyPollMs = 50;
 constexpr int CaptureReadyTimeoutMs = 60000;
-constexpr int DebugEffectManifestWaitMs = 5000;
+constexpr int DebugEffectCaptureReadyTimeoutMs = 180000;
+constexpr int DebugEffectManifestWaitMs = 30000;
 constexpr int DebugEffectManifestPollMs = 50;
 
 struct CaptureRequest
@@ -542,6 +547,7 @@ void scheduleWindowRecording(QCoreApplication* app,
 
 void startCaptureTimersAfterFirstFrame(QCoreApplication* app,
                                        QPointer<QQuickWindow> guardedWindow,
+                                       int readyTimeoutMs,
                                        std::function<void()> startCaptureTimers)
 {
     auto gate = std::make_shared<yakkai::harness::CaptureStartGate>();
@@ -578,18 +584,18 @@ void startCaptureTimersAfterFirstFrame(QCoreApplication* app,
             (*tryStart)();
         }
     });
-    QObject::connect(readyTimeoutTimer, &QTimer::timeout, app, [guardedWindow]() {
+    QObject::connect(readyTimeoutTimer, &QTimer::timeout, app, [guardedWindow, readyTimeoutMs]() {
         const QString status = guardedWindow
             ? guardedWindow->property("backendStatus").toString()
             : QStringLiteral("<window destroyed>");
         qWarning() << "yakkai_scene_harness: timed out waiting for backend readiness before capture"
-                   << "timeoutMs=" << CaptureReadyTimeoutMs
+                   << "timeoutMs=" << readyTimeoutMs
                    << "backendStatus=" << status;
         QCoreApplication::exit(7);
     });
 
     qInfo() << "yakkai_scene_harness: waiting for backend readiness before capture"
-            << "timeoutMs=" << CaptureReadyTimeoutMs;
+            << "timeoutMs=" << readyTimeoutMs;
     if (guardedWindow && guardedWindow->property("captureReady").toBool()) {
         gate->markFirstFrameReady();
         (*tryStart)();
@@ -597,7 +603,7 @@ void startCaptureTimersAfterFirstFrame(QCoreApplication* app,
     }
 
     readyPollTimer->start();
-    readyTimeoutTimer->start(CaptureReadyTimeoutMs);
+    readyTimeoutTimer->start(readyTimeoutMs);
 }
 
 int fillModeFromString(const QString& fillMode)
@@ -688,6 +694,10 @@ int main(int argc, char* argv[])
     QCommandLineOption mouseOption(
         QStringList{QStringLiteral("mouse")},
         QStringLiteral("Enable mouse and hover input.")
+    );
+    QCommandLineOption interactiveMouseOption(
+        QStringList{QStringLiteral("interactive-mouse")},
+        QStringLiteral("Harness-only live pointer input for manual mouse/parallax checks. Cannot be combined with synthetic debug mouse options.")
     );
     QCommandLineOption unmutedOption(
         QStringList{QStringLiteral("unmuted")},
@@ -802,6 +812,21 @@ int main(int argc, char* argv[])
         QStringLiteral("Semicolon-separated harness-only puppet animation layer overrides: layerId:animationId:key=value[,key=value]. Requires --debug-effect-captures."),
         QStringLiteral("rules")
     );
+    QCommandLineOption debugLayerVisibilityOverridesOption(
+        QStringList{QStringLiteral("debug-layer-visibility-overrides")},
+        QStringLiteral("Comma-separated harness-only layer visibility overrides: layerId:true|false. Requires --debug-effect-captures."),
+        QStringLiteral("rules")
+    );
+    QCommandLineOption debugMousePositionOption(
+        QStringList{QStringLiteral("debug-mouse-position")},
+        QStringLiteral("Harness-only synthetic normalized mouse position as x,y. Requires --debug-effect-captures."),
+        QStringLiteral("x,y")
+    );
+    QCommandLineOption debugMouseTimelineOption(
+        QStringList{QStringLiteral("debug-mouse-timeline")},
+        QStringLiteral("Harness-only synthetic mouse timeline as timeMs:x,y;timeMs:x,y. Requires --debug-effect-captures."),
+        QStringLiteral("timeline")
+    );
     QCommandLineOption scenePropertiesJsonOption(
         QStringList{QStringLiteral("scene-properties-json")},
         QStringLiteral("Wallpaper Engine properties JSON object forwarded to backends that support it."),
@@ -835,6 +860,7 @@ int main(int argc, char* argv[])
     parser.addOption(fillOption);
     parser.addOption(windowSizeOption);
     parser.addOption(mouseOption);
+    parser.addOption(interactiveMouseOption);
     parser.addOption(unmutedOption);
     parser.addOption(hideInfoOverlayOption);
     parser.addOption(captureOption);
@@ -857,6 +883,9 @@ int main(int argc, char* argv[])
     parser.addOption(debugPuppetEffectFinalMeshOption);
     parser.addOption(debugPuppetEffectRouteOnlyOption);
     parser.addOption(debugPuppetAnimationLayerOverridesOption);
+    parser.addOption(debugLayerVisibilityOverridesOption);
+    parser.addOption(debugMousePositionOption);
+    parser.addOption(debugMouseTimelineOption);
     parser.addOption(scenePropertiesJsonOption);
     parser.addOption(puppetSimulationOption);
     parser.addOption(debugSyntheticAudioOption);
@@ -894,6 +923,12 @@ int main(int argc, char* argv[])
         parser.value(debugPuppetEffectFinalMeshOption).trimmed().toLower();
     const QString debugPuppetAnimationLayerOverridesValue =
         parser.value(debugPuppetAnimationLayerOverridesOption).trimmed();
+    const yakkai::harness::LayerVisibilityOverrideOptionResult debugLayerVisibilityOverrides =
+        yakkai::harness::validateLayerVisibilityOverrideOption(parser.value(debugLayerVisibilityOverridesOption));
+    const yakkai::harness::MousePositionOptionResult debugMousePosition =
+        yakkai::harness::validateMousePositionOption(parser.value(debugMousePositionOption));
+    const yakkai::harness::MouseTimelineOptionResult debugMouseTimeline =
+        yakkai::harness::validateMouseTimelineOption(parser.value(debugMouseTimelineOption));
     const yakkai::harness::ScenePropertiesJsonOptionResult scenePropertiesJson =
         yakkai::harness::validateScenePropertiesJsonOption(parser.value(scenePropertiesJsonOption));
     const yakkai::harness::PuppetSimulationOptionResult puppetSimulation =
@@ -913,6 +948,16 @@ int main(int argc, char* argv[])
         parser.isSet(debugPuppetEffectRouteOnlyOption);
     const bool debugPuppetAnimationLayerOverridesRequested =
         !debugPuppetAnimationLayerOverridesValue.isEmpty();
+    const bool debugLayerVisibilityOverridesRequested =
+        !debugLayerVisibilityOverrides.normalized.isEmpty();
+    const bool debugMousePositionRequested = debugMousePosition.hasPosition;
+    const bool debugMouseTimelineRequested = debugMouseTimeline.hasTimeline;
+    const bool interactiveMouseRequested = parser.isSet(interactiveMouseOption);
+    const bool mouseInputRequested = parser.isSet(mouseOption) || interactiveMouseRequested;
+    const yakkai::harness::InteractiveMouseOptionResult interactiveMouse =
+        yakkai::harness::validateInteractiveMouseOption(interactiveMouseRequested,
+                                                        debugMousePositionRequested,
+                                                        debugMouseTimelineRequested);
     const QString debugEffectCapturesDir =
         debugEffectCapturesRequested ? QFileInfo(debugEffectCapturesPath).absoluteFilePath() : QString();
     const QString debugEffectCaptureCommand = app.arguments().join(QLatin1Char(' '));
@@ -945,6 +990,22 @@ int main(int argc, char* argv[])
 
     if (!scenePropertiesJson.valid) {
         qWarning().noquote() << "yakkai_scene_harness:" << scenePropertiesJson.error;
+        return 2;
+    }
+    if (!debugLayerVisibilityOverrides.valid) {
+        qWarning().noquote() << "yakkai_scene_harness:" << debugLayerVisibilityOverrides.error;
+        return 2;
+    }
+    if (!debugMousePosition.valid) {
+        qWarning().noquote() << "yakkai_scene_harness:" << debugMousePosition.error;
+        return 2;
+    }
+    if (!debugMouseTimeline.valid) {
+        qWarning().noquote() << "yakkai_scene_harness:" << debugMouseTimeline.error;
+        return 2;
+    }
+    if (!interactiveMouse.valid) {
+        qWarning().noquote() << "yakkai_scene_harness:" << interactiveMouse.error;
         return 2;
     }
     if (!puppetSimulation.valid) {
@@ -1028,6 +1089,22 @@ int main(int argc, char* argv[])
     }
     if (debugPuppetAnimationLayerOverridesRequested && !debugEffectCapturesRequested) {
         qWarning() << "yakkai_scene_harness: --debug-puppet-animation-layer-overrides requires --debug-effect-captures";
+        return 2;
+    }
+    if (debugLayerVisibilityOverridesRequested && !debugEffectCapturesRequested) {
+        qWarning() << "yakkai_scene_harness: --debug-layer-visibility-overrides requires --debug-effect-captures";
+        return 2;
+    }
+    if (debugMousePositionRequested && !debugEffectCapturesRequested) {
+        qWarning() << "yakkai_scene_harness: --debug-mouse-position requires --debug-effect-captures";
+        return 2;
+    }
+    if (debugMouseTimelineRequested && !debugEffectCapturesRequested) {
+        qWarning() << "yakkai_scene_harness: --debug-mouse-timeline requires --debug-effect-captures";
+        return 2;
+    }
+    if (debugMouseTimelineRequested && debugMousePositionRequested) {
+        qWarning() << "yakkai_scene_harness: --debug-mouse-timeline cannot be combined with --debug-mouse-position";
         return 2;
     }
     if (debugEffectProbeMaxEffectsRequested &&
@@ -1142,7 +1219,7 @@ int main(int argc, char* argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessFillModeValue"), fillModeFromString(fillMode));
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessWindowWidth"), windowSize->width());
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessWindowHeight"), windowSize->height());
-    engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessMouseInput"), parser.isSet(mouseOption));
+    engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessMouseInput"), mouseInputRequested);
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessMuted"), !parser.isSet(unmutedOption));
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessShowInfoOverlay"), !parser.isSet(hideInfoOverlayOption));
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessBackendQmlFile"), backendQmlFile(qmlDir, backend));
@@ -1158,6 +1235,10 @@ int main(int argc, char* argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugPuppetEffectFinalMesh"), debugPuppetEffectFinalMeshValue);
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugPuppetEffectRouteOnly"), debugPuppetEffectRouteOnlyRequested);
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugPuppetAnimationLayerOverrides"), debugPuppetAnimationLayerOverridesValue);
+    engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugLayerVisibilityOverrides"), debugLayerVisibilityOverrides.normalized);
+    engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugMousePosition"), debugMousePosition.normalized);
+    engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugMouseTimeline"), debugMouseTimeline.normalized);
+    engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugInteractiveMouse"), interactiveMouseRequested);
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugSyntheticAudioEnabled"), parser.isSet(debugSyntheticAudioOption));
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugSyntheticAudioBins"), *debugSyntheticAudioBins);
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugSyntheticAudioIntervalMs"), *debugSyntheticAudioIntervalMs);
@@ -1201,7 +1282,7 @@ int main(int argc, char* argv[])
         *recordStartDelayMs,
     };
 
-    QObject::connect(&engine, &QQmlApplicationEngine::objectCreated, &app, [&app, capturePath, captureDelayMs, captureDirPath, captureTimesValue, captureSequenceValue, parsedCaptures, selectedCaptureExitMode, recordRequested, recordingRequest](QObject* object, const QUrl&) {
+    QObject::connect(&engine, &QQmlApplicationEngine::objectCreated, &app, [&app, capturePath, captureDelayMs, captureDirPath, captureTimesValue, captureSequenceValue, parsedCaptures, selectedCaptureExitMode, recordRequested, recordingRequest, debugEffectCapturesRequested](QObject* object, const QUrl&) {
         const bool multiCaptureRequested = !captureDirPath.isEmpty() || !captureTimesValue.isEmpty() || !captureSequenceValue.isEmpty();
         if (capturePath.isEmpty() && !multiCaptureRequested && !recordRequested) {
             return;
@@ -1217,7 +1298,7 @@ int main(int argc, char* argv[])
         QPointer<QQuickWindow> guardedWindow(quickWindow);
 
         if (recordRequested) {
-            startCaptureTimersAfterFirstFrame(&app, guardedWindow, [&app, guardedWindow, recordingRequest, selectedCaptureExitMode]() {
+            startCaptureTimersAfterFirstFrame(&app, guardedWindow, CaptureReadyTimeoutMs, [&app, guardedWindow, recordingRequest, selectedCaptureExitMode]() {
                 scheduleWindowRecording(&app, guardedWindow, recordingRequest, selectedCaptureExitMode);
             });
             return;
@@ -1225,7 +1306,10 @@ int main(int argc, char* argv[])
 
         if (!capturePath.isEmpty()) {
             const QString absoluteCapturePath = QFileInfo(capturePath).absoluteFilePath();
-            startCaptureTimersAfterFirstFrame(&app, guardedWindow, [&app, guardedWindow, absoluteCapturePath, captureDelayMs, selectedCaptureExitMode]() {
+            const int readyTimeoutMs = debugEffectCapturesRequested
+                ? DebugEffectCaptureReadyTimeoutMs
+                : CaptureReadyTimeoutMs;
+            startCaptureTimersAfterFirstFrame(&app, guardedWindow, readyTimeoutMs, [&app, guardedWindow, absoluteCapturePath, captureDelayMs, selectedCaptureExitMode]() {
                 scheduleSingleCapture(&app, guardedWindow, absoluteCapturePath, captureDelayMs, selectedCaptureExitMode);
             });
             return;
@@ -1243,7 +1327,7 @@ int main(int argc, char* argv[])
             QCoreApplication::exit(5);
             return;
         }
-        startCaptureTimersAfterFirstFrame(&app, guardedWindow, [&app, guardedWindow, parsedCaptures, absoluteCaptureDir, selectedCaptureExitMode]() {
+        startCaptureTimersAfterFirstFrame(&app, guardedWindow, CaptureReadyTimeoutMs, [&app, guardedWindow, parsedCaptures, absoluteCaptureDir, selectedCaptureExitMode]() {
             scheduleMultiCaptures(&app, guardedWindow, *parsedCaptures, absoluteCaptureDir, selectedCaptureExitMode);
         });
     });

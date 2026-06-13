@@ -19,6 +19,7 @@
 #include "WPMdlParser.hpp"
 #include "WPSceneParser.hpp"
 #include "WPSceneScript.hpp"
+#include "WPShaderValueUpdater.hpp"
 #include "WPShaderParser.hpp"
 #include "WPTexImageParser.hpp"
 #include "Audio/SoundManager.h"
@@ -39,6 +40,7 @@
 #include <iterator>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -135,6 +137,22 @@ wallpaper::SceneNode* findNodeByTranslate(wallpaper::SceneNode* node,
     }
     for (const auto& child : node->GetChildren()) {
         if (auto* match = findNodeByTranslate(child.get(), translate)) {
+            return match;
+        }
+    }
+    return nullptr;
+}
+
+wallpaper::SceneNode* findNodeById(wallpaper::SceneNode* node, int32_t id)
+{
+    if (!node) {
+        return nullptr;
+    }
+    if (node->ID() == id) {
+        return node;
+    }
+    for (const auto& child : node->GetChildren()) {
+        if (auto* match = findNodeById(child.get(), id)) {
             return match;
         }
     }
@@ -2667,6 +2685,29 @@ void testPuppetFinalDisplayBlendInvariant()
           "non-channelmap puppet final display publishes premultiplied offscreen output");
 }
 
+void testDeferredPuppetEffectFinalPublishDoesNotDoubleApplyParallax()
+{
+    wallpaper::PuppetEffectRoutePlan deferredRoute;
+    deferredRoute.effectFinalMeshKind = "puppet-skinned-mesh";
+    deferredRoute.finalDisplayRoute = "effect-layer-node-final-publish";
+
+    const auto ordinaryPassDepth =
+        wallpaper::decideEffectLayerMaterialParallaxDepth(deferredRoute,
+                                                          false,
+                                                          {0.5f, 0.5f});
+    check(std::abs(ordinaryPassDepth[0] - 0.5f) <= 1.0e-6f &&
+              std::abs(ordinaryPassDepth[1] - 0.5f) <= 1.0e-6f,
+          "deferred puppet intermediate effect passes keep the inherited parallax depth");
+
+    const auto finalPublishDepth =
+        wallpaper::decideEffectLayerMaterialParallaxDepth(deferredRoute,
+                                                          true,
+                                                          {0.5f, 0.5f});
+    check(std::abs(finalPublishDepth[0]) <= 1.0e-6f &&
+              std::abs(finalPublishDepth[1]) <= 1.0e-6f,
+          "deferred puppet final publish consumes zero parallax because the effect input is already parallaxed");
+}
+
 void testLayerEffectViewportPolicy()
 {
     {
@@ -3219,6 +3260,195 @@ void testTextSceneScriptOriginBindingAppliesToTextNode()
           "text SceneScript origin binding moves the generated text node");
     check(findNodeByTranslate(scene->sceneGraph.get(), {1.0f, 2.0f, 0.0f}) == nullptr,
           "text node does not keep authored origin after script origin binding resolves");
+}
+
+void testChildImageInheritsParentParallaxWithoutDebugCaptures()
+{
+    const auto root =
+        std::filesystem::current_path() / "smoke-tests/artifacts/tmp/yakkai-parent-parallax-test";
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root / "models");
+    std::filesystem::create_directories(root / "materials");
+    std::filesystem::create_directories(root / "shaders");
+
+    {
+        std::ofstream out(root / "models/child.json");
+        out << R"({"width": 100, "height": 100, "material": "materials/child.json"})";
+    }
+    {
+        std::ofstream out(root / "materials/child.json");
+        out << R"({"passes":[{"blending":"translucent","combos":{},"shader":"genericimage4","textures":[""]}]})";
+    }
+    {
+        std::ofstream out(root / "shaders/genericimage4.vert");
+        out << R"(
+attribute vec3 a_Position;
+uniform mat4 g_ModelViewProjectionMatrix;
+void main() {
+    gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);
+}
+)";
+    }
+    {
+        std::ofstream out(root / "shaders/genericimage4.frag");
+        out << R"(
+void main() {
+    gl_FragColor = vec4(1.0);
+}
+)";
+    }
+
+    wallpaper::fs::VFS vfs;
+    check(vfs.Mount("/assets", wallpaper::fs::CreatePhysicalFs(root.string())),
+          "test VFS mounts parent parallax fixture");
+
+    nlohmann::json sceneJson = {
+        {"camera", {
+            {"center", "0 0 0"},
+            {"eye", "0 0 1"},
+            {"up", "0 1 0"}
+        }},
+        {"general", {
+            {"ambientcolor", "0.2 0.2 0.2"},
+            {"skylightcolor", "0.3 0.3 0.3"},
+            {"clearcolor", "0 0 0"},
+            {"cameraparallax", true},
+            {"cameraparallaxamount", 0.1},
+            {"cameraparallaxdelay", 0.5},
+            {"cameraparallaxmouseinfluence", 0.5},
+            {"orthogonalprojection", {
+                {"width", 1000},
+                {"height", 500}
+            }}
+        }},
+        {"objects", nlohmann::json::array({
+            {
+                {"id", 100},
+                {"name", "PARENT==TRANSFORM"},
+                {"origin", "0 0 0"},
+                {"scale", "1 1 1"},
+                {"angles", "0 0 0"},
+                {"parallaxDepth", "0.50000 0.50000"}
+            },
+            {
+                {"id", 101},
+                {"name", "ChildImage"},
+                {"parent", 100},
+                {"origin", "10 20 0"},
+                {"scale", "1 1 1"},
+                {"angles", "0 0 0"},
+                {"parallaxDepth", "0.00000 0.00000"},
+                {"image", "models/child.json"}
+            }
+        })}
+    };
+
+    wallpaper::audio::SoundManager soundManager;
+    wallpaper::WPSceneParser parser;
+    const auto scene = parser.Parse("parent_parallax_test", sceneJson.dump(), vfs, soundManager);
+    check(scene != nullptr, "parent parallax fixture parses");
+    if (!scene || !scene->sceneGraph || !scene->shaderValueUpdater) {
+        return;
+    }
+
+    auto* child = findNodeById(scene->sceneGraph.get(), 101);
+    check(child != nullptr, "parent parallax fixture child node exists");
+    if (!child) {
+        return;
+    }
+
+    auto hasModelViewProjection = [](std::string_view name) {
+        return name == wallpaper::G_MVP;
+    };
+    wallpaper::sprite_map_t sprites;
+    std::vector<float> centerMvp;
+    std::vector<float> leftMvp;
+    scene->shaderValueUpdater->InitUniforms(child, hasModelViewProjection);
+    scene->shaderValueUpdater->MouseInput(0.5, 0.5);
+    scene->PassFrameTime(0.5);
+    scene->shaderValueUpdater->FrameBegin();
+    scene->shaderValueUpdater->UpdateUniforms(child,
+                                               sprites,
+                                               [&centerMvp](std::string_view name,
+                                                            wallpaper::ShaderValue value) {
+                                                   if (name == wallpaper::G_MVP) {
+                                                       centerMvp.assign(value.data(),
+                                                                        value.data() + value.size());
+                                                   }
+                                               });
+    scene->shaderValueUpdater->MouseInput(0.0, 0.5);
+    scene->PassFrameTime(0.5);
+    scene->shaderValueUpdater->FrameBegin();
+    scene->shaderValueUpdater->UpdateUniforms(child,
+                                               sprites,
+                                               [&leftMvp](std::string_view name,
+                                                          wallpaper::ShaderValue value) {
+                                                   if (name == wallpaper::G_MVP) {
+                                                       leftMvp.assign(value.data(),
+                                                                      value.data() + value.size());
+                                                   }
+                                               });
+
+    check(!centerMvp.empty(), "center MVP uniform captured for child image");
+    check(!leftMvp.empty(), "left-edge MVP uniform captured for child image");
+    check(centerMvp.size() == leftMvp.size(), "MVP matrix sizes match");
+    bool matricesDiffer = false;
+    for (size_t i = 0; i < std::min(centerMvp.size(), leftMvp.size()); ++i) {
+        if (std::abs(centerMvp[i] - leftMvp[i]) > 1.0e-5f) {
+            matricesDiffer = true;
+            break;
+        }
+    }
+    check(matricesDiffer,
+          "child image with zero own parallax inherits parent parallax in runtime MVP without debug captures");
+}
+
+void testRepeatedIdenticalMouseInputDoesNotRestartParallaxDelay()
+{
+    wallpaper::Scene scene;
+    wallpaper::WPShaderValueUpdater updater(&scene);
+    updater.SetCameraParallax({
+        .enable = true,
+        .amount = 0.1f,
+        .delay = 0.1f,
+        .mouseinfluence = 0.5f,
+    });
+
+    updater.MouseInput(0.0, 0.5);
+    scene.PassFrameTime(0.05);
+    updater.FrameBegin();
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    updater.MouseInput(0.0, 0.5);
+    scene.PassFrameTime(0.05);
+    updater.FrameBegin();
+
+    const auto snapshot = updater.mouseParallaxDebugSnapshot();
+    check(snapshot.effectivePosition[0] < 0.05f,
+          "repeated identical mouse input does not restart parallax delay");
+}
+
+void testChangingMouseInputDoesNotKeepRestartingParallaxDelay()
+{
+    wallpaper::Scene scene;
+    wallpaper::WPShaderValueUpdater updater(&scene);
+    updater.SetCameraParallax({
+        .enable = true,
+        .amount = 0.1f,
+        .delay = 0.1f,
+        .mouseinfluence = 0.5f,
+    });
+
+    for (const float x : {0.4f, 0.3f, 0.2f, 0.1f, 0.0f}) {
+        updater.MouseInput(x, 0.5);
+        scene.PassFrameTime(0.02);
+        updater.FrameBegin();
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    }
+
+    const auto snapshot = updater.mouseParallaxDebugSnapshot();
+    check(snapshot.effectivePosition[0] < 0.18f,
+          "changing mouse input advances parallax without restart lag");
 }
 
 void testPuppetMeshTexcoordsApplyTextureMapRate()
@@ -3883,12 +4113,16 @@ int main()
     testEffectPublishRoutePolicy();
     testPuppetEffectRoutePlan();
     testPuppetFinalDisplayBlendInvariant();
+    testDeferredPuppetEffectFinalPublishDoesNotDoubleApplyParallax();
     testLayerEffectViewportPolicy();
     testVideoTexturePolicy();
     testModelFallbackPolicy();
     testSceneScriptRuntimePolicy();
     testSceneScriptEvaluatorRuntimeStubs();
     testTextSceneScriptOriginBindingAppliesToTextNode();
+    testChildImageInheritsParentParallaxWithoutDebugCaptures();
+    testRepeatedIdenticalMouseInputDoesNotRestartParallaxDelay();
+    testChangingMouseInputDoesNotKeepRestartingParallaxDelay();
     testPuppetMeshTexcoordsApplyTextureMapRate();
     testPuppetFilteredMeshIncludesSecondaryOnlyWeightedChildren();
     testPuppetSimulationModeParser();

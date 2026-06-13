@@ -24,3 +24,8 @@ wallpapers/logs.txt
 /yakkai-references/
 /md-fixes/
 /AGENTS.md
+/CLAUDE.md
+/.codex
+/.superpowers/
+/.tmp_*
+/log*.txt

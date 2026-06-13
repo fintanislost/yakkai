@@ -2,6 +2,7 @@
 
 #include <QtQuick/QQuickFramebufferObject>
 #include <QtCore/QLoggingCategory>
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QString>
 #include <QtCore/QTimer>
 #include <QtGui/QMouseEvent>
@@ -30,6 +31,12 @@ class SceneObject : public QQuickItem {
     Q_PROPERTY(QString debugPuppetEffectFinalMesh READ debugPuppetEffectFinalMesh WRITE setDebugPuppetEffectFinalMesh NOTIFY debugPuppetEffectFinalMeshChanged)
     Q_PROPERTY(bool debugPuppetEffectRouteOnly READ debugPuppetEffectRouteOnly WRITE setDebugPuppetEffectRouteOnly NOTIFY debugPuppetEffectRouteOnlyChanged)
     Q_PROPERTY(QString debugPuppetAnimationLayerOverrides READ debugPuppetAnimationLayerOverrides WRITE setDebugPuppetAnimationLayerOverrides NOTIFY debugPuppetAnimationLayerOverridesChanged)
+    Q_PROPERTY(QString debugLayerVisibilityOverrides READ debugLayerVisibilityOverrides WRITE setDebugLayerVisibilityOverrides NOTIFY debugLayerVisibilityOverridesChanged)
+    Q_PROPERTY(QString debugMousePosition READ debugMousePosition WRITE setDebugMousePosition NOTIFY debugMousePositionChanged)
+    Q_PROPERTY(QString debugMouseTimeline READ debugMouseTimeline WRITE setDebugMouseTimeline NOTIFY debugMouseTimelineChanged)
+    Q_PROPERTY(bool debugInteractiveMouse READ debugInteractiveMouse WRITE setDebugInteractiveMouse NOTIFY debugInteractiveMouseChanged)
+    Q_PROPERTY(bool mouseDiagnosticsEnabled READ mouseDiagnosticsEnabled WRITE setMouseDiagnosticsEnabled NOTIFY mouseDiagnosticsEnabledChanged)
+    Q_PROPERTY(QString lastMouseDiagnostic READ lastMouseDiagnostic NOTIFY lastMouseDiagnosticChanged)
     Q_PROPERTY(int fps READ fps WRITE setFps NOTIFY fpsChanged)
     Q_PROPERTY(int fillMode READ fillMode WRITE setFillMode NOTIFY fillModeChanged)
     Q_PROPERTY(float speed READ speed WRITE setSpeed NOTIFY speedChanged)
@@ -61,6 +68,12 @@ public:
     QString debugPuppetEffectFinalMesh() const;
     bool debugPuppetEffectRouteOnly() const;
     QString debugPuppetAnimationLayerOverrides() const;
+    QString debugLayerVisibilityOverrides() const;
+    QString debugMousePosition() const;
+    QString debugMouseTimeline() const;
+    bool debugInteractiveMouse() const;
+    bool mouseDiagnosticsEnabled() const;
+    QString lastMouseDiagnostic() const;
     void setSource(const QUrl& source);
     void setAssets(const QUrl& assets);
     void setScenePropertiesJson(const QString& value);
@@ -75,6 +88,11 @@ public:
     void setDebugPuppetEffectFinalMesh(const QString& value);
     void setDebugPuppetEffectRouteOnly(bool value);
     void setDebugPuppetAnimationLayerOverrides(const QString& value);
+    void setDebugLayerVisibilityOverrides(const QString& value);
+    void setDebugMousePosition(const QString& value);
+    void setDebugMouseTimeline(const QString& value);
+    void setDebugInteractiveMouse(bool value);
+    void setMouseDiagnosticsEnabled(bool value);
 
     int   fps() const;
     int   fillMode() const;
@@ -120,6 +138,12 @@ signals:
     void debugPuppetEffectFinalMeshChanged();
     void debugPuppetEffectRouteOnlyChanged();
     void debugPuppetAnimationLayerOverridesChanged();
+    void debugLayerVisibilityOverridesChanged();
+    void debugMousePositionChanged();
+    void debugMouseTimelineChanged();
+    void debugInteractiveMouseChanged();
+    void mouseDiagnosticsEnabledChanged();
+    void lastMouseDiagnosticChanged();
     void fpsChanged();
     void fillModeChanged();
     void speedChanged();
@@ -142,6 +166,13 @@ private:
     QString m_debugPuppetEffectFinalMesh;
     bool m_debugPuppetEffectRouteOnly { false };
     QString m_debugPuppetAnimationLayerOverrides;
+    QString m_debugLayerVisibilityOverrides;
+    QString m_debugMousePosition;
+    QString m_debugMouseTimeline;
+    bool m_debugInteractiveMouse { false };
+    bool m_mouseDiagnosticsEnabled { false };
+    QString m_lastMouseDiagnostic;
+    QElapsedTimer m_mouseDiagnosticLogTimer;
 
     int   m_fps { 15 };
     int   m_fillMode { FillMode::ASPECTCROP };
@@ -158,6 +189,7 @@ public:
 private:
     void setScenePropertyQurl(std::string_view, QUrl);
     void reportBackendError(const QString& message);
+    void recordMouseDiagnostic(double normalizedX, double normalizedY, const QString& source);
     bool m_inited { false };
     bool m_enable_valid { false };
     bool m_reportedBackendError { false };

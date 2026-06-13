@@ -20,6 +20,10 @@ Item {
     property string debugPuppetEffectFinalMesh: ""
     property bool debugPuppetEffectRouteOnly: false
     property string debugPuppetAnimationLayerOverrides: ""
+    property string debugLayerVisibilityOverrides: ""
+    property string debugMousePosition: ""
+    property string debugMouseTimeline: ""
+    property bool debugInteractiveMouse: false
     property string scenePropertiesJson: ""
     property bool firstFrameEmitted: false
     readonly property string backendStatus: "video frames=" + video.receivedFrameCount + " source=" + String(sceneSource)

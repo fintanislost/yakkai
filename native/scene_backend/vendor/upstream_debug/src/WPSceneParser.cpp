@@ -173,6 +173,17 @@ struct ParseContext {
     fs::VFS*               vfs;
     std::unordered_map<int32_t, std::shared_ptr<SceneNode>> object_nodes;
     std::unordered_map<int32_t, std::vector<std::shared_ptr<SceneNode>>> deferred_children;
+    std::unordered_map<int32_t, std::string> object_names;
+    std::unordered_map<int32_t, int32_t> object_parent_ids;
+    std::unordered_map<int32_t, std::vector<int>> object_child_ids;
+    std::unordered_map<int32_t, std::array<float, 2>> object_parallax_depths;
+    struct DebugMouseParallaxSidecarLayer {
+        int32_t              id { 0 };
+        int32_t              parent { 0 };
+        std::string          name;
+        std::array<float, 2> parallaxDepth { 0.0f, 0.0f };
+    };
+    std::vector<DebugMouseParallaxSidecarLayer> debug_mouse_parallax_sidecar_layers;
     std::unordered_map<std::string, std::unordered_set<std::string>> paused_puppet_animations;
 
     // Scene type detection — determines which rendering pipeline is used.
@@ -226,6 +237,7 @@ struct ParseContext {
     std::unordered_set<int32_t> hidden_containers;
     // All container object IDs (visible or not) — used to reparent orphaned children.
     std::unordered_set<int32_t> all_containers;
+    std::unordered_map<int32_t, bool> debug_layer_visibility_originals;
 };
 
 struct WPSolidAnchorObject {
@@ -236,6 +248,7 @@ struct WPSolidAnchorObject {
         GET_JSON_NAME_VALUE_NOWARN(json, "origin", origin);
         GET_JSON_NAME_VALUE_NOWARN(json, "angles", angles);
         GET_JSON_NAME_VALUE_NOWARN(json, "scale", scale);
+        GET_JSON_NAME_VALUE_NOWARN(json, "parallaxDepth", parallaxDepth);
         GET_JSON_NAME_VALUE_NOWARN(json, "visible", visible);
         return true;
     }
@@ -246,6 +259,7 @@ struct WPSolidAnchorObject {
     std::array<float, 3> origin { 0.0f, 0.0f, 0.0f };
     std::array<float, 3> scale { 1.0f, 1.0f, 1.0f };
     std::array<float, 3> angles { 0.0f, 0.0f, 0.0f };
+    std::array<float, 2> parallaxDepth { 0.0f, 0.0f };
     bool                 visible { true };
 };
 
@@ -398,6 +412,49 @@ void RegisterPuppetPauseDirectives(ParseContext& context, const nlohmann::json& 
     }
 }
 
+bool ResolveObjectVisibleForDebug(const nlohmann::json& obj)
+{
+    if (! obj.contains("visible")) {
+        return true;
+    }
+    const auto& visible = obj.at("visible");
+    if (visible.is_boolean()) {
+        return visible.get<bool>();
+    }
+    if (auto resolved = ResolveConditionalProperty(visible)) {
+        if (resolved->is_boolean()) {
+            return resolved->get<bool>();
+        }
+        if (resolved->is_number()) {
+            return resolved->get<double>() > 0.5;
+        }
+    }
+    return true;
+}
+
+void ApplyDebugLayerVisibilityOverride(ParseContext& context,
+                                       nlohmann::json& obj,
+                                       const wallpaper::debug::EffectCaptureConfig& config)
+{
+    if (! config.enabled() || ! obj.contains("id") || ! obj.at("id").is_number_integer()) {
+        return;
+    }
+
+    const int32_t layerId = obj.at("id").get<int32_t>();
+    const auto visibleOverride = config.layerVisibilityOverrideFor(layerId);
+    if (! visibleOverride) {
+        return;
+    }
+
+    const bool originalVisible = ResolveObjectVisibleForDebug(obj);
+    context.debug_layer_visibility_originals[layerId] = originalVisible;
+    obj["visible"] = *visibleOverride;
+    LOG_INFO("debug layer visibility override applied: layer=%d originalVisible=%d visible=%d",
+             layerId,
+             originalVisible ? 1 : 0,
+             *visibleOverride ? 1 : 0);
+}
+
 bool HasDrawablePayload(const nlohmann::json& obj) {
     auto hasNonNull = [&obj](const char* key) {
         return obj.contains(key) && ! obj.at(key).is_null();
@@ -420,7 +477,125 @@ bool IsTransformAnchorObject(const nlohmann::json& obj) {
     }
 
     return obj.contains("origin") || obj.contains("angles") || obj.contains("scale") ||
-           obj.contains("parent") || obj.contains("parallaxDepth") || obj.contains("solid");
+           obj.contains("parent") || obj.contains("solid");
+}
+
+bool ParseDebugVec2(const nlohmann::json& value, std::array<float, 2>& out)
+{
+    if (value.is_array() && value.size() >= 2) {
+        if (!value.at(0).is_number() || !value.at(1).is_number()) {
+            return false;
+        }
+        out = {value.at(0).get<float>(), value.at(1).get<float>()};
+        return true;
+    }
+    if (value.is_string()) {
+        std::istringstream iss(value.get<std::string>());
+        float x = 0.0f;
+        float y = 0.0f;
+        if (iss >> x >> y) {
+            out = {x, y};
+            return true;
+        }
+    }
+    return false;
+}
+
+bool HasDebugNonzeroParallaxDepth(const std::array<float, 2>& value)
+{
+    return std::abs(value[0]) > 1.0e-6f || std::abs(value[1]) > 1.0e-6f;
+}
+
+std::array<float, 2> ResolveEffectiveParallaxDepth(const ParseContext& context,
+                                                   int32_t parentId,
+                                                   const std::array<float, 2>& ownDepth)
+{
+    if (HasDebugNonzeroParallaxDepth(ownDepth)) {
+        return ownDepth;
+    }
+
+    std::unordered_set<int32_t> seen;
+    int32_t current = parentId;
+    while (current > 0 && seen.insert(current).second) {
+        const auto depthIt = context.object_parallax_depths.find(current);
+        if (depthIt != context.object_parallax_depths.end() &&
+            HasDebugNonzeroParallaxDepth(depthIt->second)) {
+            return depthIt->second;
+        }
+        const auto parentIt = context.object_parent_ids.find(current);
+        if (parentIt == context.object_parent_ids.end()) {
+            break;
+        }
+        current = parentIt->second;
+    }
+    return ownDepth;
+}
+
+void RegisterDebugObjectGraphEntry(ParseContext& context,
+                                   int32_t id,
+                                   int32_t parent,
+                                   std::string_view name);
+void RegisterDebugObjectParallaxDepth(ParseContext& context,
+                                      int32_t id,
+                                      const std::array<float, 2>& parallaxDepth);
+
+void RegisterDebugJsonObjectGraph(ParseContext& context, const nlohmann::json& obj)
+{
+    if (!obj.contains("id") || !obj.at("id").is_number_integer()) {
+        return;
+    }
+    if (!ResolveObjectVisibleForDebug(obj)) {
+        return;
+    }
+
+    const int32_t id = obj.at("id").get<int32_t>();
+    int32_t parent = 0;
+    if (obj.contains("parent") && obj.at("parent").is_number_integer()) {
+        parent = obj.at("parent").get<int32_t>();
+    }
+    std::string name;
+    if (obj.contains("name") && obj.at("name").is_string()) {
+        name = obj.at("name").get<std::string>();
+    }
+
+    RegisterDebugObjectGraphEntry(context, id, parent, name);
+
+    std::array<float, 2> parallaxDepth {0.0f, 0.0f};
+    if (obj.contains("parallaxDepth") &&
+        ParseDebugVec2(obj.at("parallaxDepth"), parallaxDepth)) {
+        RegisterDebugObjectParallaxDepth(context, id, parallaxDepth);
+    }
+}
+
+void CollectDebugMouseParallaxSidecarLayer(ParseContext& context, const nlohmann::json& obj)
+{
+    if (HasDrawablePayload(obj) || obj.contains("text") || obj.contains("font")) {
+        return;
+    }
+    if (!obj.contains("id") || !obj.at("id").is_number_integer() || !obj.contains("parallaxDepth")) {
+        return;
+    }
+    if (!ResolveObjectVisibleForDebug(obj)) {
+        return;
+    }
+
+    std::array<float, 2> parallaxDepth {0.0f, 0.0f};
+    if (!ParseDebugVec2(obj.at("parallaxDepth"), parallaxDepth) ||
+        !HasDebugNonzeroParallaxDepth(parallaxDepth)) {
+        return;
+    }
+
+    ParseContext::DebugMouseParallaxSidecarLayer layer;
+    layer.id = obj.at("id").get<int32_t>();
+    layer.parallaxDepth = parallaxDepth;
+    context.object_parallax_depths[layer.id] = parallaxDepth;
+    if (obj.contains("parent") && obj.at("parent").is_number_integer()) {
+        layer.parent = obj.at("parent").get<int32_t>();
+    }
+    if (obj.contains("name") && obj.at("name").is_string()) {
+        layer.name = obj.at("name").get<std::string>();
+    }
+    context.debug_mouse_parallax_sidecar_layers.push_back(std::move(layer));
 }
 
 float ClampUnit(float value) {
@@ -2342,6 +2517,24 @@ void AttachObjectNode(ParseContext&                    context,
     context.deferred_children.erase(deferredIt);
 }
 
+std::string DebugObjectName(const ParseContext& context, int32_t id)
+{
+    auto it = context.object_names.find(id);
+    return it != context.object_names.end() ? it->second : std::string();
+}
+
+std::vector<int> DebugChildLayerIds(const ParseContext& context, int32_t id)
+{
+    auto it = context.object_child_ids.find(id);
+    if (it == context.object_child_ids.end()) {
+        return {};
+    }
+    std::vector<int> ids = it->second;
+    std::sort(ids.begin(), ids.end());
+    ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+    return ids;
+}
+
 bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene, SceneNode* pNode,
                   SceneMaterial* pMaterial, WPShaderValueData* pSvData,
                   WPShaderInfo* pWPShaderInfo = nullptr) {
@@ -3077,6 +3270,10 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     const auto puppetEffectDecision = wallpaper::policy::decideLayerEffects(layerEffectInput);
     const auto candidateClassification =
         wallpaper::policy::classifyStrippedEffectCandidate(layerEffectInput);
+    const auto effectiveParallaxDepth =
+        ResolveEffectiveParallaxDepth(context,
+                                      wpimgobj.parent,
+                                      {wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1]});
     wallpaper::debug::EffectCaptureLayerInfo effectCaptureInfo;
     effectCaptureInfo.sceneId = context.scene ? context.scene->scene_id : "unknown_scene";
     effectCaptureInfo.sceneType = SceneTypeText(context.scene_type);
@@ -3085,6 +3282,16 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     effectCaptureInfo.layerId = wpimgobj.id;
     effectCaptureInfo.visibleEffectCount = count_eff;
     effectCaptureInfo.alpha = wpimgobj.alpha;
+    effectCaptureInfo.parallaxDepth = effectiveParallaxDepth;
+    effectCaptureInfo.parallaxDepthNonzero =
+        std::abs(effectCaptureInfo.parallaxDepth[0]) > 1.0e-6f ||
+        std::abs(effectCaptureInfo.parallaxDepth[1]) > 1.0e-6f;
+    if (const auto originalVisibleIt = context.debug_layer_visibility_originals.find(wpimgobj.id);
+        originalVisibleIt != context.debug_layer_visibility_originals.end()) {
+        effectCaptureInfo.debugLayerVisibilityOverrideRequested = true;
+        effectCaptureInfo.debugLayerVisibilityOverrideOriginalVisible = originalVisibleIt->second;
+        effectCaptureInfo.debugLayerVisibilityOverrideVisible = wpimgobj.visible;
+    }
     effectCaptureInfo.keepLayer = puppetEffectDecision.keepLayer;
     effectCaptureInfo.keepEffects = puppetEffectDecision.keepEffects;
     effectCaptureInfo.strippedEffects = puppetEffectDecision.strippedEffects;
@@ -3132,6 +3339,15 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         effectCaptureInfo.debugProbeRequested =
             context.scene->debugEffectCaptures.shouldProbeLayer(wpimgobj.id) ||
             context.scene->debugEffectCaptures.shouldProbeHighRiskLayer(wpimgobj.id);
+        wallpaper::debug::recordMouseParallaxLayer(*context.scene,
+                                                   wpimgobj.id,
+                                                   wpimgobj.name,
+                                                   "image",
+                                                   effectCaptureInfo.parallaxDepth,
+                                                   wpimgobj.parent,
+                                                   DebugObjectName(context, wpimgobj.parent),
+                                                   DebugChildLayerIds(context, wpimgobj.id),
+                                                   true);
         wallpaper::debug::recordPuppetAnimationLayerInventory(*context.scene, effectCaptureInfo);
     }
     const std::string debugProbeReason =
@@ -3298,7 +3514,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     std::vector<WPPuppetLayer::AnimationLayer> renderPuppetLayers = wpimgobj.puppet_layers;
     {
         if (! hasEffect) {
-            svData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
+            svData.parallaxDepth = effectiveParallaxDepth;
             if (puppet) {
                 WPMdlParser::AddPuppetShaderInfo(shaderInfo, *puppet);
             }
@@ -3346,7 +3562,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 channelMapPrepassMode.clear();
                 channelMapMaterialPath.clear();
                 sourceMaterial             = wpimgobj.material;
-                svData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
+                svData.parallaxDepth = effectiveParallaxDepth;
                 WPMdlParser::AddPuppetShaderInfo(shaderInfo, *puppet);
                 LOG_INFO("native puppet channelmap prepass falling back to ordinary puppet image-effects route: image=%s authoredEffects=%d",
                          wpimgobj.name.c_str(),
@@ -3356,7 +3572,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     puppetFinalMeshOverride == "layer-card" ||
                     puppetFinalMeshOverride == "image-space";
                 useDeferredPuppetFinalRoute = ! forceLegacyPuppetFinalRoute;
-                svData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
+                svData.parallaxDepth = effectiveParallaxDepth;
                 if (useDeferredPuppetFinalRoute) {
                     LOG_INFO("deferred puppet-final route enabled: image=%s authoredEffects=%d",
                              wpimgobj.name.c_str(),
@@ -4025,7 +4241,11 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     puppetEffectRoutePlan.preservePuppetMeshForEffectPasses &&
                     puppet && wpmat.use_puppet;
                 {
-                    svData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
+                    svData.parallaxDepth =
+                        wallpaper::decideEffectLayerMaterialParallaxDepth(
+                            puppetEffectRoutePlan,
+                            isFinalPublishedMaterialNode,
+                            effectiveParallaxDepth);
                     if (puppet && wpmat.use_puppet) {
                         svData.puppet_layer = WPPuppetLayer(puppet->puppet);
                         svData.puppet_layer.prepared(wpimgobj.puppet_layers);
@@ -4161,7 +4381,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                     LOG_ERROR("load standalone puppet base material failed: %s", wpimgobj.name.c_str());
                 } else {
                     LoadConstvalue(baseMaterial, baseSourceMaterial, baseShaderInfo);
-                    baseSvData.parallaxDepth = { wpimgobj.parallaxDepth[0], wpimgobj.parallaxDepth[1] };
+                    baseSvData.parallaxDepth = effectiveParallaxDepth;
                     baseSvData.puppet_layer = WPPuppetLayer(puppet->puppet);
                     baseSvData.puppet_layer.prepared(wpimgobj.puppet_layers);
 
@@ -4221,10 +4441,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 finalDisplayInput.standaloneDisplayTransform =
                     hasStandaloneDisplayTransform ? &standaloneDisplayTransform : nullptr;
                 finalDisplayInput.baseConstSvs = baseConstSvs;
-                finalDisplayInput.parallaxDepth = {
-                    wpimgobj.parallaxDepth[0],
-                    wpimgobj.parallaxDepth[1],
-                };
+                finalDisplayInput.parallaxDepth = effectiveParallaxDepth;
                 finalDisplayInput.renderPuppetLayers = renderPuppetLayers;
                 finalDisplayInput.finalEffectTexture = finalEffectTexture;
                 finalDisplayInput.authoredEffectCount = count_eff;
@@ -4351,7 +4568,21 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
     WPShaderValueData svData;
 
     if (! is_child) {
-        svData.parallaxDepth = { wppartobj.parallaxDepth[0], wppartobj.parallaxDepth[1] };
+        svData.parallaxDepth =
+            ResolveEffectiveParallaxDepth(context,
+                                          wppartobj.parent,
+                                          { wppartobj.parallaxDepth[0], wppartobj.parallaxDepth[1] });
+        if (context.scene) {
+            wallpaper::debug::recordMouseParallaxLayer(*context.scene,
+                                                       wppartobj.id,
+                                                       wppartobj.name,
+                                                       "particle",
+                                                       svData.parallaxDepth,
+                                                       wppartobj.parent,
+                                                       DebugObjectName(context, wppartobj.parent),
+                                                       DebugChildLayerIds(context, wppartobj.id),
+                                                       true);
+        }
     }
 
     WPShaderInfo shaderInfo;
@@ -4475,6 +4706,17 @@ void ParseSolidAnchorObj(ParseContext& context, WPSolidAnchorObject& solid_obj) 
                                             Vector3f(solid_obj.scale.data()),
                                             Vector3f(solid_obj.angles.data()));
     node->ID() = solid_obj.id;
+    if (context.scene) {
+        wallpaper::debug::recordMouseParallaxLayer(*context.scene,
+                                                   solid_obj.id,
+                                                   solid_obj.name,
+                                                   "transform-anchor",
+                                                   solid_obj.parallaxDepth,
+                                                   solid_obj.parent,
+                                                   DebugObjectName(context, solid_obj.parent),
+                                                   DebugChildLayerIds(context, solid_obj.id),
+                                                   true);
+    }
     AttachObjectNode(context, node, solid_obj.id, solid_obj.parent);
 }
 
@@ -4760,6 +5002,69 @@ void AddWPObject(std::vector<WPObjectVar>& objs, const nlohmann::json& json_obj,
     if (! wpobj.visible) return;
     objs.push_back(wpobj);
 }
+
+void RegisterDebugObjectGraphEntry(ParseContext& context,
+                                   int32_t id,
+                                   int32_t parent,
+                                   std::string_view name)
+{
+    if (id <= 0) {
+        return;
+    }
+    context.object_names[id] = std::string(name);
+    context.object_parent_ids[id] = parent;
+    if (parent > 0 && parent != id) {
+        context.object_child_ids[parent].push_back(id);
+    }
+}
+
+void RegisterDebugObjectParallaxDepth(ParseContext& context,
+                                      int32_t id,
+                                      const std::array<float, 2>& parallaxDepth)
+{
+    if (id <= 0 || ! HasDebugNonzeroParallaxDepth(parallaxDepth)) {
+        return;
+    }
+    context.object_parallax_depths[id] = parallaxDepth;
+}
+
+void RegisterDebugObjectGraph(ParseContext& context, const wpscene::WPImageObject& obj)
+{
+    RegisterDebugObjectGraphEntry(context, obj.id, obj.parent, obj.name);
+    RegisterDebugObjectParallaxDepth(context, obj.id, obj.parallaxDepth);
+}
+
+void RegisterDebugObjectGraph(ParseContext& context, const wpscene::WPParticleObject& obj)
+{
+    RegisterDebugObjectGraphEntry(context, obj.id, obj.parent, obj.name);
+    RegisterDebugObjectParallaxDepth(context, obj.id, obj.parallaxDepth);
+}
+
+void RegisterDebugObjectGraph(ParseContext& context, const wpscene::WPLightObject& obj)
+{
+    RegisterDebugObjectGraphEntry(context, obj.id, obj.parent, obj.name);
+    RegisterDebugObjectParallaxDepth(context, obj.id, obj.parallaxDepth);
+}
+
+void RegisterDebugObjectGraph(ParseContext& context, const wpscene::WPModelObject& obj)
+{
+    RegisterDebugObjectGraphEntry(context, obj.id, obj.parent, obj.name);
+}
+
+void RegisterDebugObjectGraph(ParseContext& context, const WPSolidAnchorObject& obj)
+{
+    RegisterDebugObjectGraphEntry(context, obj.id, obj.parent, obj.name);
+    RegisterDebugObjectParallaxDepth(context, obj.id, obj.parallaxDepth);
+}
+
+void RegisterDebugObjectGraph(ParseContext& context, const WPTextObject& obj)
+{
+    RegisterDebugObjectGraphEntry(context, obj.id, obj.parent, obj.name);
+}
+
+void RegisterDebugObjectGraph(ParseContext&, const wpscene::WPSoundObject&)
+{
+}
 } // namespace
 
 std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std::string& buf,
@@ -4952,6 +5257,16 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
         }
     }
 
+    for (auto& obj : json["objects"]) {
+        ApplyDebugLayerVisibilityOverride(context, obj, m_debug_effect_captures);
+    }
+    for (const auto& obj : json.at("objects")) {
+        RegisterDebugJsonObjectGraph(context, obj);
+        if (m_debug_effect_captures.enabled()) {
+            CollectDebugMouseParallaxSidecarLayer(context, obj);
+        }
+    }
+
     // First pass: identify container objects (no image/particle/etc) whose
     // conditional visibility resolves to false. Their children should be hidden.
     for (const auto& obj : json.at("objects")) {
@@ -4993,6 +5308,12 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
             AddWPObject<WPTextObject>(wp_objs, obj, vfs);
         } else if (IsTransformAnchorObject(obj)) {
             AddWPObject<WPSolidAnchorObject>(wp_objs, obj, vfs);
+        }
+    }
+
+    if (m_debug_effect_captures.enabled()) {
+        for (const auto& obj : wp_objs) {
+            std::visit([&context](const auto& value) { RegisterDebugObjectGraph(context, value); }, obj);
         }
     }
 
@@ -5064,6 +5385,22 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
 
     context.scene->scene_id = scene_id;
     context.scene->debugEffectCaptures = m_debug_effect_captures;
+    context.scene->debugEffectCaptures.mouseParallax.cameraEnabled = sc.general.cameraparallax;
+    context.scene->debugEffectCaptures.mouseParallax.cameraAmount = sc.general.cameraparallaxamount;
+    context.scene->debugEffectCaptures.mouseParallax.cameraDelay = sc.general.cameraparallaxdelay;
+    context.scene->debugEffectCaptures.mouseParallax.cameraMouseInfluence =
+        sc.general.cameraparallaxmouseinfluence;
+    for (const auto& layer : context.debug_mouse_parallax_sidecar_layers) {
+        wallpaper::debug::recordMouseParallaxLayer(*context.scene,
+                                                   layer.id,
+                                                   layer.name,
+                                                   "transform-anchor",
+                                                   layer.parallaxDepth,
+                                                   layer.parent,
+                                                   DebugObjectName(context, layer.parent),
+                                                   DebugChildLayerIds(context, layer.id),
+                                                   true);
+    }
 
     WPShaderParser::InitGlslang();
 

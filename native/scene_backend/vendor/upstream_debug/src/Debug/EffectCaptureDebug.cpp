@@ -1,5 +1,6 @@
 #include "Debug/EffectCaptureDebug.hpp"
 
+#include "Interface/IShaderValueUpdater.h"
 #include "Scene/Scene.h"
 #include "SpecTexs.hpp"
 
@@ -11,6 +12,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <system_error>
+#include <tuple>
 #include <utility>
 
 #include <nlohmann/json.hpp>
@@ -161,6 +163,120 @@ nlohmann::json puppetAnimationLayerOverridesToJson(
     nlohmann::json out = nlohmann::json::array();
     for (const auto& rule : rules) {
         out.push_back(puppetAnimationLayerOverrideToJson(rule));
+    }
+    return out;
+}
+
+nlohmann::json layerVisibilityOverridesToJson(const std::unordered_map<int, bool>& rules)
+{
+    std::vector<std::pair<int, bool>> sortedRules(rules.begin(), rules.end());
+    std::sort(sortedRules.begin(), sortedRules.end(), [](const auto& left, const auto& right) {
+        return left.first < right.first;
+    });
+
+    nlohmann::json out = nlohmann::json::array();
+    for (const auto& [layerId, visible] : sortedRules) {
+        out.push_back({
+            {"layerId", layerId},
+            {"visible", visible},
+        });
+    }
+    return out;
+}
+
+nlohmann::json mousePositionToJson(const std::array<float, 2>& value)
+{
+    return nlohmann::json::array({value[0], value[1]});
+}
+
+nlohmann::json mouseParallaxLayerInventoryToJson(const Scene& scene)
+{
+    nlohmann::json out = nlohmann::json::array();
+    const auto snapshot = scene.shaderValueUpdater
+        ? scene.shaderValueUpdater->mouseParallaxDebugSnapshot()
+        : MouseParallaxDebugSnapshot {};
+
+    std::vector<EffectCaptureMouseParallaxLayerInfo> layers =
+        scene.debugMouseParallaxLayerInventory;
+    std::sort(layers.begin(), layers.end(), [](const auto& left, const auto& right) {
+        return std::tie(left.layerId, left.layerKind, left.layerName) <
+               std::tie(right.layerId, right.layerKind, right.layerName);
+    });
+
+    const float mouseVecX = 0.5f - snapshot.effectivePosition[0];
+    const float mouseVecY = snapshot.effectivePosition[1] - 0.5f;
+    for (const auto& layer : layers) {
+        const std::array<float, 2> expectedOffset {
+            mouseVecX * static_cast<float>(scene.ortho[0]) *
+                snapshot.cameraMouseInfluence * layer.parallaxDepth[0] * snapshot.cameraAmount,
+            mouseVecY * static_cast<float>(scene.ortho[1]) *
+                snapshot.cameraMouseInfluence * layer.parallaxDepth[1] * snapshot.cameraAmount,
+        };
+        nlohmann::json row = {
+            {"layerId", layer.layerId},
+            {"layerName", layer.layerName},
+            {"layerKind", layer.layerKind},
+            {"parallaxDepth", mousePositionToJson(layer.parallaxDepth)},
+            {"expectedOffset", mousePositionToJson(expectedOffset)},
+            {"expectedOffsetAvailable", true},
+        };
+        if (layer.parentLayerId > 0) {
+            row["parentLayerId"] = layer.parentLayerId;
+            row["parentLayerName"] = layer.parentLayerName;
+        }
+        if (layer.childLookupAvailable) {
+            row["hasChildren"] = !layer.childLayerIds.empty();
+            row["childLayerIds"] = layer.childLayerIds;
+            row["propagationExpectation"] = "parent-offset-affects-children";
+        } else {
+            row["propagationExpectation"] = "unknown-parent-graph";
+        }
+        out.push_back(std::move(row));
+    }
+    return out;
+}
+
+nlohmann::json mouseParallaxToJson(const Scene& scene)
+{
+    const auto snapshot = scene.shaderValueUpdater
+        ? scene.shaderValueUpdater->mouseParallaxDebugSnapshot()
+        : MouseParallaxDebugSnapshot {};
+    const auto& config = scene.debugEffectCaptures.mouseParallax;
+
+    nlohmann::json out = {
+        {"inputSource", config.inputSource},
+        {"inputPosition", mousePositionToJson(snapshot.inputPosition)},
+        {"effectivePosition", mousePositionToJson(snapshot.effectivePosition)},
+        {"parallaxUniformPosition", mousePositionToJson(snapshot.parallaxUniformPosition)},
+        {"camera", {
+            {"enabled", snapshot.cameraEnabled},
+            {"amount", snapshot.cameraAmount},
+            {"delay", snapshot.cameraDelay},
+            {"mouseInfluence", snapshot.cameraMouseInfluence},
+        }},
+        {"authoredCamera", {
+            {"enabled", config.cameraEnabled},
+            {"amount", config.cameraAmount},
+            {"delay", config.cameraDelay},
+            {"mouseInfluence", config.cameraMouseInfluence},
+        }},
+        {"parallaxLayers", mouseParallaxLayerInventoryToJson(scene)},
+    };
+    if (config.hasRequestedPosition) {
+        out["requestedPosition"] = mousePositionToJson(config.requestedPosition);
+    }
+    if (!config.timeline.empty()) {
+        nlohmann::json timeline = nlohmann::json::array();
+        for (const auto& point : config.timeline) {
+            timeline.push_back({
+                {"timeMs", point.timeMs},
+                {"position", mousePositionToJson(point.position)},
+            });
+        }
+        out["timeline"] = timeline;
+    }
+    if (config.timelineElapsedMsAtCapture) {
+        out["timelineElapsedMsAtCapture"] = *config.timelineElapsedMsAtCapture;
     }
     return out;
 }
@@ -377,6 +493,11 @@ nlohmann::json layerToJson(const EffectCaptureLayerInfo& layer)
         {"effectLimitTruncated", layer.debugProbeEffectLimitTruncated},
         {"routeOnly", layer.debugProbeRouteOnly},
     };
+    nlohmann::json debugLayerVisibilityOverride = {
+        {"requested", layer.debugLayerVisibilityOverrideRequested},
+        {"visible", layer.debugLayerVisibilityOverrideVisible},
+        {"originalVisible", layer.debugLayerVisibilityOverrideOriginalVisible},
+    };
 
     return {
         {"sceneId", layer.sceneId},
@@ -404,7 +525,10 @@ nlohmann::json layerToJson(const EffectCaptureLayerInfo& layer)
         {"candidateRisk", layer.candidateRisk},
         {"candidateBlockedReason", layer.candidateBlockedReason},
         {"candidateChecks", candidateChecksToJson(layer.candidateChecks)},
+        {"parallaxDepth", mousePositionToJson(layer.parallaxDepth)},
+        {"parallaxDepthNonzero", layer.parallaxDepthNonzero},
         {"debugProbe", debugProbe},
+        {"debugLayerVisibilityOverride", debugLayerVisibilityOverride},
     };
 }
 
@@ -499,6 +623,15 @@ bool EffectCaptureConfig::shouldCaptureLayer(int layerId) const
 bool EffectCaptureConfig::shouldProbeHighRiskLayer(int layerId) const
 {
     return containsLayerId(highRiskProbeLayerIds, layerId);
+}
+
+std::optional<bool> EffectCaptureConfig::layerVisibilityOverrideFor(int layerId) const
+{
+    const auto it = layerVisibilityOverrides.find(layerId);
+    if (it == layerVisibilityOverrides.end()) {
+        return std::nullopt;
+    }
+    return it->second;
 }
 
 bool shouldDumpEffectCaptures(const EffectCaptureConfig& config,
@@ -810,6 +943,36 @@ parsePuppetAnimationLayerOverrideList(std::string_view value)
     }
 }
 
+std::unordered_map<int, bool> parseLayerVisibilityOverrideList(std::string_view value)
+{
+    std::unordered_map<int, bool> overrides;
+    value = trimAsciiWhitespace(value);
+    if (value.empty()) {
+        return overrides;
+    }
+
+    while (true) {
+        const std::size_t comma = value.find(',');
+        const std::string_view rule = trimAsciiWhitespace(value.substr(0, comma));
+        const std::size_t colon = rule.find(':');
+        if (rule.empty() || colon == std::string_view::npos) {
+            return {};
+        }
+
+        const auto layerId = parsePositiveInt(rule.substr(0, colon));
+        const auto visible = parseDebugBool(rule.substr(colon + 1));
+        if (!layerId || !visible) {
+            return {};
+        }
+        overrides[*layerId] = *visible;
+
+        if (comma == std::string_view::npos) {
+            return overrides;
+        }
+        value.remove_prefix(comma + 1);
+    }
+}
+
 std::filesystem::path capturePath(const EffectCaptureConfig& config,
                                   const EffectCaptureLayerInfo& layer,
                                   std::string_view stage)
@@ -967,6 +1130,50 @@ void recordPuppetAnimationLayerInventory(Scene& scene, const EffectCaptureLayerI
     scene.debugPuppetAnimationLayerInventory.push_back(layer);
 }
 
+void recordMouseParallaxLayer(Scene& scene,
+                              int layerId,
+                              std::string_view layerName,
+                              std::string_view layerKind,
+                              std::array<float, 2> parallaxDepth,
+                              int parentLayerId,
+                              std::string_view parentLayerName,
+                              const std::vector<int>& childLayerIds,
+                              bool childLookupAvailable)
+{
+    if (!scene.debugEffectCaptures.enabled()) {
+        return;
+    }
+    if (std::abs(parallaxDepth[0]) <= 1.0e-6f &&
+        std::abs(parallaxDepth[1]) <= 1.0e-6f) {
+        return;
+    }
+
+    std::vector<int> sortedChildLayerIds = childLayerIds;
+    std::sort(sortedChildLayerIds.begin(), sortedChildLayerIds.end());
+    sortedChildLayerIds.erase(
+        std::unique(sortedChildLayerIds.begin(), sortedChildLayerIds.end()),
+        sortedChildLayerIds.end());
+
+    EffectCaptureMouseParallaxLayerInfo info {
+        .layerId = layerId,
+        .layerName = std::string(layerName),
+        .layerKind = std::string(layerKind),
+        .parallaxDepth = parallaxDepth,
+        .parentLayerId = parentLayerId,
+        .parentLayerName = std::string(parentLayerName),
+        .childLookupAvailable = childLookupAvailable,
+        .childLayerIds = std::move(sortedChildLayerIds),
+    };
+
+    for (auto& existing : scene.debugMouseParallaxLayerInventory) {
+        if (existing.layerId == layerId && existing.layerKind == info.layerKind) {
+            existing = std::move(info);
+            return;
+        }
+    }
+    scene.debugMouseParallaxLayerInventory.push_back(std::move(info));
+}
+
 bool writeEffectCaptureManifest(const Scene& scene)
 {
     if (!scene.debugEffectCaptures.enabled()) {
@@ -1044,9 +1251,12 @@ bool writeEffectCaptureManifest(const Scene& scene)
         {"probeChannelMapSlots", scene.debugEffectCaptures.probeChannelMapSlots},
         {"puppetAnimationLayerOverrides", puppetAnimationLayerOverridesToJson(
             scene.debugEffectCaptures.puppetAnimationLayerOverrides)},
+        {"layerVisibilityOverrides", layerVisibilityOverridesToJson(
+            scene.debugEffectCaptures.layerVisibilityOverrides)},
         {"probeMaxEffects", nullableInt(scene.debugEffectCaptures.probeMaxEffects)},
         {"puppetFinalMeshOverride", scene.debugEffectCaptures.puppetFinalMeshOverride},
         {"puppetEffectRouteOnly", scene.debugEffectCaptures.puppetEffectRouteOnly},
+        {"mouseParallax", mouseParallaxToJson(scene)},
         {"captureCount", scene.debugEffectCaptureRecords.size()},
         {"captures", captures},
         {"passStates", passStates},

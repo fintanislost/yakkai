@@ -80,6 +80,11 @@ class AronaReferenceComparatorTests(unittest.TestCase):
 
         self.assertTrue(args.debug_effect_captures)
 
+    def test_parse_args_exposes_debug_effect_capture_delay_ms(self):
+        args = comparator.parse_args(["--debug-effect-captures", "--debug-effect-capture-delay-ms", "8000"])
+
+        self.assertEqual(args.debug_effect_capture_delay_ms, 8000)
+
     def test_parse_args_exposes_debug_effect_probe_layers(self):
         args = comparator.parse_args(["--debug-effect-captures", "--debug-effect-probe-layers", "405, 168"])
 
@@ -122,6 +127,17 @@ class AronaReferenceComparatorTests(unittest.TestCase):
 
         self.assertEqual(args.debug_puppet_animation_layer_overrides, "405:781:paused=false")
 
+    def test_parse_args_exposes_debug_layer_visibility_overrides(self):
+        args = comparator.parse_args(
+            [
+                "--debug-effect-captures",
+                "--debug-layer-visibility-overrides",
+                "306:true,240:false",
+            ]
+        )
+
+        self.assertEqual(args.debug_layer_visibility_overrides, "306:true,240:false")
+
     def test_parse_args_exposes_harness_timeout_extra_seconds(self):
         args = comparator.parse_args(["--harness-timeout-extra-seconds", "90"])
 
@@ -136,6 +152,15 @@ class AronaReferenceComparatorTests(unittest.TestCase):
         self.assertIn("--harness-timeout-extra-seconds must be non-negative", stderr.getvalue())
         compare_all.assert_not_called()
 
+    def test_main_rejects_debug_effect_capture_delay_without_effect_captures(self):
+        with mock.patch.object(comparator, "compare_all") as compare_all, \
+             mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            code = comparator.main(["--debug-effect-capture-delay-ms", "8000"])
+
+        self.assertEqual(code, 1)
+        self.assertIn("--debug-effect-capture-delay-ms requires --debug-effect-captures", stderr.getvalue())
+        compare_all.assert_not_called()
+
     def test_main_rejects_debug_puppet_animation_layer_overrides_without_effect_captures(self):
         with mock.patch.object(comparator, "compare_all") as compare_all, \
              mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
@@ -148,6 +173,20 @@ class AronaReferenceComparatorTests(unittest.TestCase):
 
         self.assertEqual(code, 1)
         self.assertIn("--debug-puppet-animation-layer-overrides requires --debug-effect-captures", stderr.getvalue())
+        compare_all.assert_not_called()
+
+    def test_main_rejects_debug_layer_visibility_overrides_without_effect_captures(self):
+        with mock.patch.object(comparator, "compare_all") as compare_all, \
+             mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            code = comparator.main(
+                [
+                    "--debug-layer-visibility-overrides",
+                    "306:true",
+                ]
+            )
+
+        self.assertEqual(code, 1)
+        self.assertIn("--debug-layer-visibility-overrides requires --debug-effect-captures", stderr.getvalue())
         compare_all.assert_not_called()
 
     def test_main_rejects_quarantined_debug_effect_probe_channelmap_slots(self):
@@ -410,8 +449,10 @@ class AronaReferenceComparatorTests(unittest.TestCase):
                     reference_root=root / "yakkai_arona",
                     output_root=out_dir,
                     debug_effect_captures=True,
+                    debug_effect_capture_delay_ms=8000,
                     debug_effect_probe_layers=(405,),
                     debug_effect_probe_max_effects=2,
+                    debug_layer_visibility_overrides="306:true,240:false",
                     debug_puppet_animation_layer_overrides="405:781:paused=false",
                 ),
                 harness=harness,
@@ -432,10 +473,16 @@ class AronaReferenceComparatorTests(unittest.TestCase):
         self.assertIn("--debug-effect-captures", command)
         debug_dir = Path(command[command.index("--debug-effect-captures") + 1])
         self.assertTrue(str(debug_dir).endswith("sunset/effect-captures"))
+        self.assertIn("--debug-effect-capture-delay-ms", command)
+        self.assertEqual(command[command.index("--debug-effect-capture-delay-ms") + 1], "8000")
         self.assertIn("--debug-effect-probe-layers", command)
         self.assertEqual(command[command.index("--debug-effect-probe-layers") + 1], "405")
         self.assertIn("--debug-effect-probe-max-effects", command)
         self.assertEqual(command[command.index("--debug-effect-probe-max-effects") + 1], "2")
+        self.assertIn("--debug-layer-visibility-overrides", command)
+        self.assertEqual(command[command.index("--debug-layer-visibility-overrides") + 1], "306:true,240:false")
+        self.assertIn("--debug-puppet-animation-layer-overrides", command)
+        self.assertEqual(command[command.index("--debug-puppet-animation-layer-overrides") + 1], "405:781:paused=false")
         self.assertIn("--debug-puppet-animation-layer-overrides", command)
         self.assertEqual(
             command[command.index("--debug-puppet-animation-layer-overrides") + 1],

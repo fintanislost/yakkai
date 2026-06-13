@@ -5,6 +5,7 @@
 */
 
 import QtQuick
+import QtQuick.Window
 import QtCore
 import org.kde.plasma.plasmoid
 
@@ -257,6 +258,7 @@ WallpaperItem {
     }
     property bool wallpaperEngineSceneExperimentalEnabled: configuration.WESceneExperimentalEnabled ?? false
     property bool wallpaperEngineSceneMouseInput: configuration.WESceneMouseInput ?? false
+    property bool wallpaperEngineSceneMouseDiagnosticsEnabled: configuration.WESceneMouseDiagnosticsEnabled ?? false
     property string wallpaperEngineLibraryPath: configuration.WEVideoLibraryPath ?? ""
     property int videoFillMode: configuration.VideoFillMode ?? 0
     property bool videoMuted: configuration.VideoMuted ?? true
@@ -277,6 +279,43 @@ WallpaperItem {
     readonly property bool webMode: wallpaperEngineWebMode
     readonly property bool sceneMode: wallpaperEngineSceneMode
     readonly property bool sceneNativeMode: wallpaperEngineSceneNativeMode
+    readonly property bool sceneMouseDiagnosticsActive: sceneNativeMode
+        && wallpaperEngineSceneMouseInput
+        && wallpaperEngineSceneMouseDiagnosticsEnabled
+    property double lastSceneMouseDiagnosticLogMs: 0
+
+    function diagnosticNumber(value) {
+        return Number(value).toFixed(3)
+    }
+
+    function sceneMouseDiagnosticScreenName() {
+        if (root.Window.window && root.Window.window.screen && root.Window.window.screen.name) {
+            return root.Window.window.screen.name
+        }
+
+        return "unknown"
+    }
+
+    function logSceneMouseDiagnostic(localX, localY, itemWidth, itemHeight) {
+        if (!sceneMouseDiagnosticsActive || itemWidth <= 0 || itemHeight <= 0) {
+            return
+        }
+
+        const now = Date.now()
+        if (now - lastSceneMouseDiagnosticLogMs < 250) {
+            return
+        }
+        lastSceneMouseDiagnosticLogMs = now
+
+        const normalizedX = Math.max(0, Math.min(1, localX / itemWidth))
+        const normalizedY = Math.max(0, Math.min(1, localY / itemHeight))
+
+        console.log(logPrefix
+            + " mouse-diagnostic screen=" + sceneMouseDiagnosticScreenName()
+            + " local=" + diagnosticNumber(localX) + "," + diagnosticNumber(localY)
+            + " normalized=" + diagnosticNumber(normalizedX) + "," + diagnosticNumber(normalizedY)
+            + " itemSize=" + Math.round(itemWidth) + "x" + Math.round(itemHeight))
+    }
 
     UmbrellaMode {
         id: umbrellaMode
@@ -325,6 +364,7 @@ WallpaperItem {
     onWallpaperEngineSceneSourceChanged: log("wallpaperEngineSceneSource=" + String(wallpaperEngineSceneSource))
     onWallpaperEngineSceneExperimentalEnabledChanged: log("wallpaperEngineSceneExperimentalEnabled=" + wallpaperEngineSceneExperimentalEnabled)
     onWallpaperEngineSceneMouseInputChanged: log("wallpaperEngineSceneMouseInput=" + wallpaperEngineSceneMouseInput)
+    onWallpaperEngineSceneMouseDiagnosticsEnabledChanged: log("wallpaperEngineSceneMouseDiagnosticsEnabled=" + wallpaperEngineSceneMouseDiagnosticsEnabled)
     onVideoFillModeChanged: log("videoFillMode=" + videoFillMode)
     onVideoMutedChanged: log("videoMuted=" + videoMuted)
 
@@ -447,6 +487,9 @@ WallpaperItem {
             contentLoader.item.mouseInputEnabled = Qt.binding(function() {
                 return root.wallpaperEngineSceneMouseInput
             })
+            contentLoader.item.mouseDiagnosticsEnabled = Qt.binding(function() {
+                return root.wallpaperEngineSceneMouseDiagnosticsEnabled
+            })
             contentLoader.item.fillModeValue = Qt.binding(function() {
                 return root.videoFillMode
             })
@@ -507,6 +550,16 @@ WallpaperItem {
         contentLoader.item.nightEndColor = Qt.binding(function() {
             return root.nightEndColor
         })
+    }
+
+    HoverHandler {
+        id: sceneMouseDiagnosticHover
+        enabled: root.sceneMouseDiagnosticsActive
+        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+
+        onPointChanged: {
+            root.logSceneMouseDiagnostic(point.position.x, point.position.y, root.width, root.height)
+        }
     }
 
     Component.onCompleted: {

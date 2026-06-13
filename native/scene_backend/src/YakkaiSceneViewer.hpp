@@ -70,6 +70,8 @@ class YakkaiSceneViewer : public QQuickItem
     Q_PROPERTY(float volume READ volume WRITE setVolume NOTIFY volumeChanged)
     Q_PROPERTY(bool muted READ muted WRITE setMuted NOTIFY mutedChanged)
     Q_PROPERTY(bool mouseInputEnabled READ mouseInputEnabled WRITE setMouseInputEnabled NOTIFY mouseInputEnabledChanged)
+    Q_PROPERTY(bool mouseDiagnosticsEnabled READ mouseDiagnosticsEnabled WRITE setMouseDiagnosticsEnabled NOTIFY mouseDiagnosticsEnabledChanged)
+    Q_PROPERTY(QString lastMouseDiagnostic READ lastMouseDiagnostic NOTIFY lastMouseDiagnosticChanged)
     Q_PROPERTY(bool validationLayersEnabled READ validationLayersEnabled WRITE setValidationLayersEnabled NOTIFY validationLayersEnabledChanged)
     Q_PROPERTY(QString backendStatus READ backendStatus NOTIFY backendStatusChanged)
     Q_PROPERTY(QString debugEffectCapturesPath READ debugEffectCapturesPath WRITE setDebugEffectCapturesPath NOTIFY debugEffectCapturesPathChanged)
@@ -83,6 +85,10 @@ class YakkaiSceneViewer : public QQuickItem
     Q_PROPERTY(QString debugPuppetEffectFinalMesh READ debugPuppetEffectFinalMesh WRITE setDebugPuppetEffectFinalMesh NOTIFY debugPuppetEffectFinalMeshChanged)
     Q_PROPERTY(bool debugPuppetEffectRouteOnly READ debugPuppetEffectRouteOnly WRITE setDebugPuppetEffectRouteOnly NOTIFY debugPuppetEffectRouteOnlyChanged)
     Q_PROPERTY(QString debugPuppetAnimationLayerOverrides READ debugPuppetAnimationLayerOverrides WRITE setDebugPuppetAnimationLayerOverrides NOTIFY debugPuppetAnimationLayerOverridesChanged)
+    Q_PROPERTY(QString debugLayerVisibilityOverrides READ debugLayerVisibilityOverrides WRITE setDebugLayerVisibilityOverrides NOTIFY debugLayerVisibilityOverridesChanged)
+    Q_PROPERTY(QString debugMousePosition READ debugMousePosition WRITE setDebugMousePosition NOTIFY debugMousePositionChanged)
+    Q_PROPERTY(QString debugMouseTimeline READ debugMouseTimeline WRITE setDebugMouseTimeline NOTIFY debugMouseTimelineChanged)
+    Q_PROPERTY(bool debugInteractiveMouse READ debugInteractiveMouse WRITE setDebugInteractiveMouse NOTIFY debugInteractiveMouseChanged)
     Q_PROPERTY(QString scenePropertiesJson READ scenePropertiesJson WRITE setScenePropertiesJson NOTIFY scenePropertiesJsonChanged)
 
 public:
@@ -119,6 +125,11 @@ public:
 
     bool mouseInputEnabled() const;
     void setMouseInputEnabled(bool value);
+
+    bool mouseDiagnosticsEnabled() const;
+    void setMouseDiagnosticsEnabled(bool value);
+
+    QString lastMouseDiagnostic() const;
 
     bool validationLayersEnabled() const;
     void setValidationLayersEnabled(bool value);
@@ -158,6 +169,18 @@ public:
     QString debugPuppetAnimationLayerOverrides() const;
     void setDebugPuppetAnimationLayerOverrides(const QString& value);
 
+    QString debugLayerVisibilityOverrides() const;
+    void setDebugLayerVisibilityOverrides(const QString& value);
+
+    QString debugMousePosition() const;
+    void setDebugMousePosition(const QString& value);
+
+    QString debugMouseTimeline() const;
+    void setDebugMouseTimeline(const QString& value);
+
+    bool debugInteractiveMouse() const;
+    void setDebugInteractiveMouse(bool value);
+
     QString scenePropertiesJson() const;
     void setScenePropertiesJson(const QString& value);
 
@@ -172,6 +195,8 @@ signals:
     void volumeChanged();
     void mutedChanged();
     void mouseInputEnabledChanged();
+    void mouseDiagnosticsEnabledChanged();
+    void lastMouseDiagnosticChanged();
     void validationLayersEnabledChanged();
     void backendStatusChanged();
     void debugEffectCapturesPathChanged();
@@ -185,6 +210,10 @@ signals:
     void debugPuppetEffectFinalMeshChanged();
     void debugPuppetEffectRouteOnlyChanged();
     void debugPuppetAnimationLayerOverridesChanged();
+    void debugLayerVisibilityOverridesChanged();
+    void debugMousePositionChanged();
+    void debugMouseTimelineChanged();
+    void debugInteractiveMouseChanged();
     void scenePropertiesJsonChanged();
 
 private:
@@ -199,6 +228,8 @@ private:
     float m_volume = 1.0f;
     bool m_muted = true;
     bool m_mouseInputEnabled = false;
+    bool m_mouseDiagnosticsEnabled = false;
+    QString m_lastMouseDiagnostic;
     bool m_validationLayersEnabled = false;
     QString m_backendStatus;
     QString m_debugEffectCapturesPath;
@@ -212,6 +243,10 @@ private:
     QString m_debugPuppetEffectFinalMesh;
     bool m_debugPuppetEffectRouteOnly = false;
     QString m_debugPuppetAnimationLayerOverrides;
+    QString m_debugLayerVisibilityOverrides;
+    QString m_debugMousePosition;
+    QString m_debugMouseTimeline;
+    bool m_debugInteractiveMouse = false;
     QString m_scenePropertiesJson;
 };
 

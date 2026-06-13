@@ -233,17 +233,34 @@ void WPShaderValueUpdater::FrameBegin() {
 void WPShaderValueUpdater::FrameEnd() {}
 
 void WPShaderValueUpdater::MouseInput(double x, double y) {
-    using namespace std::chrono;
-
-    auto   now_time = steady_clock::now();
-    double new_time = m_mouseDelayedTime -
-                      duration_cast<duration<double>>(now_time - m_last_mouse_input_time).count();
-    m_mouseDelayedTime = new_time < 0.0f ? 0.0f : new_time;
+    if (std::abs(static_cast<float>(x) - m_mousePosInput[0]) <= 1.0e-6f &&
+        std::abs(static_cast<float>(y) - m_mousePosInput[1]) <= 1.0e-6f) {
+        return;
+    }
 
     m_mousePosInput[0] = (float)x;
     m_mousePosInput[1] = (float)y;
+}
 
-    m_last_mouse_input_time = now_time;
+MouseParallaxDebugSnapshot WPShaderValueUpdater::mouseParallaxDebugSnapshot() const
+{
+    using Eigen::Scaling;
+    using Eigen::Vector2f;
+
+    const Vector2f effective(&m_mousePos[0]);
+    const Vector2f parallax =
+        Vector2f { 0.5f, 0.5f } +
+        (Scaling(1.0f, -1.0f) * effective - Vector2f { 0.5f, 0.5f }) *
+            m_parallax.mouseinfluence;
+    return {
+        .inputPosition = m_mousePosInput,
+        .effectivePosition = m_mousePos,
+        .parallaxUniformPosition = { parallax[0], parallax[1] },
+        .cameraEnabled = m_parallax.enable,
+        .cameraAmount = m_parallax.amount,
+        .cameraDelay = m_parallax.delay,
+        .cameraMouseInfluence = m_parallax.mouseinfluence,
+    };
 }
 
 void WPShaderValueUpdater::InitUniforms(SceneNode* pNode, const ExistsUniformOp& existsOp) {

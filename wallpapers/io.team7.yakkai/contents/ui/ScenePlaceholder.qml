@@ -17,6 +17,7 @@ Item {
     property string emptyMessage: qsTr("Select a Wallpaper Engine scene wallpaper in the wallpaper settings.")
     property bool experimentalEnabled: false
     property bool mouseInputEnabled: false
+    property bool mouseDiagnosticsEnabled: false
     property int fillModeValue: 0
     property bool muted: true
     property string runtimeErrorText: ""

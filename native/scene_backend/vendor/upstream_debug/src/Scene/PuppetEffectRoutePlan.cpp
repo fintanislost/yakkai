@@ -50,4 +50,17 @@ PuppetEffectRoutePlan decidePuppetEffectRoutePlan(const PuppetEffectRoutePlanInp
     return plan;
 }
 
+std::array<float, 2> decideEffectLayerMaterialParallaxDepth(
+    const PuppetEffectRoutePlan& routePlan,
+    bool isFinalPublishedMaterialNode,
+    std::array<float, 2> sourceParallaxDepth)
+{
+    if (isFinalPublishedMaterialNode &&
+        routePlan.finalDisplayRoute == "effect-layer-node-final-publish" &&
+        routePlan.effectFinalMeshKind == "puppet-skinned-mesh") {
+        return {0.0f, 0.0f};
+    }
+    return sourceParallaxDepth;
+}
+
 } // namespace wallpaper

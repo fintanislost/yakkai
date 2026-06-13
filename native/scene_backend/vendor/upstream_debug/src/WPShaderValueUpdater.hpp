@@ -4,7 +4,6 @@
 #include <array>
 #include <unordered_map>
 #include <cstdint>
-#include <chrono>
 
 #include <Eigen/Dense>
 
@@ -63,9 +62,9 @@ struct WPShaderValueData {
 
 struct WPCameraParallax {
     bool  enable { false };
-    float amount;
-    float delay;
-    float mouseinfluence;
+    float amount { 0.0f };
+    float delay { 1.0f };
+    float mouseinfluence { 0.0f };
 };
 
 struct WPCameraPathKeyframe {
@@ -107,6 +106,7 @@ public:
                                   WPCameraPathAnimation               animation);
 
     void SetScreenSize(i32 w, i32 h) override { m_screen_size = { (float)w, (float)h }; }
+    MouseParallaxDebugSnapshot mouseParallaxDebugSnapshot() const override;
 
 private:
     void UpdatePerspectiveCameraPath();
@@ -120,8 +120,6 @@ private:
     std::array<float, 2> m_mousePosInput { 0.5f, 0.5f };
     double               m_mouseDelayedTime { 0.0f };
     uint                 m_mouseInputCount { 0 };
-
-    std::chrono::time_point<std::chrono::steady_clock> m_last_mouse_input_time;
 
     std::array<float, 2> m_screen_size { 1920, 1080 };
 

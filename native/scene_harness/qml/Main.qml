@@ -29,6 +29,10 @@ Window {
     property string debugPuppetEffectFinalMesh: sceneHarnessDebugPuppetEffectFinalMesh
     property bool debugPuppetEffectRouteOnly: sceneHarnessDebugPuppetEffectRouteOnly
     property string debugPuppetAnimationLayerOverrides: sceneHarnessDebugPuppetAnimationLayerOverrides
+    property string debugLayerVisibilityOverrides: sceneHarnessDebugLayerVisibilityOverrides
+    property string debugMousePosition: sceneHarnessDebugMousePosition
+    property string debugMouseTimeline: sceneHarnessDebugMouseTimeline || ""
+    property bool debugInteractiveMouse: sceneHarnessDebugInteractiveMouse
     property bool debugSyntheticAudioEnabled: sceneHarnessDebugSyntheticAudioEnabled
     property int debugSyntheticAudioBins: sceneHarnessDebugSyntheticAudioBins
     property int debugSyntheticAudioIntervalMs: sceneHarnessDebugSyntheticAudioIntervalMs
@@ -111,6 +115,18 @@ Window {
             })
             item.debugPuppetAnimationLayerOverrides = Qt.binding(function() {
                 return root.debugPuppetAnimationLayerOverrides
+            })
+            item.debugLayerVisibilityOverrides = Qt.binding(function() {
+                return root.debugLayerVisibilityOverrides
+            })
+            item.debugMousePosition = Qt.binding(function() {
+                return root.debugMousePosition
+            })
+            item.debugMouseTimeline = Qt.binding(function() {
+                return root.debugMouseTimeline
+            })
+            item.debugInteractiveMouse = Qt.binding(function() {
+                return root.debugInteractiveMouse
             })
             item.scenePropertiesJson = Qt.binding(function() {
                 return root.scenePropertiesJson

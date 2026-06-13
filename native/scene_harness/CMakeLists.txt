@@ -1,5 +1,9 @@
 qt_add_executable(yakkai_scene_harness
     src/main.cpp
+    src/InteractiveMouseOption.cpp
+    src/LayerVisibilityOverrideOption.cpp
+    src/MousePositionOption.cpp
+    src/MouseTimelineOption.cpp
     src/PuppetSimulationOption.cpp
     src/ScenePropertiesOption.cpp
 )
@@ -31,6 +35,10 @@ endif()
 
 add_executable(yakkai_scene_harness_tests
     tests/test_capture_gate.cpp
+    src/InteractiveMouseOption.cpp
+    src/LayerVisibilityOverrideOption.cpp
+    src/MousePositionOption.cpp
+    src/MouseTimelineOption.cpp
     src/PuppetSimulationOption.cpp
     src/ScenePropertiesOption.cpp
 )

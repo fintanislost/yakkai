@@ -219,6 +219,34 @@ target_link_libraries(yakkai_mpris_media_payload_tests
 
 add_test(NAME yakkai_mpris_media_payload_tests COMMAND yakkai_mpris_media_payload_tests)
 
+add_executable(yakkai_mpris_media_source_tests
+    src/MprisMediaPayload.cpp
+    src/YakkaiMprisMediaSource.cpp
+    tests/test_mpris_media_source.cpp
+)
+
+target_compile_features(yakkai_mpris_media_source_tests PRIVATE cxx_std_20)
+
+target_compile_definitions(yakkai_mpris_media_source_tests
+    PRIVATE
+        YAKKAI_ENABLE_MPRIS_SOURCE_TEST_API=1
+)
+
+target_include_directories(yakkai_mpris_media_source_tests
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
+target_link_libraries(yakkai_mpris_media_source_tests
+    PRIVATE
+        Qt6::Core
+        Qt6::DBus
+        Qt6::Qml
+        Qt6::Test
+)
+
+add_test(NAME yakkai_mpris_media_source_tests COMMAND yakkai_mpris_media_source_tests)
+
 if(TARGET yakkai_scene_backendplugin)
     # The staged wallpaper package keeps the plugin and backing library together.
     set_target_properties(yakkai_scene_backendplugin PROPERTIES

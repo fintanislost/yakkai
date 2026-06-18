@@ -8,6 +8,7 @@
 #include "Utils/FpsCounter.h"
 #include "WPJson.hpp"
 #include "WPSceneParser.hpp"
+#include "SceneScriptMediaState.hpp"
 #include "Scene/Scene.h"
 #include "Particle/ParticleSystem.h"
 #include "Interface/IShaderValueUpdater.h"
@@ -90,6 +91,25 @@ std::string ResolveScenePropertiesJson(const std::string& explicitJson, const st
     }
 
     return explicitJson;
+}
+
+nlohmann::json ParseMediaStateJson(const std::string& mediaStateJson)
+{
+    if (mediaStateJson.empty()) {
+        return nlohmann::json::object();
+    }
+
+    nlohmann::json parsed;
+    if (PARSE_JSON(mediaStateJson, parsed) && parsed.is_object()) {
+        return parsed;
+    }
+
+    return nlohmann::json::object();
+}
+
+SceneScriptMediaState SceneScriptMediaStateFromJsonString(const std::string& mediaStateJson)
+{
+    return SceneScriptMediaStateFromSceneProperties(ParseMediaStateJson(mediaStateJson));
 }
 
 bool ShouldLogHighFrequency(std::atomic<uint64_t>& counter,
@@ -372,6 +392,7 @@ private:
     std::string m_source;
     std::string m_cache_path;
     std::string m_scene_properties_json;
+    std::string m_media_state_json;
     std::string m_debug_effect_captures;
     std::string m_debug_effect_capture_command;
     int32_t     m_debug_effect_capture_delay_ms { 0 };
@@ -386,6 +407,7 @@ private:
     std::string m_debug_layer_visibility_overrides;
     std::string m_debug_mouse_position;
     std::string m_debug_mouse_timeline;
+    std::string m_debug_media_state_timeline;
     bool        m_debug_mouse_position_active { false };
     bool        m_debug_mouse_timeline_active { false };
     bool        m_debug_interactive_mouse_active { false };
@@ -415,6 +437,7 @@ public:
         CMD_SET_MOUSE_POSITION,
         CMD_SET_MOUSE_TIMELINE,
         CMD_SET_MOUSE_INTERACTIVE,
+        CMD_SET_MEDIA_STATE,
         CMD_STOP,
         CMD_DRAW,
         CMD_NO
@@ -442,6 +465,7 @@ public:
                 CASE_CMD(SET_MOUSE_POSITION);
                 CASE_CMD(SET_MOUSE_TIMELINE);
                 CASE_CMD(SET_MOUSE_INTERACTIVE);
+                CASE_CMD(SET_MEDIA_STATE);
                 CASE_CMD(INIT_VULKAN);
             default: break;
             }
@@ -484,6 +508,12 @@ private:
                     frameTimelineElapsedMs;
             }
             m_scene->shaderValueUpdater->FrameBegin();
+            if (m_media_state && !m_scene->mediaTimelineScaleBindings.empty()) {
+                const auto mediaState = InterpolatedSceneMediaState(
+                    *m_media_state,
+                    m_scene->elapsingTime - m_media_state_scene_time);
+                ApplySceneMediaTimelineState(*m_scene, mediaState);
+            }
             {
                 auto pos = m_mouse_pos.load();
                 m_scene->shaderValueUpdater->MouseInput(pos[0], pos[1]);
@@ -538,6 +568,10 @@ private:
                 m_scene->shaderValueUpdater->MouseInput(pos[0], pos[1]);
             }
             if (m_rg) m_render->clearLastRenderGraph();
+            if (m_media_state) {
+                m_media_state_scene_time = m_scene->elapsingTime;
+                ApplySceneMediaTimelineState(*m_scene, *m_media_state);
+            }
             LOG_INFO("render set_scene: building render graph");
             m_rg = sceneToRenderGraph(*m_scene);
 
@@ -598,6 +632,16 @@ private:
             ApplyInteractiveMouseManifest(m_scene->debugEffectCaptures.mouseParallax);
         }
     }
+    MHANDLER_CMD(SET_MEDIA_STATE) {
+        std::shared_ptr<SceneScriptMediaState> mediaState;
+        if (msg->findObject("value", &mediaState) && mediaState) {
+            m_media_state = *mediaState;
+            m_media_state_scene_time = m_scene ? m_scene->elapsingTime : 0.0;
+            if (m_scene) {
+                ApplySceneMediaTimelineState(*m_scene, *m_media_state);
+            }
+        }
+    }
     MHANDLER_CMD(INIT_VULKAN) {
         std::shared_ptr<RenderInitInfo> info;
         if (msg->findObject("info", &info)) {
@@ -624,6 +668,8 @@ private:
     std::atomic<std::array<float, 2>> m_mouse_pos { std::array { 0.5f, 0.5f } };
     std::vector<DebugMouseTimelinePoint> m_mouse_timeline;
     double m_mouse_timeline_elapsed_ms = 0.0;
+    std::optional<SceneScriptMediaState> m_media_state;
+    double m_media_state_scene_time = 0.0;
 };
 } // namespace wallpaper
 
@@ -734,6 +780,13 @@ MHANDLER_CMD_IMPL(MainHandler, SET_PROPERTY) {
             m_cache_path = path;
         } else if (property == PROPERTY_SCENE_PROPERTIES_JSON) {
             msg->findString("value", &m_scene_properties_json);
+        } else if (property == PROPERTY_MEDIA_STATE_JSON) {
+            msg->findString("value", &m_media_state_json);
+            auto mediaState = std::make_shared<SceneScriptMediaState>(
+                SceneScriptMediaStateFromJsonString(m_media_state_json));
+            auto nmsg = CreateMsgWithCmd(m_render_handler, RenderHandler::CMD::CMD_SET_MEDIA_STATE);
+            nmsg->setObject("value", mediaState);
+            nmsg->post();
         } else if (property == PROPERTY_DEBUG_EFFECT_CAPTURES) {
             msg->findString("value", &m_debug_effect_captures);
         } else if (property == PROPERTY_DEBUG_EFFECT_CAPTURE_COMMAND) {
@@ -794,6 +847,8 @@ MHANDLER_CMD_IMPL(MainHandler, SET_PROPERTY) {
             } else if (!TrimAsciiWhitespace(m_debug_mouse_timeline).empty()) {
                 LOG_ERROR("invalid debug mouse timeline: %s", m_debug_mouse_timeline.c_str());
             }
+        } else if (property == PROPERTY_DEBUG_MEDIA_STATE_TIMELINE) {
+            msg->findString("value", &m_debug_media_state_timeline);
         } else if (property == PROPERTY_DEBUG_INTERACTIVE_MOUSE) {
             bool value = false;
             if (msg->findBool("value", &value)) {
@@ -969,6 +1024,7 @@ void MainHandler::loadScene() {
             .puppetFinalMeshOverride = m_debug_puppet_effect_final_mesh,
             .puppetEffectRouteOnly = m_debug_puppet_effect_route_only,
             .layerVisibilityOverrides = wallpaper::debug::parseLayerVisibilityOverrideList(m_debug_layer_visibility_overrides),
+            .mediaStateTimelineJson = m_debug_media_state_timeline,
         };
         const auto debugMousePosition = ParseDebugMousePosition(m_debug_mouse_position);
         const auto debugMouseTimeline = ParseDebugMouseTimeline(m_debug_mouse_timeline);
@@ -998,6 +1054,11 @@ void MainHandler::loadScene() {
         if (!scene) {
             LOG_ERROR("scene parse returned null for %s", scene_id.c_str());
             return;
+        }
+        if (!m_media_state_json.empty()) {
+            ApplySceneMediaTimelineState(
+                *scene,
+                SceneScriptMediaStateFromJsonString(m_media_state_json));
         }
         LOG_INFO("main loadScene: parse finished for %s", scene_id.c_str());
         scene->vfs.swap(pVfs);

@@ -133,6 +133,7 @@ QString diagnosticForSelectedPlayer(const yakkai::mpris::PlayerState& state)
 YakkaiMprisMediaSource::YakkaiMprisMediaSource(QObject* parent)
     : QObject(parent)
     , m_mediaJson(yakkai::mpris::buildUnavailableMediaPayload())
+    , m_runtimeMediaJson(yakkai::mpris::buildUnavailableMediaPayload())
     , m_diagnosticText(QStringLiteral("MPRIS media source is disabled."))
 {
     m_pollTimer.setInterval(pollIntervalMs);
@@ -180,10 +181,27 @@ QString YakkaiMprisMediaSource::mediaJson() const
     return m_mediaJson;
 }
 
+QString YakkaiMprisMediaSource::runtimeMediaJson() const
+{
+    return m_runtimeMediaJson;
+}
+
 QString YakkaiMprisMediaSource::diagnosticText() const
 {
     return m_diagnosticText;
 }
+
+#ifdef YAKKAI_ENABLE_MPRIS_SOURCE_TEST_API
+void YakkaiMprisMediaSource::publishStateForTest(const yakkai::mpris::PlayerState& state)
+{
+    publishState(yakkai::mpris::buildMediaPayload(state), stableSignatureForState(state), diagnosticForSelectedPlayer(state));
+}
+
+void YakkaiMprisMediaSource::publishUnavailableForTest(const QString& diagnostic)
+{
+    publishUnavailable(diagnostic);
+}
+#endif
 
 void YakkaiMprisMediaSource::refresh()
 {
@@ -311,6 +329,11 @@ void YakkaiMprisMediaSource::publishState(
     const QString& diagnostic)
 {
     setDiagnosticText(diagnostic);
+
+    if (m_runtimeMediaJson != mediaJson) {
+        m_runtimeMediaJson = mediaJson;
+        emit runtimeMediaChanged();
+    }
 
     if (m_stableSignature == signature) {
         return;

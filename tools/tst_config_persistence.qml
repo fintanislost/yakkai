@@ -137,4 +137,45 @@ TestCase {
         verify(!merged.hasOwnProperty("__yakkaiMedia"))
         missingMediaItem.destroy()
     }
+
+    function test_sceneMediaPropertiesRuntimeMediaUpdatesWithoutChangingStableSceneProperties() {
+        const item = createSceneMediaProperties({
+            scenePropertiesJson: "{\"volume\":0.65}",
+            mediaJson: "{\"__yakkaiMedia\":{\"title\":\"Track\",\"position\":42}}",
+            runtimeMediaJson: "{\"__yakkaiMedia\":{\"title\":\"Track\",\"position\":42}}",
+            mediaIntegrationEnabled: true
+        })
+
+        const stableBefore = item.mergedScenePropertiesJson
+        item.runtimeMediaJson = "{\"__yakkaiMedia\":{\"title\":\"Track\",\"position\":84}}"
+
+        compare(item.mergedScenePropertiesJson, stableBefore)
+        const runtimeMedia = JSON.parse(item.mergedRuntimeMediaJson).__yakkaiMedia
+        compare(runtimeMedia.title, "Track")
+        compare(runtimeMedia.position, 84)
+
+        item.destroy()
+    }
+
+    function test_sceneMediaPropertiesRuntimeMediaSanitizesInvalidPayload() {
+        const item = createSceneMediaProperties({
+            runtimeMediaJson: "{not json",
+            mediaIntegrationEnabled: true
+        })
+
+        compare(item.mergedRuntimeMediaJson, "{}")
+
+        item.destroy()
+    }
+
+    function test_sceneMediaPropertiesRuntimeMediaDisabledReturnsEmptyObject() {
+        const item = createSceneMediaProperties({
+            runtimeMediaJson: "{\"__yakkaiMedia\":{\"title\":\"Track\",\"position\":84}}",
+            mediaIntegrationEnabled: false
+        })
+
+        compare(item.mergedRuntimeMediaJson, "{}")
+
+        item.destroy()
+    }
 }

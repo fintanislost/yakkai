@@ -15,6 +15,7 @@ Item {
     property url sceneSource: ""
     property string assetsPath: ""
     property string scenePropertiesJson: "{}"
+    property string mediaStateJson: "{}"
     property int fillModeValue: 0
     property bool muted: true
     property bool mouseInputEnabled: false
@@ -127,6 +128,7 @@ Item {
     }
     onAssetsPathChanged: log("scene runtime assetsPath=" + assetsPath)
     onScenePropertiesJsonChanged: log("scene runtime scenePropertiesJson length=" + String(scenePropertiesJson).length)
+    onMediaStateJsonChanged: log("scene runtime mediaStateJson length=" + String(mediaStateJson).length)
     onMutedChanged: log("scene runtime muted=" + muted)
     onFillModeValueChanged: applyFillMode()
     onMouseInputEnabledChanged: applyMouseInput()
@@ -165,6 +167,7 @@ Item {
         source: root.sceneSource
         assets: root.assetsUrl(root.assetsPath)
         scenePropertiesJson: root.scenePropertiesJson
+        mediaStateJson: root.mediaStateJson
         fillMode: YakkaiSceneModule.YakkaiSceneViewer.AspectCrop
         fps: 30
         speed: 1.0

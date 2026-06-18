@@ -24,6 +24,7 @@
 #include "CaptureGate.hpp"
 #include "InteractiveMouseOption.hpp"
 #include "LayerVisibilityOverrideOption.hpp"
+#include "MediaStateTimelineOption.hpp"
 #include "MousePositionOption.hpp"
 #include "MouseTimelineOption.hpp"
 #include "PuppetSimulationOption.hpp"
@@ -840,6 +841,11 @@ int main(int argc, char* argv[])
         QStringLiteral("Wallpaper Engine properties JSON object forwarded to backends that support it."),
         QStringLiteral("json")
     );
+    QCommandLineOption mediaStateTimelineJsonOption(
+        QStringList{QStringLiteral("media-state-timeline-json")},
+        QStringLiteral("Harness-only runtime media-state timeline as a JSON array of {timeMs, ...mediaFields} keyframes."),
+        QStringLiteral("json")
+    );
     QCommandLineOption puppetSimulationOption(
         QStringList{QStringLiteral("puppet-simulation")},
         QStringLiteral("Harness-only puppet simulation mode: off, diagnostic, or runtime."),
@@ -897,6 +903,7 @@ int main(int argc, char* argv[])
     parser.addOption(debugMousePositionOption);
     parser.addOption(debugMouseTimelineOption);
     parser.addOption(scenePropertiesJsonOption);
+    parser.addOption(mediaStateTimelineJsonOption);
     parser.addOption(puppetSimulationOption);
     parser.addOption(debugSyntheticAudioOption);
     parser.addOption(debugSyntheticAudioBinsOption);
@@ -941,6 +948,8 @@ int main(int argc, char* argv[])
         yakkai::harness::validateMouseTimelineOption(parser.value(debugMouseTimelineOption));
     const yakkai::harness::ScenePropertiesJsonOptionResult scenePropertiesJson =
         yakkai::harness::validateScenePropertiesJsonOption(parser.value(scenePropertiesJsonOption));
+    const yakkai::harness::MediaStateTimelineOptionResult mediaStateTimeline =
+        yakkai::harness::validateMediaStateTimelineOption(parser.value(mediaStateTimelineJsonOption));
     const yakkai::harness::PuppetSimulationOptionResult puppetSimulation =
         yakkai::harness::validatePuppetSimulationOption(parser.value(puppetSimulationOption));
     const QString debugSyntheticAudioBinsValue = parser.value(debugSyntheticAudioBinsOption).trimmed();
@@ -1000,6 +1009,10 @@ int main(int argc, char* argv[])
 
     if (!scenePropertiesJson.valid) {
         qWarning().noquote() << "yakkai_scene_harness:" << scenePropertiesJson.error;
+        return 2;
+    }
+    if (!mediaStateTimeline.valid) {
+        qWarning().noquote() << "yakkai_scene_harness:" << mediaStateTimeline.error;
         return 2;
     }
     if (!debugLayerVisibilityOverrides.valid) {
@@ -1255,6 +1268,7 @@ int main(int argc, char* argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugSyntheticAudioBins"), *debugSyntheticAudioBins);
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessDebugSyntheticAudioIntervalMs"), *debugSyntheticAudioIntervalMs);
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessScenePropertiesJson"), scenePropertiesJson.normalized);
+    engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessMediaStateTimelineJson"), mediaStateTimeline.normalized);
 
     const QUrl mainQml = QUrl::fromLocalFile(QDir(qmlDir).filePath(QStringLiteral("Main.qml")));
     QObject::connect(

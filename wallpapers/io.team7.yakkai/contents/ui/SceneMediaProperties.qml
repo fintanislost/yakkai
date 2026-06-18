@@ -9,8 +9,12 @@ import QtQml
 QtObject {
     property string scenePropertiesJson: "{}"
     property string mediaJson: "{}"
+    property string runtimeMediaJson: "{}"
     property bool mediaIntegrationEnabled: false
     readonly property string mergedScenePropertiesJson: mergeSceneAndMedia(scenePropertiesJson, mediaJson, mediaIntegrationEnabled)
+    readonly property string mergedRuntimeMediaJson: mediaIntegrationEnabled
+        ? sanitizeMediaJson(runtimeMediaJson)
+        : "{}"
 
     function parseObject(json) {
         try {
@@ -23,6 +27,21 @@ QtObject {
         return {}
     }
 
+    function hasMediaObject(payload) {
+        return payload.__yakkaiMedia !== null
+            && typeof payload.__yakkaiMedia === "object"
+            && !Array.isArray(payload.__yakkaiMedia)
+    }
+
+    function sanitizeMediaJson(mediaPropertiesJson) {
+        const media = parseObject(mediaPropertiesJson)
+        if (hasMediaObject(media)) {
+            return JSON.stringify({ "__yakkaiMedia": media.__yakkaiMedia })
+        }
+
+        return "{}"
+    }
+
     function mergeSceneAndMedia(sceneJson, mediaPropertiesJson, integrationEnabled) {
         const merged = parseObject(sceneJson)
         delete merged.__yakkaiMedia
@@ -32,9 +51,7 @@ QtObject {
         }
 
         const media = parseObject(mediaPropertiesJson)
-        if (media.__yakkaiMedia !== null
-                && typeof media.__yakkaiMedia === "object"
-                && !Array.isArray(media.__yakkaiMedia)) {
+        if (hasMediaObject(media)) {
             merged.__yakkaiMedia = media.__yakkaiMedia
         }
 

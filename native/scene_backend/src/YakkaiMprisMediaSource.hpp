@@ -17,6 +17,7 @@ class YakkaiMprisMediaSource : public QObject
     Q_PROPERTY(bool playing READ playing NOTIFY mediaChanged)
     Q_PROPERTY(QString activeService READ activeService NOTIFY mediaChanged)
     Q_PROPERTY(QString mediaJson READ mediaJson NOTIFY mediaChanged)
+    Q_PROPERTY(QString runtimeMediaJson READ runtimeMediaJson NOTIFY runtimeMediaChanged)
     Q_PROPERTY(QString diagnosticText READ diagnosticText NOTIFY diagnosticTextChanged)
 
 public:
@@ -29,13 +30,20 @@ public:
     bool playing() const;
     QString activeService() const;
     QString mediaJson() const;
+    QString runtimeMediaJson() const;
     QString diagnosticText() const;
 
     Q_INVOKABLE void refresh();
 
+#ifdef YAKKAI_ENABLE_MPRIS_SOURCE_TEST_API
+    void publishStateForTest(const yakkai::mpris::PlayerState& state);
+    void publishUnavailableForTest(const QString& diagnostic);
+#endif
+
 signals:
     void enabledChanged();
     void mediaChanged();
+    void runtimeMediaChanged();
     void diagnosticTextChanged();
 
 private:
@@ -65,6 +73,7 @@ private:
     bool m_playing = false;
     QString m_activeService;
     QString m_mediaJson;
+    QString m_runtimeMediaJson;
     QString m_diagnosticText;
     StableSignature m_stableSignature;
 };

@@ -1,6 +1,7 @@
 #include "CaptureGate.hpp"
 #include "InteractiveMouseOption.hpp"
 #include "LayerVisibilityOverrideOption.hpp"
+#include "MediaStateTimelineOption.hpp"
 #include "MousePositionOption.hpp"
 #include "../src/MouseTimelineOption.hpp"
 #include "PuppetSimulationOption.hpp"
@@ -259,6 +260,47 @@ void testMouseTimelineOption()
     }
 }
 
+void testMediaStateTimelineOption()
+{
+    {
+        const auto option = yakkai::harness::validateMediaStateTimelineOption(QString());
+        check(option.valid, "empty media state timeline is valid");
+        check(!option.hasTimeline, "empty media state timeline has no timeline");
+    }
+    {
+        const auto option = yakkai::harness::validateMediaStateTimelineOption(
+            QStringLiteral("[{\"timeMs\":0,\"available\":true,\"playing\":true,\"duration\":240,\"position\":0},"
+                           "{\"timeMs\":2000,\"position\":120}]"));
+        check(option.valid, "media state timeline accepts direct media fields");
+        check(option.hasTimeline, "media state timeline has timeline");
+        check(option.normalized.contains(QStringLiteral("\"media\"")),
+              "media state timeline normalizes direct fields under media object");
+        check(option.normalized.contains(QStringLiteral("\"position\":120")),
+              "media state timeline preserves position updates");
+    }
+    {
+        const auto option = yakkai::harness::validateMediaStateTimelineOption(
+            QStringLiteral("[{\"timeMs\":0,\"__yakkaiMedia\":{\"available\":true,\"position\":0}}]"));
+        check(option.valid, "media state timeline accepts nested __yakkaiMedia");
+        check(option.normalized.contains(QStringLiteral("\"available\":true")),
+              "media state timeline preserves nested media fields");
+    }
+    {
+        const auto option = yakkai::harness::validateMediaStateTimelineOption(
+            QStringLiteral("[{\"timeMs\":1000,\"position\":1},{\"timeMs\":1000,\"position\":2}]"));
+        check(!option.valid, "media state timeline rejects duplicate times");
+    }
+    {
+        const auto option = yakkai::harness::validateMediaStateTimelineOption(
+            QStringLiteral("[{\"timeMs\":0.5,\"position\":1}]"));
+        check(!option.valid, "media state timeline rejects non-integer times");
+    }
+    {
+        const auto option = yakkai::harness::validateMediaStateTimelineOption(QStringLiteral("{}"));
+        check(!option.valid, "media state timeline rejects non-array json");
+    }
+}
+
 void testInteractiveMouseOptionAllowsLiveMouseWithoutSyntheticDebugInput()
 {
     const yakkai::harness::InteractiveMouseOptionResult result =
@@ -313,6 +355,7 @@ int main()
     testMousePositionOptionRejectsOutOfRangeValues();
     testMousePositionOptionRejectsNonFiniteValues();
     testMouseTimelineOption();
+    testMediaStateTimelineOption();
     testInteractiveMouseOptionAllowsLiveMouseWithoutSyntheticDebugInput();
     testInteractiveMouseOptionRejectsFixedSyntheticMousePosition();
     testInteractiveMouseOptionRejectsSyntheticMouseTimeline();

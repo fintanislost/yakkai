@@ -5,6 +5,7 @@
 #include "Utils/Logging.h"
 #include "Utils/AutoDeletor.hpp"
 #include "vvk/vulkan_wrapper.hpp"
+#include <cassert>
 #include <cstdint>
 
 using namespace wallpaper::vulkan;

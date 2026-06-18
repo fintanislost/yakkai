@@ -21,6 +21,7 @@ constexpr std::string_view PROPERTY_MUTED                = "muted";
 constexpr std::string_view PROPERTY_CACHE_PATH           = "cache_path";
 constexpr std::string_view PROPERTY_FIRST_FRAME_CALLBACK = "first_frame_callback";
 constexpr std::string_view PROPERTY_SCENE_PROPERTIES_JSON = "scene_properties_json";
+constexpr std::string_view PROPERTY_MEDIA_STATE_JSON = "media_state_json";
 constexpr std::string_view PROPERTY_DEBUG_EFFECT_CAPTURES = "debug_effect_captures";
 constexpr std::string_view PROPERTY_DEBUG_EFFECT_CAPTURE_COMMAND = "debug_effect_capture_command";
 constexpr std::string_view PROPERTY_DEBUG_EFFECT_CAPTURE_DELAY_MS = "debug_effect_capture_delay_ms";
@@ -35,6 +36,7 @@ constexpr std::string_view PROPERTY_DEBUG_PUPPET_ANIMATION_LAYER_OVERRIDES = "de
 constexpr std::string_view PROPERTY_DEBUG_LAYER_VISIBILITY_OVERRIDES = "debug_layer_visibility_overrides";
 constexpr std::string_view PROPERTY_DEBUG_MOUSE_POSITION = "debug_mouse_position";
 constexpr std::string_view PROPERTY_DEBUG_MOUSE_TIMELINE = "debug_mouse_timeline";
+constexpr std::string_view PROPERTY_DEBUG_MEDIA_STATE_TIMELINE = "debug_media_state_timeline";
 constexpr std::string_view PROPERTY_DEBUG_INTERACTIVE_MOUSE = "debug_interactive_mouse";
 
 #include "Core/NoCopyMove.hpp"

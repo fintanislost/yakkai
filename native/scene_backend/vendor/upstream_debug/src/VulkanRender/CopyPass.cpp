@@ -6,6 +6,7 @@
 #include "PassCommon.hpp"
 
 #include <algorithm>
+#include <cassert>
 
 using namespace wallpaper::vulkan;
 

@@ -380,6 +380,7 @@ void SceneObject::setScenePropertyQurl(std::string_view name, QUrl value) {
 QUrl SceneObject::source() const { return m_source; }
 QUrl SceneObject::assets() const { return m_assets; }
 QString SceneObject::scenePropertiesJson() const { return m_scenePropertiesJson; }
+QString SceneObject::mediaStateJson() const { return m_mediaStateJson; }
 QString SceneObject::debugEffectCapturesPath() const { return m_debugEffectCapturesPath; }
 QString SceneObject::debugEffectCaptureCommand() const { return m_debugEffectCaptureCommand; }
 int SceneObject::debugEffectCaptureDelayMs() const { return m_debugEffectCaptureDelayMs; }
@@ -394,6 +395,7 @@ QString SceneObject::debugPuppetAnimationLayerOverrides() const { return m_debug
 QString SceneObject::debugLayerVisibilityOverrides() const { return m_debugLayerVisibilityOverrides; }
 QString SceneObject::debugMousePosition() const { return m_debugMousePosition; }
 QString SceneObject::debugMouseTimeline() const { return m_debugMouseTimeline; }
+QString SceneObject::debugMediaStateTimeline() const { return m_debugMediaStateTimeline; }
 bool SceneObject::debugInteractiveMouse() const { return m_debugInteractiveMouse; }
 bool SceneObject::mouseDiagnosticsEnabled() const { return m_mouseDiagnosticsEnabled; }
 QString SceneObject::lastMouseDiagnostic() const { return m_lastMouseDiagnostic; }
@@ -424,6 +426,15 @@ void SceneObject::setScenePropertiesJson(const QString& value) {
                  wallpaper::PROPERTY_SCENE_PROPERTIES_JSON,
                  m_scenePropertiesJson.toStdString());
     Q_EMIT scenePropertiesJsonChanged();
+}
+
+void SceneObject::setMediaStateJson(const QString& value) {
+    if (m_mediaStateJson == value) return;
+    m_mediaStateJson = value;
+    SET_PROPERTY(String,
+                 wallpaper::PROPERTY_MEDIA_STATE_JSON,
+                 m_mediaStateJson.toStdString());
+    Q_EMIT mediaStateJsonChanged();
 }
 
 void SceneObject::setDebugEffectCapturesPath(const QString& value) {
@@ -551,6 +562,15 @@ void SceneObject::setDebugMouseTimeline(const QString& value) {
                  wallpaper::PROPERTY_DEBUG_MOUSE_TIMELINE,
                  m_debugMouseTimeline.toStdString());
     Q_EMIT debugMouseTimelineChanged();
+}
+
+void SceneObject::setDebugMediaStateTimeline(const QString& value) {
+    if (m_debugMediaStateTimeline == value) return;
+    m_debugMediaStateTimeline = value;
+    SET_PROPERTY(String,
+                 wallpaper::PROPERTY_DEBUG_MEDIA_STATE_TIMELINE,
+                 m_debugMediaStateTimeline.toStdString());
+    Q_EMIT debugMediaStateTimelineChanged();
 }
 
 void SceneObject::setDebugInteractiveMouse(bool value) {

@@ -41,6 +41,11 @@ Window {
     property int debugSyntheticAudioBins: sceneHarnessDebugSyntheticAudioBins
     property int debugSyntheticAudioIntervalMs: sceneHarnessDebugSyntheticAudioIntervalMs
     property string scenePropertiesJson: sceneHarnessScenePropertiesJson
+    property string mediaStateTimelineJson: sceneHarnessMediaStateTimelineJson || ""
+    property string mediaStateJson: "{}"
+    property var mediaStateTimeline: []
+    property int mediaStateTimelineIndex: 0
+    property double mediaStateTimelineStartMs: 0
     property bool captureReady: false
     property string backendStatus: backendLoader.item && backendLoader.item.backendStatus
         ? backendLoader.item.backendStatus
@@ -70,6 +75,87 @@ Window {
         if (backendLoader.item
                 && typeof backendLoader.item.prepareForCaptureExit === "function") {
             backendLoader.item.prepareForCaptureExit()
+        }
+    }
+
+    function stableMediaBase() {
+        if (scenePropertiesJson.length === 0) {
+            return {}
+        }
+
+        try {
+            const parsed = JSON.parse(scenePropertiesJson)
+            if (parsed && typeof parsed === "object"
+                    && parsed.__yakkaiMedia
+                    && typeof parsed.__yakkaiMedia === "object") {
+                return parsed.__yakkaiMedia
+            }
+        } catch (error) {
+            console.log("[Harness] failed to parse stable media base: " + error)
+        }
+        return {}
+    }
+
+    function mergedMediaStateJson(mediaUpdate) {
+        const media = stableMediaBase()
+        if (mediaUpdate && typeof mediaUpdate === "object") {
+            for (const key in mediaUpdate) {
+                media[key] = mediaUpdate[key]
+            }
+        }
+        return JSON.stringify({"__yakkaiMedia": media})
+    }
+
+    function stopMediaStateTimeline() {
+        mediaStateTimelineTimer.stop()
+        mediaStateTimeline = []
+        mediaStateTimelineIndex = 0
+        mediaStateTimelineStartMs = 0
+    }
+
+    function armMediaStateTimeline() {
+        stopMediaStateTimeline()
+        if (mediaStateTimelineJson.length === 0) {
+            mediaStateJson = "{}"
+            return
+        }
+
+        try {
+            const parsed = JSON.parse(mediaStateTimelineJson)
+            if (!Array.isArray(parsed) || parsed.length === 0) {
+                mediaStateJson = "{}"
+                return
+            }
+            mediaStateTimeline = parsed
+            mediaStateTimelineIndex = 0
+            mediaStateTimelineStartMs = Date.now()
+            applyDueMediaStateTimelineFrames()
+            if (mediaStateTimelineIndex < mediaStateTimeline.length) {
+                mediaStateTimelineTimer.start()
+            }
+        } catch (error) {
+            console.log("[Harness] failed to parse media timeline: " + error)
+            mediaStateJson = "{}"
+        }
+    }
+
+    function applyDueMediaStateTimelineFrames() {
+        if (mediaStateTimeline.length === 0) {
+            return
+        }
+
+        const elapsedMs = Date.now() - mediaStateTimelineStartMs
+        while (mediaStateTimelineIndex < mediaStateTimeline.length
+                && Number(mediaStateTimeline[mediaStateTimelineIndex].timeMs) <= elapsedMs) {
+            mediaStateJson = mergedMediaStateJson(mediaStateTimeline[mediaStateTimelineIndex].media)
+            console.log("[Harness] media state timeline applied index="
+                + mediaStateTimelineIndex
+                + " elapsedMs=" + Math.round(elapsedMs)
+                + " stateLength=" + mediaStateJson.length)
+            mediaStateTimelineIndex += 1
+        }
+        if (mediaStateTimelineIndex >= mediaStateTimeline.length) {
+            mediaStateTimelineTimer.stop()
         }
     }
 
@@ -129,12 +215,22 @@ Window {
             item.debugMouseTimeline = Qt.binding(function() {
                 return root.debugMouseTimeline
             })
+            if ("debugMediaStateTimeline" in item) {
+                item.debugMediaStateTimeline = Qt.binding(function() {
+                    return root.mediaStateTimelineJson
+                })
+            }
             item.debugInteractiveMouse = Qt.binding(function() {
                 return root.debugInteractiveMouse
             })
             item.scenePropertiesJson = Qt.binding(function() {
                 return root.scenePropertiesJson
             })
+            if ("mediaStateJson" in item) {
+                item.mediaStateJson = Qt.binding(function() {
+                    return root.mediaStateJson
+                })
+            }
             item.sceneSource = Qt.binding(function() {
                 return root.sceneSource
             })
@@ -179,9 +275,17 @@ Window {
         function onFirstFrameReady() {
             if (!root.captureReady) {
                 root.captureReady = true
+                root.armMediaStateTimeline()
                 console.log("[Harness] backend first frame ready for capture")
             }
         }
+    }
+
+    Timer {
+        id: mediaStateTimelineTimer
+        interval: 16
+        repeat: true
+        onTriggered: root.applyDueMediaStateTimelineFrames()
     }
 
     Rectangle {

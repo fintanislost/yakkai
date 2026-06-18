@@ -2,6 +2,7 @@
 #include "Utils/Logging.h"
 #include "Fs/LimitedBinaryStream.h"
 #include "Fs/CBinaryStream.h"
+#include <cassert>
 #include <vector>
 
 using namespace wallpaper;

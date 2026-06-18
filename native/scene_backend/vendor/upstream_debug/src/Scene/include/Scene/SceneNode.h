@@ -68,6 +68,10 @@ public:
                m_translate = v;
                MarkTransDirty();
     }
+    void        SetScale(Eigen::Vector3f v) {
+               m_scale = v;
+               MarkTransDirty();
+    }
 
     void CopyTrans(const SceneNode& node) {
         m_translate = node.m_translate;

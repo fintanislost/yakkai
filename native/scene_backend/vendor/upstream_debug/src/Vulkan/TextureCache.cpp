@@ -14,8 +14,9 @@
 #include "include/Vulkan/Parameters.hpp"
 #include "vvk/vulkan_wrapper.hpp"
 
-#include <cstdio>
 #include <array>
+#include <cassert>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>

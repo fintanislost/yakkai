@@ -13,9 +13,10 @@
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
 #include <algorithm>
+#include <cassert>
+#include <chrono>
 #include <cstring>
 #include <iostream>
-#include <chrono>
 #include <ctime>
 #include <numeric>
 #include <cmath>

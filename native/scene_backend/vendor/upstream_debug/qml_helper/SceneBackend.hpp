@@ -20,6 +20,7 @@ class SceneObject : public QQuickItem {
     Q_PROPERTY(QUrl source READ source WRITE setSource NOTIFY sourceChanged)
     Q_PROPERTY(QUrl assets READ assets WRITE setAssets)
     Q_PROPERTY(QString scenePropertiesJson READ scenePropertiesJson WRITE setScenePropertiesJson NOTIFY scenePropertiesJsonChanged)
+    Q_PROPERTY(QString mediaStateJson READ mediaStateJson WRITE setMediaStateJson NOTIFY mediaStateJsonChanged)
     Q_PROPERTY(QString debugEffectCapturesPath READ debugEffectCapturesPath WRITE setDebugEffectCapturesPath NOTIFY debugEffectCapturesPathChanged)
     Q_PROPERTY(QString debugEffectCaptureCommand READ debugEffectCaptureCommand WRITE setDebugEffectCaptureCommand NOTIFY debugEffectCaptureCommandChanged)
     Q_PROPERTY(int debugEffectCaptureDelayMs READ debugEffectCaptureDelayMs WRITE setDebugEffectCaptureDelayMs NOTIFY debugEffectCaptureDelayMsChanged)
@@ -34,6 +35,7 @@ class SceneObject : public QQuickItem {
     Q_PROPERTY(QString debugLayerVisibilityOverrides READ debugLayerVisibilityOverrides WRITE setDebugLayerVisibilityOverrides NOTIFY debugLayerVisibilityOverridesChanged)
     Q_PROPERTY(QString debugMousePosition READ debugMousePosition WRITE setDebugMousePosition NOTIFY debugMousePositionChanged)
     Q_PROPERTY(QString debugMouseTimeline READ debugMouseTimeline WRITE setDebugMouseTimeline NOTIFY debugMouseTimelineChanged)
+    Q_PROPERTY(QString debugMediaStateTimeline READ debugMediaStateTimeline WRITE setDebugMediaStateTimeline NOTIFY debugMediaStateTimelineChanged)
     Q_PROPERTY(bool debugInteractiveMouse READ debugInteractiveMouse WRITE setDebugInteractiveMouse NOTIFY debugInteractiveMouseChanged)
     Q_PROPERTY(bool mouseDiagnosticsEnabled READ mouseDiagnosticsEnabled WRITE setMouseDiagnosticsEnabled NOTIFY mouseDiagnosticsEnabledChanged)
     Q_PROPERTY(QString lastMouseDiagnostic READ lastMouseDiagnostic NOTIFY lastMouseDiagnosticChanged)
@@ -57,6 +59,7 @@ public:
     QUrl source() const;
     QUrl assets() const;
     QString scenePropertiesJson() const;
+    QString mediaStateJson() const;
     QString debugEffectCapturesPath() const;
     QString debugEffectCaptureCommand() const;
     int debugEffectCaptureDelayMs() const;
@@ -71,12 +74,14 @@ public:
     QString debugLayerVisibilityOverrides() const;
     QString debugMousePosition() const;
     QString debugMouseTimeline() const;
+    QString debugMediaStateTimeline() const;
     bool debugInteractiveMouse() const;
     bool mouseDiagnosticsEnabled() const;
     QString lastMouseDiagnostic() const;
     void setSource(const QUrl& source);
     void setAssets(const QUrl& assets);
     void setScenePropertiesJson(const QString& value);
+    void setMediaStateJson(const QString& value);
     void setDebugEffectCapturesPath(const QString& value);
     void setDebugEffectCaptureCommand(const QString& value);
     void setDebugEffectCaptureDelayMs(int value);
@@ -91,6 +96,7 @@ public:
     void setDebugLayerVisibilityOverrides(const QString& value);
     void setDebugMousePosition(const QString& value);
     void setDebugMouseTimeline(const QString& value);
+    void setDebugMediaStateTimeline(const QString& value);
     void setDebugInteractiveMouse(bool value);
     void setMouseDiagnosticsEnabled(bool value);
 
@@ -127,6 +133,7 @@ public slots:
 signals:
     void sourceChanged();
     void scenePropertiesJsonChanged();
+    void mediaStateJsonChanged();
     void debugEffectCapturesPathChanged();
     void debugEffectCaptureCommandChanged();
     void debugEffectCaptureDelayMsChanged();
@@ -141,6 +148,7 @@ signals:
     void debugLayerVisibilityOverridesChanged();
     void debugMousePositionChanged();
     void debugMouseTimelineChanged();
+    void debugMediaStateTimelineChanged();
     void debugInteractiveMouseChanged();
     void mouseDiagnosticsEnabledChanged();
     void lastMouseDiagnosticChanged();
@@ -155,6 +163,7 @@ private:
     QUrl m_source;
     QUrl m_assets;
     QString m_scenePropertiesJson;
+    QString m_mediaStateJson;
     QString m_debugEffectCapturesPath;
     QString m_debugEffectCaptureCommand;
     int m_debugEffectCaptureDelayMs { 0 };
@@ -169,6 +178,7 @@ private:
     QString m_debugLayerVisibilityOverrides;
     QString m_debugMousePosition;
     QString m_debugMouseTimeline;
+    QString m_debugMediaStateTimeline;
     bool m_debugInteractiveMouse { false };
     bool m_mouseDiagnosticsEnabled { false };
     QString m_lastMouseDiagnostic;

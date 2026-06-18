@@ -13,6 +13,7 @@ Item {
     property url sceneSource: ""
     property string sceneSourceKind: ""
     property string scenePropertiesJson: "{}"
+    property string mediaStateJson: "{}"
     property string projectTitle: ""
     property string assetsPath: ""
     property string emptyMessage: qsTr("Select a Wallpaper Engine scene wallpaper in the wallpaper settings.")
@@ -26,6 +27,7 @@ Item {
     property url runtimeSceneSource: ""
     property string runtimeAssetsPath: ""
     property string runtimeScenePropertiesJson: "{}"
+    property string runtimeMediaStateJson: "{}"
     property int runtimeFillModeValue: 0
     property bool runtimeMouseInputEnabled: false
     property bool runtimeMouseDiagnosticsEnabled: false
@@ -72,6 +74,7 @@ Item {
         runtimeSceneSource = sceneSource
         runtimeAssetsPath = assetsPath
         runtimeScenePropertiesJson = scenePropertiesJson
+        runtimeMediaStateJson = mediaStateJson
         runtimeFillModeValue = fillModeValue
         runtimeMouseInputEnabled = mouseInputEnabled
         runtimeMouseDiagnosticsEnabled = mouseDiagnosticsEnabled
@@ -124,6 +127,9 @@ Item {
     onScenePropertiesJsonChanged: {
         log("scene guard scenePropertiesJson length=" + String(scenePropertiesJson).length)
         scheduleRuntimeRestartIfReady("scenePropertiesJsonChanged")
+    }
+    onMediaStateJsonChanged: {
+        runtimeMediaStateJson = mediaStateJson
     }
     onMouseInputEnabledChanged: {
         log("scene guard mouseInputEnabled=" + mouseInputEnabled)
@@ -196,6 +202,7 @@ Item {
             sceneSource: root.runtimeSceneSource
             assetsPath: root.runtimeAssetsPath
             scenePropertiesJson: root.runtimeScenePropertiesJson
+            mediaStateJson: root.runtimeMediaStateJson
             fillModeValue: root.runtimeFillModeValue
             muted: root.muted
             mouseInputEnabled: root.runtimeMouseInputEnabled

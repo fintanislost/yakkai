@@ -23,8 +23,10 @@ Item {
     property string debugLayerVisibilityOverrides: ""
     property string debugMousePosition: ""
     property string debugMouseTimeline: ""
+    property string debugMediaStateTimeline: ""
     property bool debugInteractiveMouse: false
     property string scenePropertiesJson: ""
+    property string mediaStateJson: "{}"
 
     signal firstFrameReady()
 
@@ -86,8 +88,10 @@ Item {
         debugLayerVisibilityOverrides: root.debugLayerVisibilityOverrides
         debugMousePosition: root.debugMousePosition
         debugMouseTimeline: root.debugMouseTimeline
+        debugMediaStateTimeline: root.debugMediaStateTimeline
         debugInteractiveMouse: root.debugInteractiveMouse
         scenePropertiesJson: root.scenePropertiesJson
+        mediaStateJson: root.mediaStateJson
         source: root.sceneSource
         assets: root.assetsUrl(root.assetsPath)
         fillMode: root.sceneFillMode()

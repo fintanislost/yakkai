@@ -16,18 +16,23 @@ not be inferred from README prose alone.
 - Position-only MPRIS polling does not rewrite `SceneGuard.scenePropertiesJson`
   every tick. This avoids restarting the native scene renderer for normal track
   progress.
+- Position-only MPRIS changes also flow through runtime `mediaStateJson` and
+  update supported SceneScript media timeline solid progress layers inside an
+  already-running parsed scene.
+- The standalone scene harness accepts `--media-state-timeline-json` for
+  synthetic runtime media-position keyframes and records the normalized timeline
+  in paper-backend debug manifests when `--debug-effect-captures` is enabled.
 - A Plasma setting, `LinuxMediaIntegrationEnabled`, gates the live desktop media
   source for native scene wallpapers.
 
 ## Deferred Work
 
-- Smooth live media-position updates inside an already-running parsed scene.
-  This needs a live SceneScript media-update boundary instead of restarting the
-  whole scene with new static properties.
 - Click-driven player controls, including play/pause/next/previous actions.
 - Native audio-reactive bars from real Linux audio capture. Existing web audio
   coverage still uses harness-only synthetic audio.
 - Texture-animation media widgets.
+- Broader live SceneScript media event-loop behavior beyond supported timeline
+  solid progress scale bindings.
 - Full rich text and exact Wallpaper Engine text-layout parity.
 - Broader real-player compatibility coverage across common MPRIS providers,
   including players with missing metadata, remote/non-file album art, empty

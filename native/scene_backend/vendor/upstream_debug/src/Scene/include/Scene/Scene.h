@@ -1,8 +1,11 @@
 #pragma once
+#include <array>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <nlohmann/json.hpp>
 
 #include "Debug/EffectCaptureDebug.hpp"
 #include "SceneTexture.h"
@@ -17,6 +20,7 @@ namespace wallpaper
 class ParticleSystem;
 class IShaderValueUpdater;
 class IImageParser;
+struct SceneScriptMediaState;
 
 namespace fs
 {
@@ -39,6 +43,22 @@ public:
     std::unique_ptr<IShaderValueUpdater> shaderValueUpdater;
     std::unique_ptr<IImageParser>        imageParser;
     std::unique_ptr<fs::VFS>             vfs;
+
+    struct MediaTimelineScaleBinding {
+        int32_t layerId { 0 };
+        std::string script;
+        std::array<float, 3> authoredOrigin { 0.0f, 0.0f, 0.0f };
+        std::array<float, 3> authoredScale { 1.0f, 1.0f, 1.0f };
+        std::array<float, 2> size { 0.0f, 0.0f };
+        float parentHorizontalSign { 1.0f };
+        int canvasWidth { 1920 };
+        int canvasHeight { 1080 };
+        bool leadingEdgeAnchored { false };
+        nlohmann::json userProperties;
+        std::unordered_map<std::string, double> scriptProperties;
+        std::weak_ptr<SceneNode> node;
+    };
+    std::vector<MediaTimelineScaleBinding> mediaTimelineScaleBindings;
 
     std::string scene_id { "unknown_id" };
 
@@ -83,4 +103,8 @@ public:
         }
     }
 };
+
+SceneScriptMediaState InterpolatedSceneMediaState(const SceneScriptMediaState& state,
+                                                  double elapsedSeconds);
+void ApplySceneMediaTimelineState(Scene& scene, const SceneScriptMediaState& mediaState);
 } // namespace wallpaper

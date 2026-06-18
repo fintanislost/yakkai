@@ -26,6 +26,7 @@ Item {
     property string debugMouseTimeline: ""
     property bool debugInteractiveMouse: false
     property string scenePropertiesJson: ""
+    property string mediaStateJson: "{}"
 
     signal firstFrameReady()
 

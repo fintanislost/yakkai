@@ -342,6 +342,7 @@ WallpaperItem {
         id: sceneMediaProperties
         scenePropertiesJson: root.wallpaperEngineScenePropertiesJson
         mediaJson: linuxMediaSource.mediaJson
+        runtimeMediaJson: linuxMediaSource.runtimeMediaJson
         mediaIntegrationEnabled: root.linuxMediaIntegrationEnabled
             && root.sceneNativeMode
             && linuxMediaSource.available
@@ -504,6 +505,11 @@ WallpaperItem {
             contentLoader.item.scenePropertiesJson = Qt.binding(function() {
                 return sceneMediaProperties.mergedScenePropertiesJson
             })
+            if ("mediaStateJson" in contentLoader.item) {
+                contentLoader.item.mediaStateJson = Qt.binding(function() {
+                    return sceneMediaProperties.mergedRuntimeMediaJson
+                })
+            }
             contentLoader.item.assetsPath = Qt.binding(function() {
                 return root.activeSceneAssetsPath
             })

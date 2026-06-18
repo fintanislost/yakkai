@@ -100,7 +100,15 @@ SceneScript `color` property scripts are evaluated from the authored color value
 
 In Plasma, native scene mode can also read the active Linux media player through MPRIS over the session DBus. The runtime maps title, artist, album, playback status, track duration, a position snapshot, and local `mpris:artUrl` album art into the same `__yakkaiMedia` object used by the harness. This path is read-only: Yakkai does not send play/pause/next commands and does not capture real audio-reactive data.
 
-To avoid restarting the native scene renderer every progress tick, the first runtime slice refreshes scene media state on player, metadata, art, status, or duration changes. Smooth live position updates inside already-running parsed scenes remain deferred until the renderer has a live SceneScript media-update boundary.
+To avoid restarting the native scene renderer every progress tick, stable MPRIS
+metadata still flows through scene properties while live player state flows
+through a separate runtime `mediaStateJson` path. Position-only MPRIS changes
+update supported SceneScript media timeline solid progress layers inside the
+already-running scene; they do not rewrite `SceneGuard.scenePropertiesJson` or
+reload the wallpaper. This live path is currently scoped to media timeline
+scale bindings that Yakkai can identify from authored `mediaTimelineChanged`
+scripts. Click controls, real audio-reactive widgets, texture-animation media
+widgets, and a full Wallpaper Engine media event loop remain deferred.
 
 For repeatable media-widget fixture checks, use the owned MP3 fixture at
 `native/scene_harness/tests/fixtures/media/instalock.mp3`. It contains real
@@ -125,6 +133,24 @@ durations, or `--position seconds` for an exact synthetic timeline value. Use
 `--paused --clock-time HH:MM` for paused clock-widget references, or
 `--stopped` for unavailable-player references. It is still synthetic harness
 input; it does not read the current Linux media player.
+
+For harness-only live progress checks, keep the stable metadata in
+`--scene-properties-json` and pass runtime position keyframes with
+`--media-state-timeline-json`. Keyframes are a JSON array with increasing
+`timeMs` values. Direct media fields are merged over the stable
+`__yakkaiMedia` payload before each runtime `mediaStateJson` update:
+
+```bash
+./build/native/scene_harness/yakkai_scene_harness \
+  --backend paper \
+  --source /path/to/scene.pkg \
+  --assets /path/to/wallpaper_engine/assets \
+  --scene-properties-json '{"__yakkaiMedia":{"available":true,"playing":true,"duration":240,"position":0}}' \
+  --media-state-timeline-json '[{"timeMs":0,"position":0},{"timeMs":1000,"position":120}]'
+```
+
+When combined with `--debug-effect-captures`, the debug manifest records the
+normalized timeline under top-level `mediaStateTimeline`.
 
 For broader media-widget coverage, build a local candidate inventory and run the
 fixture-backed matrix:
@@ -914,7 +940,7 @@ The native backend supports:
 - Static model scenes use an experimental fallback for basis correction, camera framing, and material selection.
 - Material/lighting fidelity is partial: generic materials and point lights are supported, but full Wallpaper Engine PBR, shadow, and reflection parity is not.
 - SceneScript support is partial: Yakkai evaluates simple layer bindings (origin/scale/color/alpha/visible and generated text returns) with generic layer/scene stubs, not the full Wallpaper Engine runtime. Text objects are represented structurally at their script-resolved transform, logged for validation, and rendered to generated RGBA textures with Qt font rasterization when available; authored font files, horizontal/vertical text-card edge anchoring, scene-canvas-scaled 100-DPI point-size conversion, color, alpha, and mirror-aware text placement based on the final effective mirror state are honored, with a simple bitmap renderer retained as fallback. SceneScript layer lookups preserve authored text-card sizes for `thisScene.getLayer(...).size`; generated glyph alpha bounds are recorded for diagnostics but do not resize the layer object exposed to scripts. Debug manifests and media text crop reports record whether Qt or the fallback renderer was used and whether an authored font loaded successfully. Full Wallpaper Engine wrapping, ellipsis, rich typography, and exact text layout parity are not implemented yet. Native SceneScript media metadata/progress widgets can read synthetic `__yakkaiMedia` state through `shared.mi`, `engine.media`, `MediaPlaybackEvent`, `mediaPropertiesChanged(event)`, and `mediaThumbnailChanged(event)`; read-only Linux MPRIS metadata integration can feed the same object in Plasma native scene mode.
-  The runtime seeds common media-widget shared defaults, preserves returned `Vec3` color bindings, and guards non-finite `Vec3.mix` amounts so property-only widgets can open without NaN transforms/colors. Supported widgets keep authored/script-active container transforms and structured transform fallback values, while hidden template variants, click-driven player controls, native audio-reactive bars, texture-animation media widgets, exact rich text layout parity, smooth live media-position updates inside an already-running parsed scene, and unsupported object APIs remain deferred diagnostics. Safe inert stubs exist for compatibility-only calls such as `thisObject.getAnimation().play()` and `thisLayer.play()` / `thisLayer.pause()` so unsupported control calls do not abort unrelated binding side effects. Synthetic media thumbnail textures are available for harness/backend debugging through `albumArtPath` or deterministic color placeholders; when album art is provided without explicit thumbnail colors, Yakkai derives the thumbnail event colors from that image, including a blended contrast `textColor` rather than pure white/black. Validator logs classify missing runtime APIs as visible, harmless, or media/runtime-only diagnostics so candidate fixtures can be triaged before adding new API stubs.
+  The runtime seeds common media-widget shared defaults, preserves returned `Vec3` color bindings, and guards non-finite `Vec3.mix` amounts so property-only widgets can open without NaN transforms/colors. Supported widgets keep authored/script-active container transforms and structured transform fallback values. Supported media timeline solid progress layers can also receive live position updates inside an already-running parsed scene through runtime `mediaStateJson`, while hidden template variants, click-driven player controls, native audio-reactive bars, texture-animation media widgets, exact rich text layout parity, non-progress media event-loop updates, and unsupported object APIs remain deferred diagnostics. Safe inert stubs exist for compatibility-only calls such as `thisObject.getAnimation().play()` and `thisLayer.play()` / `thisLayer.pause()` so unsupported control calls do not abort unrelated binding side effects. Synthetic media thumbnail textures are available for harness/backend debugging through `albumArtPath` or deterministic color placeholders; when album art is provided without explicit thumbnail colors, Yakkai derives the thumbnail event colors from that image, including a blended contrast `textColor` rather than pure white/black. Validator logs classify missing runtime APIs as visible, harmless, or media/runtime-only diagnostics so candidate fixtures can be triaged before adding new API stubs.
 
 ## Remove
 

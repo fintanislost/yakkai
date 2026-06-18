@@ -399,6 +399,14 @@ struct ParseContext {
         bool                 has_vertical_align { false };
     };
     std::unordered_map<int32_t, ScriptColorBinding> script_color_bindings;
+    struct MediaTimelineScaleScript {
+        std::string script;
+        std::unordered_map<std::string, double> scriptProperties;
+    };
+    std::unordered_map<int32_t, MediaTimelineScaleScript> media_timeline_scale_scripts;
+    nlohmann::json scene_properties;
+    int canvas_width { 1920 };
+    int canvas_height { 1080 };
 
     struct ScriptTextBinding {
         std::string text;
@@ -3912,6 +3920,12 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
 
     auto& vfs = *context.vfs;
 
+    if (wpimgobj.image == "models/util/solidlayer.json" &&
+        context.media_timeline_scale_scripts.count(wpimgobj.id) > 0) {
+        wpimgobj.supportedMediaWidgetUtility = true;
+        wpimgobj.mediaTimelineSolidLayer = true;
+    }
+
     if (const auto pauseIt = context.paused_puppet_animations.find(wpimgobj.name);
         pauseIt != context.paused_puppet_animations.end()) {
         for (auto& layer : wpimgobj.puppet_layers) {
@@ -4046,6 +4060,8 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         }
     }
 
+    const std::array<float, 3> authoredScale = wpimgobj.scale;
+
     // Apply script-resolved origin binding before creating the scene node.
     {
         auto it = context.script_color_bindings.find(wpimgobj.id);
@@ -4063,8 +4079,33 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                   wpimgobj.alignment,
                   { wpimgobj.size[0], wpimgobj.size[1] },
                   !wpimgobj.mediaTimelineSolidLayer);
+    const Eigen::Vector3f timelineBaseTranslate = spImgNode->Translate();
     AnchorTimelineSolidLayerLeadingEdge(context, wpimgobj, *spImgNode);
     spImgNode->ID() = wpimgobj.id;
+    if (context.scene && wpimgobj.mediaTimelineSolidLayer &&
+        wpimgobj.image == "models/util/solidlayer.json") {
+        auto scriptIt = context.media_timeline_scale_scripts.find(wpimgobj.id);
+        if (scriptIt != context.media_timeline_scale_scripts.end()) {
+            Scene::MediaTimelineScaleBinding binding;
+            binding.layerId = wpimgobj.id;
+            binding.script = scriptIt->second.script;
+            binding.authoredOrigin = {
+                timelineBaseTranslate.x(),
+                timelineBaseTranslate.y(),
+                timelineBaseTranslate.z()
+            };
+            binding.authoredScale = authoredScale;
+            binding.size = { wpimgobj.size[0], wpimgobj.size[1] };
+            binding.parentHorizontalSign = ParentHorizontalSign(context, wpimgobj.parent);
+            binding.canvasWidth = context.canvas_width;
+            binding.canvasHeight = context.canvas_height;
+            binding.leadingEdgeAnchored = true;
+            binding.userProperties = context.scene_properties;
+            binding.scriptProperties = scriptIt->second.scriptProperties;
+            binding.node = spImgNode;
+            context.scene->mediaTimelineScaleBindings.push_back(std::move(binding));
+        }
+    }
     std::shared_ptr<SceneNode> childTransformAnchorNode;
     const auto childIdsIt = context.object_child_ids.find(wpimgobj.id);
     const bool hasAuthoredChildren =
@@ -7018,6 +7059,9 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
     //	LOG_INFO(nlohmann::json(sc).dump(4));
 
     ParseContext context;
+    context.scene_properties = sceneProperties;
+    context.canvas_width = sc.general.orthogonalprojection.width;
+    context.canvas_height = sc.general.orthogonalprojection.height;
     // The script pre-scan runs before InitContext creates the Scene, but it
     // still needs the VFS for generated text diagnostics and font lookup.
     // SceneScript layer lookups keep authored layer sizes.
@@ -7180,6 +7224,7 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
                     // Resolve scriptproperties user bindings before evaluating.
                     // Scene JSON scriptproperties can have {"user": "propName", "value": default}
                     // entries that need to be resolved to the actual user property value.
+                    std::unordered_map<std::string, double> resolvedScriptProperties;
                     if (node.contains("scriptproperties") && node.at("scriptproperties").is_object()) {
                         const auto& sp = node.at("scriptproperties");
                         for (const auto& [spKey, spVal] : sp.items()) {
@@ -7204,8 +7249,18 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
                             } else {
                                 resolved = jsonToDouble(spVal, dval);
                             }
-                            if (resolved) scriptCtx.setScriptProperty(spKey, dval);
+                            if (resolved) {
+                                scriptCtx.setScriptProperty(spKey, dval);
+                                resolvedScriptProperties[spKey] = dval;
+                            }
                         }
+                    }
+                    if (scriptField == "scale" &&
+                        script.find("mediaTimelineChanged") != std::string::npos) {
+                        context.media_timeline_scale_scripts[objId] = {
+                            script,
+                            std::move(resolvedScriptProperties)
+                        };
                     }
                     const bool currentVisible = ResolveObjectVisibleForDebug(obj);
                     auto result = scriptCtx.evaluateLayerScript(

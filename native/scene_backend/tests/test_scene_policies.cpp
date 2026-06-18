@@ -31,6 +31,7 @@
 #include "Audio/SoundManager.h"
 #include "Fs/PhysicalFs.h"
 #include "Fs/VFS.h"
+#include "SceneBackend.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -3550,6 +3551,36 @@ void testSceneScriptMediaState()
         check(nearFloat(static_cast<float>(state.position), 0.0f),
               "negative media position clamps to zero");
     }
+}
+
+void testSceneScriptMediaStateInterpolation()
+{
+    const auto playing = wallpaper::InterpolatedSceneMediaState(wallpaper::SceneScriptMediaState {
+        .available = true,
+        .playing = true,
+        .duration = 120.0,
+        .position = 42.0
+    }, 5.0);
+    check(nearFloat(static_cast<float>(playing.position), 47.0f),
+          "playing media state advances position by elapsed seconds");
+
+    const auto clamped = wallpaper::InterpolatedSceneMediaState(wallpaper::SceneScriptMediaState {
+        .available = true,
+        .playing = true,
+        .duration = 45.0,
+        .position = 42.0
+    }, 5.0);
+    check(nearFloat(static_cast<float>(clamped.position), 45.0f),
+          "playing media state interpolation clamps to duration");
+
+    const auto paused = wallpaper::InterpolatedSceneMediaState(wallpaper::SceneScriptMediaState {
+        .available = true,
+        .playing = false,
+        .duration = 120.0,
+        .position = 42.0
+    }, 5.0);
+    check(nearFloat(static_cast<float>(paused.position), 42.0f),
+          "paused media state interpolation keeps position fixed");
 }
 
 void testSceneScriptMediaRuntimeStubs()
@@ -7262,6 +7293,10 @@ void main() {
           "test VFS mounts media progress anchor fixture");
 
     const std::string timelineScaleScript = R"(
+        export var scriptProperties = createScriptProperties()
+            .addSlider({ name: 'multiplier', value: 1.0 })
+            .finish();
+
         let ratio = 1.0;
 
         export function mediaTimelineChanged(event) {
@@ -7269,7 +7304,7 @@ void main() {
         }
 
         export function update(value) {
-            value.x = ratio;
+            value.x = ratio * scriptProperties.multiplier;
             return value;
         }
     )";
@@ -7314,7 +7349,13 @@ void main() {
                 {"origin", "-24 -162 0"},
                 {"scale", {
                     {"value", "1 1 1"},
-                    {"script", timelineScaleScript}
+                    {"script", timelineScaleScript},
+                    {"scriptproperties", {
+                        {"multiplier", {
+                            {"user", "progressMultiplier"},
+                            {"value", 1.0}
+                        }}
+                    }}
                 }},
                 {"angles", "0 0 0"},
                 {"size", "1132 15"},
@@ -7363,7 +7404,13 @@ void main() {
                 {"origin", "-24 -162 0"},
                 {"scale", {
                     {"value", "1 1 1"},
-                    {"script", timelineScaleScript}
+                    {"script", timelineScaleScript},
+                    {"scriptproperties", {
+                        {"multiplier", {
+                            {"user", "progressMultiplier"},
+                            {"value", 1.0}
+                        }}
+                    }}
                 }},
                 {"angles", "0 0 0"},
                 {"size", "1132 15"},
@@ -7380,8 +7427,17 @@ void main() {
             {"playing", true},
             {"duration", 240.0},
             {"position", 220.0}
+        }},
+        {"progressMultiplier", {
+            {"type", "slider"},
+            {"value", 0.5}
         }}
     }).dump());
+    const auto timelineSupport = wallpaper::policy::ClassifyMediaIntegrationSupport(
+        sceneJson.at("objects").at(1),
+        "models/util/solidlayer.json");
+    check(timelineSupport.timelineDrivenSolidLayer,
+          "media progress fixture classifies scale script as timeline solid");
     const auto scene = parser.Parse("media_progress_anchor_test",
                                     sceneJson.dump(),
                                     vfs,
@@ -7402,12 +7458,12 @@ void main() {
     auto* progressNode = findNodeById(scene->sceneGraph.get(), 539);
     check(progressNode != nullptr, "media progress fixture keeps timeline progress node");
     if (progressNode) {
-        const float ratio = 220.0f / 240.0f;
+        const float ratio = (220.0f / 240.0f) * 0.5f;
         const float compensation = (1.0f - ratio) * 1132.0f * 0.5f;
         check(std::abs(progressNode->Translate().x() - (-24.0f - compensation)) < 0.01f,
               "timeline-driven media progress solid anchors the leading edge while scaling");
-        check(progressNode->Scale().x() > 0.915f && progressNode->Scale().x() < 0.918f,
-              "timeline-driven media progress solid applies media position ratio as horizontal scale");
+        check(progressNode->Scale().x() > 0.457f && progressNode->Scale().x() < 0.459f,
+              "timeline-driven media progress solid applies media position ratio and script properties as horizontal scale");
     }
 
     auto* ordinaryNode = findNodeById(scene->sceneGraph.get(), 540);
@@ -7420,10 +7476,42 @@ void main() {
     auto* mirroredProgressNode = findNodeById(scene->sceneGraph.get(), 543);
     check(mirroredProgressNode != nullptr, "media progress fixture keeps mirrored timeline progress node");
     if (mirroredProgressNode) {
-        const float ratio = 220.0f / 240.0f;
+        const float ratio = (220.0f / 240.0f) * 0.5f;
         const float compensation = (1.0f - ratio) * 1132.0f * 0.5f;
         check(std::abs(mirroredProgressNode->Translate().x() - (-24.0f + compensation)) < 0.01f,
               "mirrored timeline-driven media progress solid anchors the screen-leading edge while scaling");
+    }
+
+    check(scene->mediaTimelineScaleBindings.size() == 2,
+          "media progress fixture registers runtime scale bindings for timeline solids");
+    wallpaper::ApplySceneMediaTimelineState(*scene, wallpaper::SceneScriptMediaState {
+        .available = true,
+        .playing = true,
+        .duration = 240.0,
+        .position = 120.0
+    });
+
+    if (progressNode) {
+        const float ratio = (120.0f / 240.0f) * 0.5f;
+        const float compensation = (1.0f - ratio) * 1132.0f * 0.5f;
+        check(progressNode->Scale().x() > 0.249f && progressNode->Scale().x() < 0.251f,
+              "runtime media progress update applies live position ratio and script properties as horizontal scale");
+        check(std::abs(progressNode->Translate().x() - (-24.0f - compensation)) < 0.01f,
+              "runtime media progress update re-anchors the leading edge after scaling");
+    }
+
+    if (ordinaryNode) {
+        check(nearFloat(ordinaryNode->Scale().x(), 1.0f),
+              "runtime media progress update leaves ordinary sibling scale unchanged");
+        check(nearFloat(ordinaryNode->Translate().x(), -590.0f),
+              "runtime media progress update leaves ordinary sibling translation unchanged");
+    }
+
+    if (mirroredProgressNode) {
+        const float ratio = (120.0f / 240.0f) * 0.5f;
+        const float compensation = (1.0f - ratio) * 1132.0f * 0.5f;
+        check(std::abs(mirroredProgressNode->Translate().x() - (-24.0f + compensation)) < 0.01f,
+              "runtime media progress update re-anchors mirrored timeline solid");
     }
 
     std::filesystem::remove_all(root);
@@ -9448,6 +9536,38 @@ void main() {
     check(spvs.size() == 2, "clip shader produces both vertex and fragment SPIR-V units");
 }
 
+void testSceneObjectMediaStatePropertyDoesNotMutateSceneProperties()
+{
+    scenebackend::SceneObject object;
+    int scenePropertiesChangedCount = 0;
+    int mediaStateChangedCount = 0;
+    QObject::connect(&object,
+                     &scenebackend::SceneObject::scenePropertiesJsonChanged,
+                     [&]() { scenePropertiesChangedCount++; });
+    QObject::connect(&object,
+                     &scenebackend::SceneObject::mediaStateJsonChanged,
+                     [&]() { mediaStateChangedCount++; });
+
+    object.setScenePropertiesJson(QStringLiteral("{\"volume\":0.65}"));
+    object.setMediaStateJson(QStringLiteral("{\"__yakkaiMedia\":{\"position\":42}}"));
+
+    check(scenePropertiesChangedCount == 1, "initial scene properties update emits scenePropertiesJsonChanged once");
+    check(mediaStateChangedCount == 1, "initial media state update emits mediaStateJsonChanged once");
+    check(object.scenePropertiesJson() == QStringLiteral("{\"volume\":0.65}"),
+          "media state update does not mutate scenePropertiesJson");
+    check(object.mediaStateJson() == QStringLiteral("{\"__yakkaiMedia\":{\"position\":42}}"),
+          "mediaStateJson getter returns live media state");
+
+    object.setMediaStateJson(QStringLiteral("{\"__yakkaiMedia\":{\"position\":42}}"));
+    check(mediaStateChangedCount == 1, "duplicate media state does not re-emit mediaStateJsonChanged");
+
+    object.setMediaStateJson(QStringLiteral("{\"__yakkaiMedia\":{\"position\":84}}"));
+    check(mediaStateChangedCount == 2, "position-only media state update emits mediaStateJsonChanged");
+    check(scenePropertiesChangedCount == 1, "position-only media state update does not emit scenePropertiesJsonChanged");
+    check(object.scenePropertiesJson() == QStringLiteral("{\"volume\":0.65}"),
+          "position-only media state update keeps scene properties stable");
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -9476,6 +9596,7 @@ int main(int argc, char** argv)
     testModelFallbackPolicy();
     testSceneScriptRuntimePolicy();
     testSceneScriptMediaState();
+    testSceneScriptMediaStateInterpolation();
     testSceneScriptMediaRuntimeStubs();
     testSceneScriptDispatchesStoppedPlaybackForUnavailableMedia();
     testSceneScriptMediaVisibilitySideEffectFollowsPlaybackState();
@@ -9541,6 +9662,7 @@ int main(int argc, char** argv)
     testMaterialPassUsertextureOverridesFallbackTexture();
     testImageObjectInstanceUsertextureOverridesMaterialTexture();
     testShaderCompatPolicy();
+    testSceneObjectMediaStatePropertyDoesNotMutateSceneProperties();
     if (g_failures != 0) {
         return EXIT_FAILURE;
     }

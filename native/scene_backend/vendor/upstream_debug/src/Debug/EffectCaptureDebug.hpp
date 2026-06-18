@@ -42,6 +42,7 @@ struct EffectCaptureConfig {
     std::string puppetFinalMeshOverride;
     bool puppetEffectRouteOnly { false };
     std::unordered_map<int, bool> layerVisibilityOverrides;
+    std::string mediaStateTimelineJson;
 
     struct MouseParallax {
         struct TimelinePoint {

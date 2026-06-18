@@ -30,6 +30,7 @@ Item {
     property bool syntheticAudioArmed: false
     property real syntheticAudioOriginMs: 0
     property string scenePropertiesJson: "{}"
+    property string mediaStateJson: "{}"
     property bool firstFrameEmitted: false
     readonly property string backendStatus: "web loaded=" + web.pageLoaded
         + " propertiesSent=" + web.propertiesSent

@@ -14,8 +14,9 @@
 #include "Vulkan/ShaderComp.hpp"
 
 #include <algorithm>
-#include <regex>
+#include <cassert>
 #include <fstream>
+#include <regex>
 #include <stack>
 #include <charconv>
 #include <string>

@@ -3,6 +3,7 @@
 #include "Interface/IShaderValueUpdater.h"
 #include "Scene/Scene.h"
 #include "SpecTexs.hpp"
+#include "WPJson.hpp"
 
 #include <algorithm>
 #include <cerrno>
@@ -279,6 +280,20 @@ nlohmann::json mouseParallaxToJson(const Scene& scene)
         out["timelineElapsedMsAtCapture"] = *config.timelineElapsedMsAtCapture;
     }
     return out;
+}
+
+nlohmann::json mediaStateTimelineToJson(const std::string& raw)
+{
+    if (raw.empty()) {
+        return nlohmann::json::array();
+    }
+
+    nlohmann::json parsed;
+    if (PARSE_JSON(raw, parsed) && parsed.is_array()) {
+        return parsed;
+    }
+
+    return nlohmann::json::array();
 }
 
 nlohmann::json generatedTextParentToJson(const GeneratedTextParentInfo& parent)
@@ -1343,6 +1358,7 @@ bool writeEffectCaptureManifest(const Scene& scene)
         {"puppetFinalMeshOverride", scene.debugEffectCaptures.puppetFinalMeshOverride},
         {"puppetEffectRouteOnly", scene.debugEffectCaptures.puppetEffectRouteOnly},
         {"mouseParallax", mouseParallaxToJson(scene)},
+        {"mediaStateTimeline", mediaStateTimelineToJson(scene.debugEffectCaptures.mediaStateTimelineJson)},
         {"generatedTextDiagnostics", generatedTextDiagnosticsToJson(scene)},
         {"captureCount", scene.debugEffectCaptureRecords.size()},
         {"captures", captures},

@@ -8,6 +8,7 @@
 #include "Utils/Logging.h"
 
 #include <algorithm>
+#include <cassert>
 
 using namespace wallpaper;
 

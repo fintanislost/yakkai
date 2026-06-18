@@ -25,6 +25,7 @@ Item {
     property string debugMouseTimeline: ""
     property bool debugInteractiveMouse: false
     property string scenePropertiesJson: ""
+    property string mediaStateJson: "{}"
     property bool firstFrameEmitted: false
     readonly property string backendStatus: "video frames=" + video.receivedFrameCount + " source=" + String(sceneSource)
 

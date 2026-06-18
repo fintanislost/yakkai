@@ -60,6 +60,7 @@ public:
     const auto& Translate() const { return m_translate; }
     const auto& Scale() const { return m_scale; }
     const auto& Rotation() const { return m_rotation; }
+    bool        Visible() const { return m_visible; }
     void        SetRotation(Eigen::Vector3f v) {
                m_rotation = v;
                MarkTransDirty();
@@ -72,6 +73,7 @@ public:
                m_scale = v;
                MarkTransDirty();
     }
+    void        SetVisible(bool visible) { m_visible = visible; }
 
     void CopyTrans(const SceneNode& node) {
         m_translate = node.m_translate;
@@ -105,6 +107,7 @@ private:
     Eigen::Vector3f m_translate { 0.0f, 0.0f, 0.0f };
     Eigen::Vector3f m_scale { 1.0f, 1.0f, 1.0f };
     Eigen::Vector3f m_rotation { 0.0f, 0.0f, 0.0f };
+    bool            m_visible { true };
 
     std::shared_ptr<SceneMesh> m_mesh;
 

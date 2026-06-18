@@ -916,6 +916,9 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
 
 void CustomShaderPass::execute(const Device&, RenderingResources& rr) {
     if (m_desc.update_op) m_desc.update_op();
+    if (m_desc.node != nullptr && !m_desc.node->Visible()) {
+        return;
+    }
 
     const bool diagPass = IsArsenalModelDiagnosticPass(m_desc);
 

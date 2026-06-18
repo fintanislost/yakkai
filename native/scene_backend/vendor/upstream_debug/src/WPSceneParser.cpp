@@ -404,6 +404,12 @@ struct ParseContext {
         std::unordered_map<std::string, double> scriptProperties;
     };
     std::unordered_map<int32_t, MediaTimelineScaleScript> media_timeline_scale_scripts;
+    struct MediaRuntimeScript {
+        Scene::MediaRuntimeBindingField field { Scene::MediaRuntimeBindingField::Layer };
+        std::string script;
+        std::unordered_map<std::string, double> scriptProperties;
+    };
+    std::unordered_map<int32_t, std::vector<MediaRuntimeScript>> media_runtime_scripts;
     nlohmann::json scene_properties;
     int canvas_width { 1920 };
     int canvas_height { 1080 };
@@ -424,6 +430,26 @@ struct ParseContext {
     std::unordered_set<int32_t> all_containers;
     std::unordered_map<int32_t, bool> debug_layer_visibility_originals;
 };
+
+bool SceneScriptContainsMediaRuntimeCallback(const std::string& script)
+{
+    return script.find("mediaPlaybackChanged") != std::string::npos ||
+           script.find("mediaPropertiesChanged") != std::string::npos ||
+           script.find("mediaThumbnailChanged") != std::string::npos ||
+           script.find("mediaTimelineChanged") != std::string::npos;
+}
+
+std::optional<Scene::MediaRuntimeBindingField>
+MediaRuntimeBindingFieldForScriptField(const std::string& scriptField)
+{
+    if (scriptField.empty()) return Scene::MediaRuntimeBindingField::Layer;
+    if (scriptField == "origin") return Scene::MediaRuntimeBindingField::Origin;
+    if (scriptField == "scale") return Scene::MediaRuntimeBindingField::Scale;
+    if (scriptField == "color") return Scene::MediaRuntimeBindingField::Color;
+    if (scriptField == "alpha") return Scene::MediaRuntimeBindingField::Alpha;
+    if (scriptField == "visible") return Scene::MediaRuntimeBindingField::Visible;
+    return std::nullopt;
+}
 
 std::string ScriptMaterialConstantKey(int32_t layerId,
                                       int32_t effectId,
@@ -4075,6 +4101,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     auto spImgNode = std::make_shared<SceneNode>(Vector3f(wpimgobj.origin.data()),
                                                  Vector3f(wpimgobj.scale.data()),
                                                  Vector3f(wpimgobj.angles.data()));
+    spImgNode->SetVisible(wpimgobj.visible);
     LoadAlignment(*spImgNode,
                   wpimgobj.alignment,
                   { wpimgobj.size[0], wpimgobj.size[1] },
@@ -4104,6 +4131,36 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             binding.scriptProperties = scriptIt->second.scriptProperties;
             binding.node = spImgNode;
             context.scene->mediaTimelineScaleBindings.push_back(std::move(binding));
+        }
+    }
+    if (context.scene) {
+        auto runtimeIt = context.media_runtime_scripts.find(wpimgobj.id);
+        if (runtimeIt != context.media_runtime_scripts.end()) {
+            for (const auto& script : runtimeIt->second) {
+                Scene::MediaRuntimeBinding binding;
+                binding.layerId = wpimgobj.id;
+                binding.field = script.field;
+                binding.script = script.script;
+                binding.authoredOrigin = {
+                    spImgNode->Translate().x(),
+                    spImgNode->Translate().y(),
+                    spImgNode->Translate().z()
+                };
+                binding.authoredScale = {
+                    spImgNode->Scale().x(),
+                    spImgNode->Scale().y(),
+                    spImgNode->Scale().z()
+                };
+                binding.authoredColor = wpimgobj.color;
+                binding.authoredAlpha = wpimgobj.alpha;
+                binding.authoredVisible = wpimgobj.visible;
+                binding.canvasWidth = context.canvas_width;
+                binding.canvasHeight = context.canvas_height;
+                binding.userProperties = context.scene_properties;
+                binding.scriptProperties = script.scriptProperties;
+                binding.node = spImgNode;
+                context.scene->mediaRuntimeBindings.push_back(std::move(binding));
+            }
         }
     }
     std::shared_ptr<SceneNode> childTransformAnchorNode;
@@ -7259,7 +7316,7 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
                         script.find("mediaTimelineChanged") != std::string::npos) {
                         context.media_timeline_scale_scripts[objId] = {
                             script,
-                            std::move(resolvedScriptProperties)
+                            resolvedScriptProperties
                         };
                     }
                     const bool currentVisible = ResolveObjectVisibleForDebug(obj);
@@ -7267,6 +7324,22 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
                         script, vectorValue, color, alpha, objId, currentVisible);
                     const bool isMaterialConstantScript =
                         inConstantShaderValues && effectId != 0 && passId != 0;
+                    if (scriptPass == 0 && !isMaterialConstantScript &&
+                        SceneScriptContainsMediaRuntimeCallback(script)) {
+                        const bool handledByTimelineScaleBinding =
+                            scriptField == "scale" &&
+                            script.find("mediaTimelineChanged") != std::string::npos;
+                        if (!handledByTimelineScaleBinding) {
+                            if (auto runtimeField =
+                                    MediaRuntimeBindingFieldForScriptField(scriptField)) {
+                                context.media_runtime_scripts[objId].push_back({
+                                    .field = *runtimeField,
+                                    .script = script,
+                                    .scriptProperties = resolvedScriptProperties
+                                });
+                            }
+                        }
+                    }
                     if (isMaterialConstantScript) {
                         if (auto value = ScriptMaterialConstantValue(result, scriptField)) {
                             context.script_material_constant_bindings[

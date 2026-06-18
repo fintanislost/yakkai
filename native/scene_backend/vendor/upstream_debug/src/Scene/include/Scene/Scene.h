@@ -60,6 +60,32 @@ public:
     };
     std::vector<MediaTimelineScaleBinding> mediaTimelineScaleBindings;
 
+    enum class MediaRuntimeBindingField {
+        Layer,
+        Origin,
+        Scale,
+        Color,
+        Alpha,
+        Visible,
+    };
+
+    struct MediaRuntimeBinding {
+        int32_t layerId { 0 };
+        MediaRuntimeBindingField field { MediaRuntimeBindingField::Layer };
+        std::string script;
+        std::array<float, 3> authoredOrigin { 0.0f, 0.0f, 0.0f };
+        std::array<float, 3> authoredScale { 1.0f, 1.0f, 1.0f };
+        std::array<float, 3> authoredColor { 1.0f, 1.0f, 1.0f };
+        float authoredAlpha { 1.0f };
+        bool authoredVisible { true };
+        int canvasWidth { 1920 };
+        int canvasHeight { 1080 };
+        nlohmann::json userProperties;
+        std::unordered_map<std::string, double> scriptProperties;
+        std::weak_ptr<SceneNode> node;
+    };
+    std::vector<MediaRuntimeBinding> mediaRuntimeBindings;
+
     std::string scene_id { "unknown_id" };
 
     bool first_frame_ok { false };

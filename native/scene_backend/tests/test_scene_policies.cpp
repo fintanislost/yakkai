@@ -59,6 +59,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <sstream>
 
 namespace {
 
@@ -3718,6 +3719,34 @@ void testSceneScriptMediaRuntimeStubs()
                   nearFloat((*result.color)[1], 0.50f) &&
                   nearFloat((*result.color)[2], 0.25f),
               "SceneScript synthetic media thumbnail event exposes textColor as a Vec3");
+    }
+
+    {
+        wallpaper::SceneScriptContext thumbnailCtx;
+        thumbnailCtx.setUserProperties(nlohmann::json::object());
+        thumbnailCtx.setMediaState(wallpaper::SceneScriptMediaState {
+            .available = true,
+            .playing = false,
+            .hasThumbnailColors = true,
+            .primaryColor = {0.70f, 0.60f, 0.50f}
+        });
+        const auto result = thumbnailCtx.evaluateLayerScript(
+            R"(
+                let mediaColor = new Vec3(0.1, 0.2, 0.3);
+                export function mediaThumbnailChanged(event) {
+                    mediaColor = event.primaryColor;
+                }
+                export function update(value) {
+                    return mediaColor;
+                }
+            )",
+            {0.1f, 0.2f, 0.3f},
+            {0.1f, 0.2f, 0.3f});
+        check(result.returnVector &&
+                  nearFloat((*result.returnVector)[0], 0.70f) &&
+                  nearFloat((*result.returnVector)[1], 0.60f) &&
+                  nearFloat((*result.returnVector)[2], 0.50f),
+              "SceneScript synthetic media thumbnail event supports storing and returning primaryColor while paused");
     }
 
     {
@@ -7517,6 +7546,259 @@ void main() {
     std::filesystem::remove_all(root);
 }
 
+void testRuntimeMediaEventReplayUpdatesSafeImageProperties()
+{
+    const auto root =
+        std::filesystem::current_path() / "tmp/yakkai-runtime-media-event-replay-test";
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root / "models/util");
+    std::filesystem::create_directories(root / "materials/util");
+    std::filesystem::create_directories(root / "shaders");
+
+    {
+        std::ofstream out(root / "models/util/solidlayer.json");
+        out << R"({"width": 128, "height": 16, "material": "materials/util/solidlayer.json"})";
+    }
+    {
+        std::ofstream out(root / "materials/util/solidlayer.json");
+        out << R"({"passes":[{"shader":"flat","blending":"translucent","cullmode":"nocull","depthtest":"disabled","depthwrite":"disabled"}]})";
+    }
+    {
+        std::ofstream out(root / "shaders/flat.vert");
+        out << R"(
+uniform mat4 g_ModelViewProjectionMatrix;
+attribute vec3 a_Position;
+void main() {
+    gl_Position = mul(vec4(a_Position, 1.0), g_ModelViewProjectionMatrix);
+}
+)";
+    }
+    {
+        std::ofstream out(root / "shaders/flat.frag");
+        out << R"(
+uniform float g_Alpha;
+uniform vec3 g_Color;
+void main() {
+    gl_FragColor = vec4(g_Color, g_Alpha);
+}
+)";
+    }
+
+    const std::string transformScript = R"(
+        let playing = false;
+        let titleLength = 0;
+
+        export function mediaPlaybackChanged(event) {
+            playing = event.state === MediaPlaybackEvent.PLAYBACK_PLAYING;
+            thisLayer.visible = playing;
+        }
+
+        export function mediaPropertiesChanged(event) {
+            titleLength = event.title.length;
+        }
+
+        export function update(value) {
+            value.x = playing ? 40 + titleLength : -20;
+            value.y = playing ? 10 : -10;
+            return value;
+        }
+    )";
+    const std::string scaleScript = R"(
+        let duration = 0;
+        export function mediaPropertiesChanged(event) {
+            duration = event.duration;
+        }
+        export function update(value) {
+            value.x = duration > 100 ? 2.0 : 0.5;
+            return value;
+        }
+    )";
+    const std::string colorScript = R"(
+        let mediaColor = new Vec3(0.1, 0.2, 0.3);
+        export function mediaThumbnailChanged(event) {
+            mediaColor = event.primaryColor;
+        }
+        export function update(value) {
+            return mediaColor;
+        }
+    )";
+    const std::string alphaScript = R"(
+        let alpha = 0.25;
+        export function mediaPlaybackChanged(event) {
+            alpha = event.state === MediaPlaybackEvent.PLAYBACK_PLAYING ? 0.8 : 0.35;
+        }
+        export function update(value) {
+            return alpha;
+        }
+    )";
+
+    wallpaper::fs::VFS vfs;
+    check(vfs.Mount("/assets", wallpaper::fs::CreatePhysicalFs(root.string())),
+          "test VFS mounts runtime media event replay fixture");
+
+    nlohmann::json sceneJson = {
+        {"camera", {
+            {"center", "0 0 0"},
+            {"eye", "0 0 1"},
+            {"up", "0 1 0"}
+        }},
+        {"general", {
+            {"ambientcolor", "0.2 0.2 0.2"},
+            {"skylightcolor", "0.3 0.3 0.3"},
+            {"clearcolor", "0 0 0"},
+            {"cameraparallax", false},
+            {"cameraparallaxamount", 0.0},
+            {"cameraparallaxdelay", 0.0},
+            {"cameraparallaxmouseinfluence", 0.0},
+            {"orthogonalprojection", {
+                {"width", 1280},
+                {"height", 720}
+            }}
+        }},
+        {"objects", nlohmann::json::array({
+            {
+                {"id", 620},
+                {"name", "RuntimeMediaPanel"},
+                {"image", "models/util/solidlayer.json"},
+                {"origin", {
+                    {"value", "0 0 0"},
+                    {"script", transformScript}
+                }},
+                {"scale", {
+                    {"value", "1 1 1"},
+                    {"script", scaleScript}
+                }},
+                {"angles", "0 0 0"},
+                {"visible", {
+                    {"value", true},
+                    {"script", transformScript}
+                }},
+                {"alpha", {
+                    {"value", 0.25},
+                    {"script", alphaScript}
+                }},
+                {"color", {
+                    {"value", "0.1 0.2 0.3"},
+                    {"script", colorScript}
+                }}
+            }
+        })}
+    };
+
+    wallpaper::audio::SoundManager soundManager;
+    wallpaper::WPSceneParser parser;
+    parser.SetScenePropertiesJson(nlohmann::json({
+        {"__yakkaiMedia", {
+            {"available", true},
+            {"playing", true},
+            {"title", "Old"},
+            {"duration", 30.0},
+            {"hasThumbnailColors", true},
+            {"primaryColor", "0.2 0.3 0.4"}
+        }}
+    }).dump());
+    const auto scene = parser.Parse("runtime_media_event_replay_test",
+                                    sceneJson.dump(),
+                                    vfs,
+                                    soundManager);
+    check(scene != nullptr, "runtime media event replay fixture parses");
+    if (!scene || !scene->sceneGraph) {
+        std::filesystem::remove_all(root);
+        return;
+    }
+
+    auto* panelNode = findNodeById(scene->sceneGraph.get(), 620);
+    check(panelNode != nullptr && panelNode->Mesh() != nullptr &&
+              panelNode->Mesh()->Material() != nullptr,
+          "runtime media event replay fixture keeps panel node");
+    if (!panelNode || !panelNode->Mesh() || !panelNode->Mesh()->Material()) {
+        std::filesystem::remove_all(root);
+        return;
+    }
+
+    check(nearFloat(panelNode->Translate().x(), 43.0f) &&
+              nearFloat(panelNode->Translate().y(), 10.0f),
+          "parse-time media playback sets playing panel origin");
+    check(nearFloat(panelNode->Scale().x(), 0.5f),
+          "parse-time media properties set short-duration panel scale");
+    check(panelNode->Visible(),
+          "parse-time media playback keeps playing panel visible");
+    check(scene->mediaRuntimeBindings.size() == 5,
+          "runtime media event replay fixture registers safe field bindings");
+    auto colorRuntimeBinding = std::find_if(
+        scene->mediaRuntimeBindings.begin(),
+        scene->mediaRuntimeBindings.end(),
+        [](const wallpaper::Scene::MediaRuntimeBinding& binding) {
+            return binding.field == wallpaper::Scene::MediaRuntimeBindingField::Color;
+        });
+    check(colorRuntimeBinding != scene->mediaRuntimeBindings.end(),
+          "runtime media event replay fixture registers color replay binding");
+
+    const wallpaper::SceneScriptMediaState updatedMediaState {
+        .available = true,
+        .playing = false,
+        .title = "Fresh Track",
+        .duration = 240.0,
+        .position = 30.0,
+        .hasThumbnailColors = true,
+        .primaryColor = {0.7f, 0.6f, 0.5f}
+    };
+    if (colorRuntimeBinding != scene->mediaRuntimeBindings.end()) {
+        wallpaper::SceneScriptContext colorReplayContext;
+        colorReplayContext.setUserProperties(colorRuntimeBinding->userProperties);
+        colorReplayContext.setCanvasSize(colorRuntimeBinding->canvasWidth,
+                                         colorRuntimeBinding->canvasHeight);
+        colorReplayContext.setMediaState(updatedMediaState);
+        for (const auto& [name, value] : colorRuntimeBinding->scriptProperties) {
+            colorReplayContext.setScriptProperty(name, value);
+        }
+        const auto colorReplayResult = colorReplayContext.evaluateLayerScript(
+            colorRuntimeBinding->script,
+            colorRuntimeBinding->authoredColor,
+            colorRuntimeBinding->authoredColor,
+            colorRuntimeBinding->authoredAlpha,
+            colorRuntimeBinding->layerId,
+            colorRuntimeBinding->authoredVisible);
+        check(colorReplayResult.returnVector &&
+                  nearFloat((*colorReplayResult.returnVector)[0], 0.7f) &&
+                  nearFloat((*colorReplayResult.returnVector)[1], 0.6f) &&
+                  nearFloat((*colorReplayResult.returnVector)[2], 0.5f),
+              "runtime media event replay color binding evaluates new thumbnail color");
+    }
+
+    wallpaper::ApplySceneMediaTimelineState(*scene, updatedMediaState);
+
+    check(nearFloat(panelNode->Translate().x(), -20.0f) &&
+              nearFloat(panelNode->Translate().y(), -10.0f),
+          "runtime media event replay updates panel origin from new title/playback state");
+    check(nearFloat(panelNode->Scale().x(), 2.0f),
+          "runtime media event replay updates panel scale from new duration");
+    check(!panelNode->Visible(),
+          "runtime media event replay updates panel visibility from playback state");
+
+    const auto& values = panelNode->Mesh()->Material()->customShader.constValues;
+    const auto colorIt = values.find("g_Color");
+    check(colorIt != values.end(), "runtime media panel material keeps g_Color");
+    if (colorIt != values.end()) {
+        std::ostringstream colorMessage;
+        colorMessage << "runtime media event replay updates material color from thumbnail event"
+                     << " actual=(" << colorIt->second[0] << ","
+                     << colorIt->second[1] << "," << colorIt->second[2] << ")";
+        check(nearFloat(colorIt->second[0], 0.7f) &&
+                  nearFloat(colorIt->second[1], 0.6f) &&
+                  nearFloat(colorIt->second[2], 0.5f),
+              colorMessage.str());
+    }
+    const auto alphaIt = values.find("g_Alpha");
+    check(alphaIt != values.end(), "runtime media panel material keeps g_Alpha");
+    if (alphaIt != values.end()) {
+        check(nearFloat(alphaIt->second[0], 0.35f),
+              "runtime media event replay updates material alpha from playback event");
+    }
+
+    std::filesystem::remove_all(root);
+}
+
 void testGeneratedTextHonorsLimitWidth()
 {
     const auto root =
@@ -9628,6 +9910,7 @@ int main(int argc, char** argv)
     testGeneratedTextLiveMediaWidgetScriptKeepsArtistAboveTitle();
     testGeneratedTextMirroredMediaWidgetStartsAfterAlbumCover();
     testMediaTimelineSolidLayerKeepsScriptOriginHorizontalAnchor();
+    testRuntimeMediaEventReplayUpdatesSafeImageProperties();
     testGeneratedTextHonorsLimitWidth();
     testGeneratedTextExpandedMaxWidthUsesResolvedRasterSurface();
     testGeneratedTextUsesAntialiasedFontRenderer();

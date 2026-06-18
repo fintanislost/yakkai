@@ -19,6 +19,10 @@ not be inferred from README prose alone.
 - Position-only MPRIS changes also flow through runtime `mediaStateJson` and
   update supported SceneScript media timeline solid progress layers inside an
   already-running parsed scene.
+- Runtime `mediaStateJson` updates replay safe authored media callbacks on
+  existing image/solid SceneScript bindings for origin, scale, color, alpha,
+  and visibility without reparsing the scene. Timeline solid progress bindings
+  keep their specialized leading-edge compensation.
 - The standalone scene harness accepts `--media-state-timeline-json` for
   synthetic runtime media-position keyframes and records the normalized timeline
   in paper-backend debug manifests when `--debug-effect-captures` is enabled.
@@ -31,8 +35,9 @@ not be inferred from README prose alone.
 - Native audio-reactive bars from real Linux audio capture. Existing web audio
   coverage still uses harness-only synthetic audio.
 - Texture-animation media widgets.
-- Broader live SceneScript media event-loop behavior beyond supported timeline
-  solid progress scale bindings.
+- Broader live SceneScript media event-loop behavior beyond safe image/solid
+  transform/material/visibility bindings, including generated text reraster from
+  changing metadata.
 - Full rich text and exact Wallpaper Engine text-layout parity.
 - Broader real-player compatibility coverage across common MPRIS providers,
   including players with missing metadata, remote/non-file album art, empty

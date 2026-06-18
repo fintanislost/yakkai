@@ -332,6 +332,14 @@ std::shared_ptr<looper::Message> CreateMsgWithCmd(const std::shared_ptr<looper::
 
 namespace wallpaper
 {
+
+bool ScenePropertyRequiresSceneReload(std::string_view property)
+{
+    return property == PROPERTY_SOURCE ||
+           property == PROPERTY_ASSETS ||
+           property == PROPERTY_SCENE_PROPERTIES_JSON;
+}
+
 class RenderHandler;
 
 class MainHandler : public looper::Handler {
@@ -743,13 +751,14 @@ MHANDLER_CMD_IMPL(MainHandler, LOAD_SCENE) {
 MHANDLER_CMD_IMPL(MainHandler, SET_PROPERTY) {
     std::string property;
     if (msg->findString("property", &property)) {
+        bool reloadScene = false;
         if (property == PROPERTY_SOURCE) {
             msg->findString("value", &m_source);
             LOG_INFO("source: %s", m_source.c_str());
-            CALL_MHANDLER_CMD(LOAD_SCENE, msg);
+            reloadScene = ScenePropertyRequiresSceneReload(property);
         } else if (property == PROPERTY_ASSETS) {
             msg->findString("value", &m_assets);
-            CALL_MHANDLER_CMD(LOAD_SCENE, msg);
+            reloadScene = ScenePropertyRequiresSceneReload(property);
         } else if (property == PROPERTY_FPS) {
             int32_t fps { 15 };
             msg->findInt32("value", &fps);
@@ -780,6 +789,7 @@ MHANDLER_CMD_IMPL(MainHandler, SET_PROPERTY) {
             m_cache_path = path;
         } else if (property == PROPERTY_SCENE_PROPERTIES_JSON) {
             msg->findString("value", &m_scene_properties_json);
+            reloadScene = ScenePropertyRequiresSceneReload(property);
         } else if (property == PROPERTY_MEDIA_STATE_JSON) {
             msg->findString("value", &m_media_state_json);
             auto mediaState = std::make_shared<SceneScriptMediaState>(
@@ -874,6 +884,9 @@ MHANDLER_CMD_IMPL(MainHandler, SET_PROPERTY) {
                 nmsg->setFloat("value", speed);
                 nmsg->post();
             }
+        }
+        if (reloadScene) {
+            CALL_MHANDLER_CMD(LOAD_SCENE, msg);
         }
     }
 }

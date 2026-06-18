@@ -9850,6 +9850,18 @@ void testSceneObjectMediaStatePropertyDoesNotMutateSceneProperties()
           "position-only media state update keeps scene properties stable");
 }
 
+void testScenePropertyReloadPolicyKeepsRuntimeMediaLive()
+{
+    check(wallpaper::ScenePropertyRequiresSceneReload(wallpaper::PROPERTY_SOURCE),
+          "source changes reload the scene");
+    check(wallpaper::ScenePropertyRequiresSceneReload(wallpaper::PROPERTY_ASSETS),
+          "asset-root changes reload the scene");
+    check(wallpaper::ScenePropertyRequiresSceneReload(wallpaper::PROPERTY_SCENE_PROPERTIES_JSON),
+          "stable scene property changes reload the scene for generated text and parse-time media widgets");
+    check(!wallpaper::ScenePropertyRequiresSceneReload(wallpaper::PROPERTY_MEDIA_STATE_JSON),
+          "runtime media state changes stay on the live update path");
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -9946,6 +9958,7 @@ int main(int argc, char** argv)
     testImageObjectInstanceUsertextureOverridesMaterialTexture();
     testShaderCompatPolicy();
     testSceneObjectMediaStatePropertyDoesNotMutateSceneProperties();
+    testScenePropertyReloadPolicyKeepsRuntimeMediaLive();
     if (g_failures != 0) {
         return EXIT_FAILURE;
     }

@@ -23,6 +23,10 @@ not be inferred from README prose alone.
   existing image/solid SceneScript bindings for origin, scale, color, alpha,
   and visibility without reparsing the scene. Timeline solid progress bindings
   keep their specialized leading-edge compensation.
+- Stable MPRIS metadata changes reload the parsed native scene instead of using
+  the runtime-only path, so generated text and other parse-time media-widget
+  outputs refresh when title, artist, album, album art, playback availability,
+  or playback state changes.
 - The standalone scene harness accepts `--media-state-timeline-json` for
   synthetic runtime media-position keyframes and records the normalized timeline
   in paper-backend debug manifests when `--debug-effect-captures` is enabled.
@@ -36,8 +40,8 @@ not be inferred from README prose alone.
   coverage still uses harness-only synthetic audio.
 - Texture-animation media widgets.
 - Broader live SceneScript media event-loop behavior beyond safe image/solid
-  transform/material/visibility bindings, including generated text reraster from
-  changing metadata.
+  transform/material/visibility bindings, including in-place generated text
+  texture replacement without a scene reload.
 - Full rich text and exact Wallpaper Engine text-layout parity.
 - Broader real-player compatibility coverage across common MPRIS providers,
   including players with missing metadata, remote/non-file album art, empty

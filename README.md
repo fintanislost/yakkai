@@ -102,15 +102,18 @@ In Plasma, native scene mode can also read the active Linux media player through
 
 To avoid restarting the native scene renderer every progress tick, stable MPRIS
 metadata still flows through scene properties while live player state flows
-through a separate runtime `mediaStateJson` path. Runtime media updates replay
-safe authored SceneScript media callbacks for existing image/solid layers and
-can update origin, scale, color, alpha, and visibility inside the already-running
-scene. Timeline-driven solid progress bars still use their specialized
-mirror-aware leading-edge compensation. These updates do not rewrite
-`SceneGuard.scenePropertiesJson` or reload the wallpaper. Click controls, real
-audio-reactive widgets, texture-animation media widgets, generated text reraster
-from changing metadata, and the full Wallpaper Engine media event loop remain
-deferred.
+through a separate runtime `mediaStateJson` path. Stable metadata changes, such
+as a new title, artist, album, album art, playback availability, or playback
+state, reload the parsed native scene so generated text and other parse-time
+media widgets refresh from the new `__yakkaiMedia` snapshot. Runtime media
+updates replay safe authored SceneScript media callbacks for existing image/solid
+layers and can update origin, scale, color, alpha, and visibility inside the
+already-running scene. Timeline-driven solid progress bars still use their
+specialized mirror-aware leading-edge compensation. Position-only updates do not
+rewrite `SceneGuard.scenePropertiesJson` or reload the wallpaper. Click controls,
+real audio-reactive widgets, texture-animation media widgets, true in-place
+generated text texture replacement without scene reload, and the full Wallpaper
+Engine media event loop remain deferred.
 
 For repeatable media-widget fixture checks, use the owned MP3 fixture at
 `native/scene_harness/tests/fixtures/media/instalock.mp3`. It contains real

@@ -39,6 +39,8 @@ constexpr std::string_view PROPERTY_DEBUG_MOUSE_TIMELINE = "debug_mouse_timeline
 constexpr std::string_view PROPERTY_DEBUG_MEDIA_STATE_TIMELINE = "debug_media_state_timeline";
 constexpr std::string_view PROPERTY_DEBUG_INTERACTIVE_MOUSE = "debug_interactive_mouse";
 
+bool ScenePropertyRequiresSceneReload(std::string_view property);
+
 #include "Core/NoCopyMove.hpp"
 class MainHandler;
 struct RenderInitInfo;

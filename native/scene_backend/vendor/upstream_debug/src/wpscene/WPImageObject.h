@@ -74,6 +74,9 @@ public:
     bool                       fullscreen { false };
     bool                       nopadding { false };
     bool                       visible { true };
+    bool                       transformOnly { false };
+    bool                       supportedMediaWidgetUtility { false };
+    bool                       mediaTimelineSolidLayer { false };
     std::string                image;
     std::string                alignment { "center" };
     WPMaterial                 material;

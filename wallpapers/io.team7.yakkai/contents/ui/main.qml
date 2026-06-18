@@ -8,6 +8,7 @@ import QtQuick
 import QtQuick.Window
 import QtCore
 import org.kde.plasma.plasmoid
+import "../imports/io/team7/scene" as YakkaiSceneModule
 
 WallpaperItem {
     id: root
@@ -260,6 +261,7 @@ WallpaperItem {
     property bool wallpaperEngineSceneMouseInput: configuration.WESceneMouseInput ?? false
     property bool wallpaperEngineSceneMouseDiagnosticsEnabled: configuration.WESceneMouseDiagnosticsEnabled ?? false
     property string wallpaperEngineLibraryPath: configuration.WEVideoLibraryPath ?? ""
+    property bool linuxMediaIntegrationEnabled: configuration.LinuxMediaIntegrationEnabled ?? true
     property int videoFillMode: configuration.VideoFillMode ?? 0
     property bool videoMuted: configuration.VideoMuted ?? true
 
@@ -324,6 +326,27 @@ WallpaperItem {
         videoSource: wallpaperEngineVideoSource.toString()
         webSource: wallpaperEngineWebSource.toString()
     }
+
+    YakkaiSceneModule.YakkaiMprisMediaSource {
+        id: linuxMediaSource
+        enabled: root.linuxMediaIntegrationEnabled && root.sceneNativeMode
+
+        onDiagnosticTextChanged: {
+            if (root.verboseLogging) {
+                root.log("mpris: " + diagnosticText)
+            }
+        }
+    }
+
+    SceneMediaProperties {
+        id: sceneMediaProperties
+        scenePropertiesJson: root.wallpaperEngineScenePropertiesJson
+        mediaJson: linuxMediaSource.mediaJson
+        mediaIntegrationEnabled: root.linuxMediaIntegrationEnabled
+            && root.sceneNativeMode
+            && linuxMediaSource.available
+    }
+
     readonly property string umbrellaResolvedType: (contentMode === 7 || contentMode === 8)
         ? (contentMode === 8 && playlistAllPlayer.currentItem ? playlistAllPlayer.currentType : umbrellaMode.resolvedType)
         : ""
@@ -479,7 +502,7 @@ WallpaperItem {
                 return root.wallpaperEngineSceneSourceKind
             })
             contentLoader.item.scenePropertiesJson = Qt.binding(function() {
-                return root.wallpaperEngineScenePropertiesJson
+                return sceneMediaProperties.mergedScenePropertiesJson
             })
             contentLoader.item.assetsPath = Qt.binding(function() {
                 return root.activeSceneAssetsPath

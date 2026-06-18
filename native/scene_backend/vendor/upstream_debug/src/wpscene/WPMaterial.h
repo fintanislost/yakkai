@@ -21,7 +21,9 @@ class WPMaterialPass {
 public:
     bool                                                FromJson(const nlohmann::json&);
     void                                                Update(const WPMaterialPass&);
+    int32_t                                             id { 0 };
     std::vector<std::string>                            textures;
+    std::vector<std::string>                            usertextures;
     std::unordered_map<std::string, int32_t>            combos;
     std::unordered_map<std::string, std::vector<float>> constantshadervalues;
     std::string                                         target;
@@ -38,6 +40,7 @@ public:
     std::string                                         depthtest { "disabled" };
     std::string                                         depthwrite { "disabled" };
     std::vector<std::string>                            textures;
+    std::vector<std::string>                            usertextures;
     std::unordered_map<std::string, int32_t>            combos;
     std::unordered_map<std::string, std::vector<float>> constantshadervalues;
 

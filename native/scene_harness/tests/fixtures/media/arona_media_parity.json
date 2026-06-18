@@ -1,0 +1,187 @@
+{
+  "sceneId": "3228578419",
+  "renderSize": [2560, 1440],
+  "references": [
+    {
+      "name": "duringPlayback",
+      "reference": "duringPlayback.png",
+      "candidateCropRect": [0, 1105, 955, 1383],
+      "dominantMismatch": "unchecked",
+      "reviewNote": "True 2560x1440 crop for the active media widget. Regions use identical candidate/reference rectangles to expose layout drift.",
+      "regions": [
+        {
+          "name": "album-art",
+          "purpose": "Album art and rounded frame footprint",
+          "windowsPixelRect": [115, 60, 310, 260],
+          "yakkaiPixelRect": [115, 60, 310, 260],
+          "sampleRects": [
+            {
+              "name": "outer-left-frame",
+              "purpose": "Left rounded holder frame color",
+              "windowsPixelRect": [115, 80, 135, 230],
+              "yakkaiPixelRect": [115, 80, 135, 230]
+            },
+            {
+              "name": "top-frame",
+              "purpose": "Top rounded holder frame color",
+              "windowsPixelRect": [135, 60, 310, 80],
+              "yakkaiPixelRect": [135, 60, 310, 80]
+            },
+            {
+              "name": "inner-art",
+              "purpose": "Album art interior color",
+              "windowsPixelRect": [150, 90, 295, 225],
+              "yakkaiPixelRect": [150, 90, 295, 225]
+            },
+            {
+              "name": "top-left-corner",
+              "purpose": "Album art and frame corner blend",
+              "windowsPixelRect": [115, 60, 165, 110],
+              "yakkaiPixelRect": [115, 60, 165, 110]
+            }
+          ],
+          "featureDetection": {
+            "kind": "bright",
+            "minLuma": 180,
+            "minAlpha": 1
+          }
+        },
+        {
+          "name": "artist-title",
+          "purpose": "Visible metadata text block footprint",
+          "windowsPixelRect": [300, 65, 730, 190],
+          "yakkaiPixelRect": [300, 65, 730, 190],
+          "featureDetection": {
+            "kind": "bright",
+            "minLuma": 180,
+            "minAlpha": 1
+          }
+        },
+        {
+          "name": "progress",
+          "purpose": "Playback progress line footprint",
+          "windowsPixelRect": [300, 188, 575, 230],
+          "yakkaiPixelRect": [300, 188, 575, 230],
+          "sampleRects": [
+            {
+              "name": "progress-line",
+              "purpose": "Bright playback progress stroke",
+              "windowsPixelRect": [300, 204, 575, 218],
+              "yakkaiPixelRect": [300, 204, 575, 218]
+            }
+          ],
+          "featureDetection": {
+            "kind": "bright",
+            "minLuma": 180,
+            "minAlpha": 1
+          }
+        },
+        {
+          "name": "card-background",
+          "purpose": "Widget background and scene color context",
+          "windowsPixelRect": [0, 0, 955, 278],
+          "yakkaiPixelRect": [0, 0, 955, 278],
+          "sampleRects": [
+            {
+              "name": "background-left",
+              "purpose": "Text panel background tint",
+              "windowsPixelRect": [0, 40, 90, 240],
+              "yakkaiPixelRect": [0, 40, 90, 240]
+            },
+            {
+              "name": "desk-band",
+              "purpose": "Scene context below media widget",
+              "windowsPixelRect": [0, 0, 955, 45],
+              "yakkaiPixelRect": [0, 0, 955, 45]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "almostEndPlayback",
+      "reference": "almostEndPlayback.png",
+      "candidateCropRect": [0, 1105, 835, 1369],
+      "dominantMismatch": "unchecked",
+      "reviewNote": "Late-playback crop. Use with a matching media position before drawing progress conclusions.",
+      "regions": [
+        {
+          "name": "album-art",
+          "purpose": "Album art and rounded frame footprint",
+          "windowsPixelRect": [125, 63, 301, 235],
+          "yakkaiPixelRect": [125, 63, 301, 235],
+          "featureDetection": {
+            "kind": "bright",
+            "minLuma": 180,
+            "minAlpha": 1
+          }
+        },
+        {
+          "name": "artist-title",
+          "purpose": "Visible metadata text block footprint",
+          "windowsPixelRect": [301, 58, 701, 177],
+          "yakkaiPixelRect": [301, 58, 701, 177],
+          "featureDetection": {
+            "kind": "bright",
+            "minLuma": 180,
+            "minAlpha": 1
+          }
+        },
+        {
+          "name": "progress",
+          "purpose": "Playback progress line footprint",
+          "windowsPixelRect": [301, 174, 668, 211],
+          "yakkaiPixelRect": [301, 174, 668, 211],
+          "featureDetection": {
+            "kind": "bright",
+            "minLuma": 180,
+            "minAlpha": 1
+          }
+        },
+        {
+          "name": "card-background",
+          "purpose": "Widget background and scene color context",
+          "windowsPixelRect": [0, 0, 835, 264],
+          "yakkaiPixelRect": [0, 0, 835, 264]
+        }
+      ]
+    },
+    {
+      "name": "noPlaybackClock",
+      "reference": "noPlaybackClock.png",
+      "candidateCropRect": [0, 1145, 892, 1387],
+      "dominantMismatch": "unchecked",
+      "reviewNote": "Available-but-not-playing media-clock fallback. Compare only against a paused/unavailable synthetic state.",
+      "regions": [
+        {
+          "name": "album-art",
+          "purpose": "Paused widget album art and rounded frame footprint",
+          "windowsPixelRect": [135, 48, 283, 193],
+          "yakkaiPixelRect": [135, 48, 283, 193],
+          "featureDetection": {
+            "kind": "bright",
+            "minLuma": 180,
+            "minAlpha": 1
+          }
+        },
+        {
+          "name": "clock",
+          "purpose": "Paused clock fallback footprint",
+          "windowsPixelRect": [145, 186, 280, 232],
+          "yakkaiPixelRect": [145, 186, 280, 232],
+          "featureDetection": {
+            "kind": "bright",
+            "minLuma": 180,
+            "minAlpha": 1
+          }
+        },
+        {
+          "name": "card-background",
+          "purpose": "Widget background and scene color context",
+          "windowsPixelRect": [0, 0, 892, 242],
+          "yakkaiPixelRect": [0, 0, 892, 242]
+        }
+      ]
+    }
+  ]
+}

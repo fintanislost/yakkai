@@ -267,6 +267,42 @@ struct EffectCaptureMouseParallaxLayerInfo {
     std::vector<int> childLayerIds;
 };
 
+struct GeneratedTextParentInfo {
+    int layerId { 0 };
+    std::string layerName;
+    std::array<float, 3> translate { 0.0f, 0.0f, 0.0f };
+    std::array<float, 3> scale { 1.0f, 1.0f, 1.0f };
+};
+
+struct GeneratedTextDiagnostic {
+    int layerId { 0 };
+    std::string layerName;
+    std::string text;
+    std::string textureName;
+    std::string font;
+    std::string rasterizer;
+    bool fontLoaded { false };
+    std::string fontFamily;
+    std::string fontLoadStatus;
+    std::string horizontalAlign;
+    std::string verticalAlign;
+    float pointSize { 0.0f };
+    int effectivePixelSize { 0 };
+    int parentId { 0 };
+    std::vector<GeneratedTextParentInfo> parentChain;
+    std::array<float, 2> cardSize { 0.0f, 0.0f };
+    std::array<float, 2> textureSize { 0.0f, 0.0f };
+    std::array<float, 3> color { 1.0f, 1.0f, 1.0f };
+    float alpha { 1.0f };
+    std::array<float, 3> nodeTranslate { 0.0f, 0.0f, 0.0f };
+    std::array<float, 3> nodeScale { 1.0f, 1.0f, 1.0f };
+    std::array<float, 4> localBounds { 0.0f, 0.0f, 0.0f, 0.0f };
+    std::array<float, 4> worldBounds { 0.0f, 0.0f, 0.0f, 0.0f };
+    std::array<float, 4> alphaBounds { 0.0f, 0.0f, 0.0f, 0.0f };
+    std::string visibility;
+    std::string classificationReason;
+};
+
 struct EffectCaptureRecord {
     std::string            stage;
     std::string            label;
@@ -295,6 +331,9 @@ struct EffectPassState {
     int         nodeId { -1 };
     std::string materialName;
     std::string debugPurpose;
+    EffectCaptureTransformInfo localTransform;
+    EffectCaptureMeshBoundsInfo meshBounds;
+    std::vector<float> worldBounds;
 };
 
 std::string sanitizeCapturePathSegment(std::string_view value);
@@ -372,6 +411,8 @@ void recordMouseParallaxLayer(Scene& scene,
                               std::string_view parentLayerName,
                               const std::vector<int>& childLayerIds,
                               bool childLookupAvailable);
+
+void recordGeneratedTextDiagnostic(Scene& scene, const GeneratedTextDiagnostic& info);
 
 bool shouldProbeStrippedEffectLayer(const EffectCaptureConfig& config,
                                     const EffectCaptureLayerInfo& layer);

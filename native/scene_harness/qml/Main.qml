@@ -7,6 +7,10 @@ Window {
     width: sceneHarnessWindowWidth
     height: sceneHarnessWindowHeight
     visible: true
+    visibility: sceneHarnessFullscreen ? Window.FullScreen : Window.Windowed
+    flags: (sceneHarnessFrameless || sceneHarnessFullscreen)
+        ? (Qt.Window | Qt.FramelessWindowHint)
+        : Qt.Window
     color: "#0b1016"
     title: "Paper Scene Harness"
 

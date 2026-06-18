@@ -686,6 +686,11 @@ LayerEffectDecision decideLayerEffects(const LayerEffectInput& input)
         return decision;
     }
 
+    if (input.supportedMediaWidgetUtility) {
+        decision.reason = "media-widget-utility-effect";
+        return decision;
+    }
+
     const bool hasColorkey = anyEffectNameContains(input.effects, "colorkey") ||
                              anyMaterialShaderContains(input.effects, "colorkey");
     const bool hasHeavyEffect = anyEffectNameContains(input.effects, "audio") ||

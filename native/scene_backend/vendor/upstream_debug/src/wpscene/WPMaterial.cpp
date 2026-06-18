@@ -10,12 +10,27 @@ bool WPMaterialPassBindItem::FromJson(const nlohmann::json& json) {
 
 
 void WPMaterialPass::Update(const WPMaterialPass& p) {
+    if (p.id != 0) {
+        id = p.id;
+    }
     int32_t i = -1;
     for(const auto& el:p.textures) {
         i++;
         if(p.textures.size() > textures.size())
             textures.resize(p.textures.size());
         if(!el.empty()) {
+            textures[i] = el;
+        }
+    }
+    i = -1;
+    for(const auto& el:p.usertextures) {
+        i++;
+        if(p.usertextures.size() > usertextures.size())
+            usertextures.resize(p.usertextures.size());
+        if(p.usertextures.size() > textures.size())
+            textures.resize(p.usertextures.size());
+        if(!el.empty()) {
+            usertextures[i] = el;
             textures[i] = el;
         }
     }
@@ -37,6 +52,18 @@ void WPMaterial::MergePass(const WPMaterialPass& p) {
             textures[i] = el;
         }
     }
+    i = -1;
+    for(const auto& el:p.usertextures) {
+        i++;
+        if(p.usertextures.size() > usertextures.size())
+            usertextures.resize(p.usertextures.size());
+        if(p.usertextures.size() > textures.size())
+            textures.resize(p.usertextures.size());
+        if(!el.empty()) {
+            usertextures[i] = el;
+            textures[i] = el;
+        }
+    }
     for(const auto& el:p.constantshadervalues) {
         constantshadervalues[el.first] = el.second;
     }
@@ -46,12 +73,31 @@ void WPMaterial::MergePass(const WPMaterialPass& p) {
 }
 
 bool WPMaterialPass::FromJson(const nlohmann::json& json) {
+    GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
     if(json.contains("textures")) {
         for(const auto& jT:json.at("textures")) {
             std::string tex;
             if(!jT.is_null())
                 GET_JSON_VALUE(jT, tex);
             textures.push_back(tex);
+        }
+    }
+    if(json.contains("usertextures")) {
+        int32_t i = -1;
+        for(const auto& jT:json.at("usertextures")) {
+            i++;
+            std::string tex;
+            if(jT.is_object() && jT.contains("name") && jT.at("name").is_string()) {
+                tex = jT.at("name").get<std::string>();
+            } else if(jT.is_string()) {
+                GET_JSON_VALUE(jT, tex);
+            }
+            usertextures.push_back(tex);
+            if(!tex.empty()) {
+                if(static_cast<int32_t>(textures.size()) <= i)
+                    textures.resize(i + 1);
+                textures[i] = tex;
+            }
         }
     }
     if(json.contains("constantshadervalues")) {
@@ -105,6 +151,11 @@ bool WPMaterial::FromJson(const nlohmann::json& json) {
                 GET_JSON_VALUE(jT, tex);
             textures.push_back(tex);
         }
+    }
+    if(jContent.contains("usertextures")) {
+        WPMaterialPass userTexturePass;
+        userTexturePass.FromJson(jContent);
+        MergePass(userTexturePass);
     }
     if(jContent.contains("constantshadervalues")) {
         for(const auto& jC:jContent.at("constantshadervalues").items()) {

@@ -164,6 +164,10 @@ qt_add_qml_module(yakkai_scene_backend
     VERSION 1.0
     OUTPUT_DIRECTORY "${yakkai_scene_qml_output_dir}"
     SOURCES
+        src/MprisMediaPayload.cpp
+        src/MprisMediaPayload.hpp
+        src/YakkaiMprisMediaSource.cpp
+        src/YakkaiMprisMediaSource.hpp
         src/YakkaiSceneViewer.cpp
         src/YakkaiSceneViewer.hpp
 )
@@ -171,6 +175,7 @@ qt_add_qml_module(yakkai_scene_backend
 target_link_libraries(yakkai_scene_backend
     PRIVATE
         Qt6::Core
+        Qt6::DBus
         Qt6::Gui
         Qt6::Qml
         Qt6::Quick
@@ -194,6 +199,25 @@ target_compile_definitions(yakkai_scene_backend
 )
 
 target_compile_features(yakkai_scene_backend PRIVATE cxx_std_20)
+
+add_executable(yakkai_mpris_media_payload_tests
+    src/MprisMediaPayload.cpp
+    tests/test_mpris_media_payload.cpp
+)
+
+target_compile_features(yakkai_mpris_media_payload_tests PRIVATE cxx_std_20)
+
+target_include_directories(yakkai_mpris_media_payload_tests
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
+target_link_libraries(yakkai_mpris_media_payload_tests
+    PRIVATE
+        Qt6::Core
+)
+
+add_test(NAME yakkai_mpris_media_payload_tests COMMAND yakkai_mpris_media_payload_tests)
 
 if(TARGET yakkai_scene_backendplugin)
     # The staged wallpaper package keeps the plugin and backing library together.

@@ -10,6 +10,10 @@ Detailed stripped-effect family blockers from Phase 3.3 are tracked in
 `docs/renderer-effect-candidate-backlog.md`; keep this file focused on fixture
 coverage status.
 
+Media-widget runtime follow-ups, including read-only MPRIS coverage and
+deferred controls/audio/texture-animation work, are tracked in
+`docs/media-feature-backlog.md`.
+
 Coverage buckets track source Workshop ids. Smoke variants use case-specific ids such as `3228578419-day`, but report `sourceSceneId` so coverage remains tied to the underlying Workshop asset.
 
 | Bucket | Name | Required | Best | Satisfied | Scenes |

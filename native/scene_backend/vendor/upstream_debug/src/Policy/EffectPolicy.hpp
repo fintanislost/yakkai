@@ -20,6 +20,7 @@ struct LayerEffectInput {
     bool isComposelayer { false };
     bool fullscreen { false };
     bool isPuppetLayer { false };
+    bool supportedMediaWidgetUtility { false };
     int visibleEffectCount { 0 };
     int colorBlendMode { 0 };
     float alpha { 1.0f };

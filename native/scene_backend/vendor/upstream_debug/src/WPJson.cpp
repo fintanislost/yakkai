@@ -16,6 +16,7 @@ extern "C" {
 #include <memory>
 #include <optional>
 #include <regex>
+#include <sstream>
 #include <unordered_map>
 
 namespace wallpaper
@@ -248,6 +249,57 @@ nlohmann::json CoerceLikeFallback(const nlohmann::json& fallback, double value) 
     return value;
 }
 
+std::string EscapeJsString(std::string_view text) {
+    std::string escaped;
+    escaped.reserve(text.size() + 8);
+    for (const char ch : text) {
+        switch (ch) {
+            case '\\': escaped += "\\\\"; break;
+            case '\'': escaped += "\\'"; break;
+            case '\n': escaped += "\\n"; break;
+            case '\r': escaped += "\\r"; break;
+            case '\t': escaped += "\\t"; break;
+            default: escaped += ch; break;
+        }
+    }
+    return escaped;
+}
+
+std::optional<std::array<float, 3>> JsonVec3Value(const nlohmann::json& value) {
+    std::array<float, 3> vec { 0.0f, 0.0f, 0.0f };
+    if (value.is_string() && utils::StrToArray::Convert(value.get<std::string>(), vec)) {
+        return vec;
+    }
+    if (value.is_array() && value.size() >= 3 && value[0].is_number() && value[1].is_number() &&
+        value[2].is_number()) {
+        vec = { value[0].get<float>(), value[1].get<float>(), value[2].get<float>() };
+        return vec;
+    }
+    return std::nullopt;
+}
+
+std::string JsVec3Literal(const std::array<float, 3>& vec) {
+    std::ostringstream out;
+    out << "new Vec3(" << vec[0] << "," << vec[1] << "," << vec[2] << ")";
+    return out.str();
+}
+
+std::string JsonToJsLiteral(const nlohmann::json& value, std::string_view fallback = "null") {
+    if (auto vec = JsonVec3Value(value)) {
+        return JsVec3Literal(*vec);
+    }
+    if (value.is_number()) {
+        return std::to_string(value.get<double>());
+    }
+    if (value.is_boolean()) {
+        return value.get<bool>() ? "true" : "false";
+    }
+    if (value.is_string()) {
+        return "'" + EscapeJsString(value.get<std::string>()) + "'";
+    }
+    return std::string(fallback);
+}
+
 std::optional<nlohmann::json> EvaluateTimeOfDayScript(std::string_view script,
                                                       const nlohmann::json& fallback) {
     if (! s_activeScenePropertyState) {
@@ -373,20 +425,17 @@ std::optional<nlohmann::json> EvaluateKnownScriptValue(const nlohmann::json& jso
             if (! prop.is_object() || ! prop.contains("value")) continue;
             const auto& val = prop.at("value");
             js += "'" + key + "': ";
-            if (val.is_number()) {
-                js += std::to_string(val.get<double>());
-            } else if (val.is_boolean()) {
-                js += val.get<bool>() ? "true" : "false";
-            } else if (val.is_string()) {
-                js += "'" + val.get<std::string>() + "'";
-            } else {
-                js += "null";
-            }
+            js += JsonToJsLiteral(val);
             js += ", ";
         }
         js += "}, canvasSize: { x: 1920, y: 1080 }, timeOfDay: " +
               std::to_string(s_activeScenePropertyState->timeOfDay) + " };\n";
-        js += "function Vec3(x,y,z) { this.x=x||0; this.y=y||0; this.z=z||0; }\n";
+        js += "function Vec3(x,y,z) {\n"
+              "  if (y === undefined && z === undefined) { y = x; z = x; }\n"
+              "  this.x = x !== undefined ? x : 0;\n"
+              "  this.y = y !== undefined ? y : 0;\n"
+              "  this.z = z !== undefined ? z : 0;\n"
+              "}\n";
         js += "function createScriptProperties() {\n"
               "  var p={}; var b={\n"
               "    addSlider:function(o){p[o.name]=o.value;return b;},\n"
@@ -413,12 +462,16 @@ std::optional<nlohmann::json> EvaluateKnownScriptValue(const nlohmann::json& jso
             rep(scriptSrc, "export default ", "");
             rep(scriptSrc, "export ", ""); // catch remaining exports
         }
-        js += "var thisLayer = { color: new Vec3(0,0,0), alpha: 1, visible: true, origin: new Vec3(0,0,0) };\n";
+        const std::string valueLiteral = JsonToJsLiteral(fallback, "new Vec3(0,0,0)");
+        js += "var localStorage = { get:function(){ return undefined; }, set:function(){}, remove:function(){} };\n";
+        js += "var thisLayer = { color: new Vec3(0,0,0), alpha: 1, visible: true, origin: " +
+              valueLiteral + " };\n";
         js += "var thisScene = { clearColor: new Vec3(0,0,0) };\n";
-        js += "var value = new Vec3(0, 0, 0);\n";
+        js += "var value = " + valueLiteral + ";\n";
         js += "(function() {\n";
         js += scriptSrc;
-        js += "\nif (typeof update === 'function') { var __r = update(value); if (__r) value = __r; }\n";
+        js += "\nif (typeof init === 'function') { var __i = init(value); if (__i !== undefined) value = __i; }\n";
+        js += "if (typeof update === 'function') { var __r = update(value); if (__r !== undefined) value = __r; }\n";
         js += "})();\n";
 
         JSRuntime* rt = JS_NewRuntime();
@@ -429,15 +482,40 @@ std::optional<nlohmann::json> EvaluateKnownScriptValue(const nlohmann::json& jso
             JSValue global = JS_GetGlobalObject(ctx);
             JSValue jsval = JS_GetPropertyStr(ctx, global, "value");
             if (! JS_IsNull(jsval) && ! JS_IsUndefined(jsval)) {
-                double d;
-                if (JS_ToFloat64(ctx, &d, jsval) == 0) {
-                    JS_FreeValue(ctx, jsval);
-                    JS_FreeValue(ctx, global);
-                    JS_FreeValue(ctx, result);
-                    JS_FreeContext(ctx);
-                    JS_FreeRuntime(rt);
-                    return CoerceLikeFallback(fallback, d);
+                if (JS_IsObject(jsval)) {
+                    JSValue jsx = JS_GetPropertyStr(ctx, jsval, "x");
+                    JSValue jsy = JS_GetPropertyStr(ctx, jsval, "y");
+                    JSValue jsz = JS_GetPropertyStr(ctx, jsval, "z");
+                    double  x = 0.0;
+                    double  y = 0.0;
+                    double  z = 0.0;
+                    const bool hasVec3 = JS_ToFloat64(ctx, &x, jsx) == 0 &&
+                                         JS_ToFloat64(ctx, &y, jsy) == 0 &&
+                                         JS_ToFloat64(ctx, &z, jsz) == 0 && std::isfinite(x) &&
+                                         std::isfinite(y) && std::isfinite(z);
+                    JS_FreeValue(ctx, jsx);
+                    JS_FreeValue(ctx, jsy);
+                    JS_FreeValue(ctx, jsz);
+                    if (hasVec3) {
+                        JS_FreeValue(ctx, jsval);
+                        JS_FreeValue(ctx, global);
+                        JS_FreeValue(ctx, result);
+                        JS_FreeContext(ctx);
+                        JS_FreeRuntime(rt);
+                        return nlohmann::json::array({ x, y, z });
+                    }
+                } else if (JS_IsNumber(jsval)) {
+                    double d;
+                    if (JS_ToFloat64(ctx, &d, jsval) == 0 && std::isfinite(d)) {
+                        JS_FreeValue(ctx, jsval);
+                        JS_FreeValue(ctx, global);
+                        JS_FreeValue(ctx, result);
+                        JS_FreeContext(ctx);
+                        JS_FreeRuntime(rt);
+                        return CoerceLikeFallback(fallback, d);
+                    }
                 }
+
                 const char* str = JS_ToCString(ctx, jsval);
                 if (str) {
                     std::string sv(str);
@@ -465,6 +543,9 @@ std::optional<nlohmann::json> EvaluateKnownScriptValue(const nlohmann::json& jso
         JS_FreeValue(ctx, result);
         JS_FreeContext(ctx);
         JS_FreeRuntime(rt);
+        if (! fallback.is_null()) {
+            return fallback;
+        }
     }
 
     return std::nullopt;
@@ -479,8 +560,15 @@ std::optional<nlohmann::json> ResolveStructuredSceneValue(const nlohmann::json& 
         return userValue;
     }
 
-    if (auto scriptValue = EvaluateKnownScriptValue(json)) {
-        return scriptValue;
+    try {
+        if (auto scriptValue = EvaluateKnownScriptValue(json)) {
+            return scriptValue;
+        }
+    } catch (const std::exception&) {
+        if (json.contains("value")) {
+            return json.at("value");
+        }
+        throw;
     }
 
     return std::nullopt;

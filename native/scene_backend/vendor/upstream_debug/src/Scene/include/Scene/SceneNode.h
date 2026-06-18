@@ -92,7 +92,7 @@ private:
     // mark self and all children
     void MarkTransDirty();
 
-    i32         m_id;
+    i32         m_id { 0 };
     std::string m_name;
 
     bool            m_dirty;

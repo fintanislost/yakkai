@@ -142,6 +142,10 @@
       <label>Enable direct mouse and hover input for the experimental scene renderer</label>
       <default>false</default>
     </entry>
+    <entry name="LinuxMediaIntegrationEnabled" type="Bool">
+      <label>Expose Linux media player metadata to supported Wallpaper Engine scene widgets</label>
+      <default>true</default>
+    </entry>
     <entry name="WESceneMouseDiagnosticsEnabled" type="Bool">
       <label>Enable hidden mouse coordinate diagnostics for the experimental scene renderer</label>
       <default>false</default>

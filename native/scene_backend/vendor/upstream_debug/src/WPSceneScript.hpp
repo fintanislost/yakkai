@@ -8,6 +8,8 @@
 #include <unordered_map>
 #include <nlohmann/json_fwd.hpp>
 
+#include "SceneScriptMediaState.hpp"
+
 namespace wallpaper {
 
 // Lightweight WE SceneScript evaluator using QuickJS.
@@ -27,6 +29,20 @@ struct SceneScriptResult {
     std::optional<bool>                 visible;
     std::optional<std::array<float, 3>> origin;
     std::optional<std::string>          text;
+    std::optional<float>                scalar;
+    std::optional<std::array<float, 3>> returnVector;
+    std::optional<std::string>          horizontalAlign;
+    std::optional<std::string>          verticalAlign;
+};
+
+struct SceneScriptLayerSnapshot {
+    int32_t id { -1 };
+    int32_t parentId { 0 };
+    std::string name;
+    std::array<float, 3> origin {0.0f, 0.0f, 0.0f};
+    std::array<float, 3> scale {1.0f, 1.0f, 1.0f};
+    std::array<float, 2> size {0.0f, 0.0f};
+    bool visible { true };
 };
 
 class SceneScriptContext {
@@ -46,8 +62,14 @@ public:
     // Set engine.timeOfDay (0.0 = midnight, 0.5 = noon, 1.0 = midnight).
     void setTimeOfDay(double fraction);
 
+    // Set synthetic media state exposed to SceneScript media integration stubs.
+    void setMediaState(const SceneScriptMediaState& state);
+
     // Override a script property value (resolved from scene JSON user bindings).
     void setScriptProperty(const std::string& name, double value);
+
+    // Register authored layer state used by thisScene.getLayer()/getParent() stubs.
+    void registerLayerSnapshot(const SceneScriptLayerSnapshot& layer);
 
     // Evaluate a SceneScript module and return any layer property modifications.
     // The script is expected to export an `update(value)` function.
@@ -55,7 +77,8 @@ public:
                                           const std::array<float, 3>& currentOrigin = {0,0,0},
                                           const std::array<float, 3>& currentColor = {1,1,1},
                                           float currentAlpha = 1.0f,
-                                          int32_t layerId = -1);
+                                          int32_t layerId = -1,
+                                          bool currentVisible = true);
 
 private:
     struct Impl;

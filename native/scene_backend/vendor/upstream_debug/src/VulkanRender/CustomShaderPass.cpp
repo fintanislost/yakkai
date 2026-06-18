@@ -109,6 +109,131 @@ std::string FormatPackedBounds(const std::array<float, 4>& values, size_t compon
 bool IsMainSceneColorTarget(std::string_view output) {
     return output == wallpaper::SpecTex_Default || output == wallpaper::WE_REFLECTION_BUFFER;
 }
+
+std::vector<float> DebugVec3(const Eigen::Vector3f& value)
+{
+    return {value.x(), value.y(), value.z()};
+}
+
+wallpaper::debug::EffectCaptureTransformInfo DebugNodeTransform(const wallpaper::SceneNode* node)
+{
+    if (node == nullptr) {
+        return {};
+    }
+    return {
+        .origin = DebugVec3(node->Translate()),
+        .scale = DebugVec3(node->Scale()),
+        .angles = DebugVec3(node->Rotation()),
+    };
+}
+
+wallpaper::debug::EffectCaptureMeshBoundsInfo DebugMeshBounds(const wallpaper::SceneMesh* mesh)
+{
+    wallpaper::debug::EffectCaptureMeshBoundsInfo info;
+    if (mesh == nullptr) {
+        return info;
+    }
+
+    info.vertexArrayCount = static_cast<int>(mesh->VertexCount());
+    info.indexArrayCount = static_cast<int>(mesh->IndexCount());
+
+    for (std::size_t i = 0; i < mesh->IndexCount(); ++i) {
+        const auto& indices = mesh->GetIndexArray(i);
+        info.indexDataCount += static_cast<int>(indices.DataCount());
+        info.indexRenderDataCount += static_cast<int>(indices.RenderDataCount());
+    }
+
+    std::array<float, 3> positionMin {
+        std::numeric_limits<float>::infinity(),
+        std::numeric_limits<float>::infinity(),
+        std::numeric_limits<float>::infinity(),
+    };
+    std::array<float, 3> positionMax {
+        -std::numeric_limits<float>::infinity(),
+        -std::numeric_limits<float>::infinity(),
+        -std::numeric_limits<float>::infinity(),
+    };
+    bool hasPosition = false;
+
+    for (std::size_t i = 0; i < mesh->VertexCount(); ++i) {
+        const auto& vertex = mesh->GetVertexArray(i);
+        info.vertexCount += static_cast<int>(vertex.VertexCount());
+
+        const auto attrs = vertex.GetAttrOffsetMap();
+        const auto posIt = attrs.find(std::string(wallpaper::WE_IN_POSITION));
+        if (posIt == attrs.end()) {
+            continue;
+        }
+        if (wallpaper::SceneVertexArray::TypeCount(posIt->second.attr.type) < 3) {
+            continue;
+        }
+
+        const float* raw = vertex.Data();
+        if (raw == nullptr) {
+            continue;
+        }
+
+        const std::size_t strideFloats = vertex.OneSize();
+        const std::size_t positionOffsetFloats = posIt->second.offset / sizeof(float);
+        for (std::size_t vertexIndex = 0; vertexIndex < vertex.VertexCount(); ++vertexIndex) {
+            const float* position = raw + vertexIndex * strideFloats + positionOffsetFloats;
+            for (std::size_t axis = 0; axis < 3; ++axis) {
+                positionMin[axis] = std::min(positionMin[axis], position[axis]);
+                positionMax[axis] = std::max(positionMax[axis], position[axis]);
+            }
+            hasPosition = true;
+        }
+    }
+
+    if (hasPosition) {
+        info.positionMin = {positionMin[0], positionMin[1], positionMin[2]};
+        info.positionMax = {positionMax[0], positionMax[1], positionMax[2]};
+    }
+
+    return info;
+}
+
+std::vector<float> DebugWorldBounds(wallpaper::SceneNode* node,
+                                    const wallpaper::debug::EffectCaptureMeshBoundsInfo& meshBounds)
+{
+    if (node == nullptr ||
+        meshBounds.positionMin.size() < 3 ||
+        meshBounds.positionMax.size() < 3) {
+        return {};
+    }
+
+    node->UpdateTrans();
+    const auto transform = node->ModelTrans();
+    const std::array<Eigen::Vector4d, 4> corners {{
+        {meshBounds.positionMin[0], meshBounds.positionMin[1], 0.0, 1.0},
+        {meshBounds.positionMax[0], meshBounds.positionMin[1], 0.0, 1.0},
+        {meshBounds.positionMax[0], meshBounds.positionMax[1], 0.0, 1.0},
+        {meshBounds.positionMin[0], meshBounds.positionMax[1], 0.0, 1.0},
+    }};
+
+    double minX = std::numeric_limits<double>::infinity();
+    double minY = std::numeric_limits<double>::infinity();
+    double maxX = -std::numeric_limits<double>::infinity();
+    double maxY = -std::numeric_limits<double>::infinity();
+    for (const auto& corner : corners) {
+        const auto world = transform * corner;
+        minX = std::min(minX, world.x());
+        minY = std::min(minY, world.y());
+        maxX = std::max(maxX, world.x());
+        maxY = std::max(maxY, world.y());
+    }
+    if (!std::isfinite(minX) || !std::isfinite(minY) ||
+        !std::isfinite(maxX) || !std::isfinite(maxY)) {
+        return {};
+    }
+
+    return {
+        static_cast<float>(minX),
+        static_cast<float>(minY),
+        static_cast<float>(maxX),
+        static_cast<float>(maxY),
+    };
+}
 } // namespace
 
 CustomShaderPass::CustomShaderPass(const Desc& desc) {
@@ -575,6 +700,7 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
                          static_cast<unsigned>(color_blend.colorWriteMask));
             }
         }
+        const auto passMeshBounds = DebugMeshBounds(&mesh);
         wallpaper::debug::recordEffectPassState(scene, {
             .output = m_desc.output,
             .loadOp = LoadOpText(loadOp),
@@ -589,6 +715,9 @@ void CustomShaderPass::prepare(Scene& scene, const Device& device, RenderingReso
             .nodeId = m_desc.node ? m_desc.node->ID() : -1,
             .materialName = mesh.Material() ? mesh.Material()->name : "",
             .debugPurpose = "effect-pass",
+            .localTransform = DebugNodeTransform(m_desc.node),
+            .meshBounds = passMeshBounds,
+            .worldBounds = DebugWorldBounds(m_desc.node, passMeshBounds),
         });
         auto opt = CreateRenderPass(device.handle(),
                                     VK_FORMAT_R8G8B8A8_UNORM,

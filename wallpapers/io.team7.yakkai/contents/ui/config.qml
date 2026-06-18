@@ -65,6 +65,7 @@ Kirigami.FormLayout {
     property string cfg_WEScenePropertiesJson
     property bool cfg_WESceneExperimentalEnabled
     property bool cfg_WESceneMouseInput
+    property bool cfg_LinuxMediaIntegrationEnabled
     property bool cfg_WESceneMouseDiagnosticsEnabled
     property string cfg_PlaylistsJson
     property int cfg_ActivePlaylistIndex
@@ -1278,6 +1279,14 @@ Kirigami.FormLayout {
         visible: root.scenePlaybackContentMode
 
         onToggled: root.cfg_WESceneMouseInput = checked
+    }
+
+    QQC2.CheckBox {
+        Kirigami.FormData.label: qsTr("Media integration:")
+        text: qsTr("Use Linux media players")
+        visible: root.scenePlaybackContentMode || root.umbrellaContentMode || root.playlistAllContentMode
+        checked: root.cfg_LinuxMediaIntegrationEnabled
+        onToggled: root.cfg_LinuxMediaIntegrationEnabled = checked
     }
 
     QQC2.CheckBox {

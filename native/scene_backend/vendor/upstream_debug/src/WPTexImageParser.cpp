@@ -19,6 +19,7 @@
 #include <array>
 #include <cstring>
 #include <iostream>
+#include <algorithm>
 
 using namespace wallpaper;
 
@@ -95,6 +96,22 @@ const char* ImageTypeName(ImageType type) {
     case ImageType::RAW: return "RAW";
     default: return "unknown";
     }
+}
+
+ImageHeader MakeGeneratedRgbaHeader(int32_t width, int32_t height) {
+    ImageHeader header;
+    header.width = width;
+    header.height = height;
+    header.mapWidth = width;
+    header.mapHeight = height;
+    header.count = 1;
+    header.type = ImageType::UNKNOWN;
+    header.format = TextureFormat::RGBA8;
+    header.sample.magFilter = TextureFilter::LINEAR;
+    header.sample.minFilter = TextureFilter::LINEAR;
+    header.sample.wrapS = TextureWrap::CLAMP_TO_EDGE;
+    header.sample.wrapT = TextureWrap::CLAMP_TO_EDGE;
+    return header;
 }
 
 std::string FormatUint8Stats(const char* label,
@@ -323,6 +340,56 @@ void SetHeaderPow2(ImageHeader& header, i32 mip_0_w, i32 mip_0_h) {
 
 } // namespace
 
+void WPTexImageParser::RegisterGeneratedRgbaImage(const std::string& name,
+                                                  int32_t            width,
+                                                  int32_t            height,
+                                                  std::span<const uint8_t> rgba) {
+    const auto expectedSize = static_cast<std::size_t>(std::max(width, 0)) *
+                              static_cast<std::size_t>(std::max(height, 0)) * 4u;
+    if (name.empty() || width <= 0 || height <= 0 || rgba.size() != expectedSize) {
+        LOG_ERROR("generated RGBA image registration rejected: name=%s size=%dx%d bytes=%zu expected=%zu",
+                  name.c_str(),
+                  width,
+                  height,
+                  rgba.size(),
+                  expectedSize);
+        return;
+    }
+
+    GeneratedRgbaImage generated;
+    generated.header = MakeGeneratedRgbaHeader(width, height);
+    generated.rgba.assign(rgba.begin(), rgba.end());
+    m_generatedRgbaImages[name] = std::move(generated);
+}
+
+std::shared_ptr<Image> WPTexImageParser::ParseGeneratedRgbaImage(const std::string& name) const {
+    const auto it = m_generatedRgbaImages.find(name);
+    if (it == m_generatedRgbaImages.end()) {
+        return nullptr;
+    }
+
+    const auto& generated = it->second;
+    auto image = std::make_shared<Image>();
+    image->key = name;
+    image->header = generated.header;
+    image->slots.resize(1);
+
+    auto& slot = image->slots[0];
+    slot.width = generated.header.width;
+    slot.height = generated.header.height;
+    slot.mipmaps.resize(1);
+
+    auto& mip = slot.mipmaps[0];
+    mip.width = generated.header.width;
+    mip.height = generated.header.height;
+    mip.size = static_cast<isize>(generated.rgba.size());
+    mip.data = ImageDataPtr(new uint8_t[generated.rgba.size()], [](uint8_t* data) {
+        delete[] data;
+    });
+    std::copy(generated.rgba.begin(), generated.rgba.end(), mip.data.get());
+    return image;
+}
+
 std::shared_ptr<Image> WPTexImageParser::ParseRasterImage(const std::string& name) {
     auto pfile = m_vfs->Open("/assets/materials/" + name);
     if (! pfile) return nullptr;
@@ -456,6 +523,10 @@ ImageHeader WPTexImageParser::ParseRasterHeader(const std::string& name) {
 }
 
 std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
+    if (auto generated = ParseGeneratedRgbaImage(name)) {
+        return generated;
+    }
+
     if (HasRasterExtension(name)) {
         return ParseRasterImage(name);
     }
@@ -685,6 +756,11 @@ std::shared_ptr<Image> WPTexImageParser::Parse(const std::string& name) {
 }
 
 ImageHeader WPTexImageParser::ParseHeader(const std::string& name) {
+    if (const auto it = m_generatedRgbaImages.find(name);
+        it != m_generatedRgbaImages.end()) {
+        return it->second.header;
+    }
+
     if (HasRasterExtension(name)) {
         return ParseRasterHeader(name);
     }

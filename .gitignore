@@ -18,6 +18,7 @@ wallpapers/logs.txt
 /smoke-tests/candidates/
 /smoke-tests/*.mp4
 /smoke-tests/*.webm
+/tmp/
 /references/
 /yakkai_arona/
 /yakkai-reference/

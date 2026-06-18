@@ -51,6 +51,8 @@ public:
     std::vector<wallpaper::debug::EffectCaptureLayerInfo> debugPuppetAnimationLayerInventory;
     std::vector<wallpaper::debug::EffectCaptureMouseParallaxLayerInfo>
         debugMouseParallaxLayerInventory;
+    std::vector<wallpaper::debug::GeneratedTextDiagnostic>
+        debugGeneratedTextDiagnostics;
     std::vector<wallpaper::debug::EffectCaptureFinalDisplayBoundaryHook>
         debugEffectFinalDisplayBoundaryCaptures;
 

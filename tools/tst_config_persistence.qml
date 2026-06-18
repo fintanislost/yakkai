@@ -18,6 +18,14 @@ TestCase {
         return item
     }
 
+    function createSceneMediaProperties(initialProperties) {
+        const component = Qt.createComponent("../wallpapers/io.team7.yakkai/contents/ui/SceneMediaProperties.qml")
+        compare(component.status, Component.Ready, component.errorString())
+        const item = component.createObject(null, initialProperties)
+        verify(item !== null, component.errorString())
+        return item
+    }
+
     function test_umbrellaSelectionRestoresFromPersistedProjectPath() {
         const projectPath = "/tmp/wallpapers/video/project.json"
         const item = createConfig({
@@ -52,14 +60,16 @@ TestCase {
                     "WEVideoLibraryPath",
                     "PlaylistAllJson",
                     "ActivePlaylistAllIndex",
-                    "UmbrellaSelectedType"
+                    "UmbrellaSelectedType",
+                    "LinuxMediaIntegrationEnabled"
                 ]
             },
             ContentMode: 8,
             WEVideoLibraryPath: "/tmp/Steam/",
             PlaylistAllJson: playlistJson,
             ActivePlaylistAllIndex: 0,
-            UmbrellaSelectedType: "video"
+            UmbrellaSelectedType: "video",
+            LinuxMediaIntegrationEnabled: false
         }
         const item = createConfig({
             wallpaperConfiguration: wallpaperConfiguration
@@ -70,7 +80,61 @@ TestCase {
         compare(item.cfg_PlaylistAllJson, playlistJson)
         compare(item.cfg_ActivePlaylistAllIndex, 0)
         compare(item.cfg_UmbrellaSelectedType, "video")
+        compare(item.cfg_LinuxMediaIntegrationEnabled, false)
 
         item.destroy()
+    }
+
+    function test_sceneMediaPropertiesEnabledMergePreservesSceneAndInsertsMedia() {
+        const item = createSceneMediaProperties({
+            scenePropertiesJson: "{\"volume\":0.65,\"mode\":\"scene\",\"nested\":{\"enabled\":true}}",
+            mediaJson: "{\"__yakkaiMedia\":{\"title\":\"Track\",\"artist\":\"Artist\",\"playing\":true}}",
+            mediaIntegrationEnabled: true
+        })
+
+        const merged = JSON.parse(item.mergedScenePropertiesJson)
+        compare(merged.volume, 0.65)
+        compare(merged.mode, "scene")
+        compare(merged.nested.enabled, true)
+        compare(merged.__yakkaiMedia.title, "Track")
+        compare(merged.__yakkaiMedia.artist, "Artist")
+        compare(merged.__yakkaiMedia.playing, true)
+
+        item.destroy()
+    }
+
+    function test_sceneMediaPropertiesDisabledMergeRemovesSyntheticPayload() {
+        const item = createSceneMediaProperties({
+            scenePropertiesJson: "{\"volume\":0.2,\"__yakkaiMedia\":{\"title\":\"Old\"},\"mode\":\"scene\"}",
+            mediaJson: "{\"__yakkaiMedia\":{\"title\":\"New\"}}",
+            mediaIntegrationEnabled: false
+        })
+
+        const merged = JSON.parse(item.mergedScenePropertiesJson)
+        compare(merged.volume, 0.2)
+        compare(merged.mode, "scene")
+        verify(!merged.hasOwnProperty("__yakkaiMedia"))
+
+        item.destroy()
+    }
+
+    function test_sceneMediaPropertiesDefensivelyIgnoresInvalidJsonAndMissingMediaObject() {
+        const invalidItem = createSceneMediaProperties({
+            scenePropertiesJson: "{not json",
+            mediaJson: "{\"__yakkaiMedia\":{\"title\":\"Track\"}}",
+            mediaIntegrationEnabled: true
+        })
+        compare(invalidItem.mergedScenePropertiesJson, "{\"__yakkaiMedia\":{\"title\":\"Track\"}}")
+        invalidItem.destroy()
+
+        const missingMediaItem = createSceneMediaProperties({
+            scenePropertiesJson: "{\"volume\":0.4,\"__yakkaiMedia\":{\"title\":\"Old\"}}",
+            mediaJson: "{\"__yakkaiMedia\":\"not an object\"}",
+            mediaIntegrationEnabled: true
+        })
+        const merged = JSON.parse(missingMediaItem.mergedScenePropertiesJson)
+        compare(merged.volume, 0.4)
+        verify(!merged.hasOwnProperty("__yakkaiMedia"))
+        missingMediaItem.destroy()
     }
 }

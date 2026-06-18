@@ -81,7 +81,140 @@ Use the dev flag when working on the renderer or smoke-test harness:
   --fill crop
 ```
 
-Use `--scene-properties-json '<json-object>'` to pass a complete Wallpaper Engine scene property object to the harness. Smoke tests generate this object from `scenePropertyOverrides` merged over the scene's `project.json` defaults; direct harness users can omit the flag to use the project defaults.
+Use `--scene-properties-json '<json-object>'` to pass a complete Wallpaper Engine scene property object to the harness. Smoke tests generate this object from `scenePropertyOverrides` merged over the scene's `project.json` defaults; direct harness users can omit the flag to use the project defaults. Native SceneScript media-widget debugging can include a reserved `__yakkaiMedia` object in that JSON; this exposes synthetic harness media metadata/progress through SceneScript stubs such as `shared.mi`, `engine.media`, `MediaPlaybackEvent`, and `mediaPropertiesChanged(event)` without reading a live Linux media player:
+
+```bash
+./build/native/scene_harness/yakkai_scene_harness \
+  --backend paper \
+  --source /path/to/scene.pkg \
+  --assets /path/to/wallpaper_engine/assets \
+  --fill crop \
+  --hide-info-overlay \
+  --scene-properties-json '{"timeofday":{"value":"1"},"__yakkaiMedia":{"available":true,"playing":true,"title":"Constant Moderato","artist":"Mitsukiyo","album":"Blue Archive","duration":240,"position":42}}'
+```
+
+For media-widget color scripts, `__yakkaiMedia` can also include `textColor`, `primaryColor`, `secondaryColor`, and `tertiaryColor` as WE-style space-separated RGB strings or three-number arrays. The paper backend exposes those through a synthetic `mediaThumbnailChanged(event)` color event and registers `$mediaThumbnail` / `$mediaPreviousThumbnail` textures for native media-widget debugging. If `__yakkaiMedia.albumArtPath` points to a local image, that image is used as the synthetic thumbnail; when explicit thumbnail colors are omitted, the backend derives deterministic thumbnail colors from the album art before SceneScript evaluation, using a muted primary base that excludes only the brightest highlights, a subdued highlight accent for `tertiaryColor` rather than raw brightest pixels, and a blended contrast `textColor` rather than snapping text to pure white or black. If no album art is available, the backend generates a deterministic placeholder from the synthetic media colors. Tests can add `settleSeconds` to advance time-based SceneScript media fades before the final binding sample.
+SceneScript `color` property scripts are evaluated from the authored color value, and vector values returned from `update()` are preserved as explicit color bindings, so media thumbnail colors such as black still override non-black wallpaper defaults.
+
+`__yakkaiMedia` does not override wallpaper-authored feature toggles. If a scene gates its media widget behind ordinary user properties, pass those properties alongside the synthetic media payload. For example, Arona's media widget needs its authored `mediaintegration` property enabled in the same `--scene-properties-json` object. Playback callbacks are dispatched for both available and unavailable synthetic media: `available=true, playing=false` maps to `MediaPlaybackEvent.PLAYBACK_PAUSED`, while unavailable media maps to `PLAYBACK_STOPPED`. Metadata, timeline, and thumbnail callbacks remain gated by `available`, so authored widgets can show paused clock fallbacks without inventing metadata for a missing player. Structured scripted fields keep their authored fallback `value` when the native SceneScript evaluator cannot fully replay a runtime-only script, so movable media-widget containers still retain authored transforms such as origin/scale. Timeline-driven solid-layer progress bars keep their script-resolved horizontal origin instead of reapplying authored left/right alignment, then compensate their horizontal origin as playback scale changes so the screen-leading edge stays anchored in mirrored and non-mirrored media-widget subtrees.
+
+In Plasma, native scene mode can also read the active Linux media player through MPRIS over the session DBus. The runtime maps title, artist, album, playback status, track duration, a position snapshot, and local `mpris:artUrl` album art into the same `__yakkaiMedia` object used by the harness. This path is read-only: Yakkai does not send play/pause/next commands and does not capture real audio-reactive data.
+
+To avoid restarting the native scene renderer every progress tick, the first runtime slice refreshes scene media state on player, metadata, art, status, or duration changes. Smooth live position updates inside already-running parsed scenes remain deferred until the renderer has a live SceneScript media-update boundary.
+
+For repeatable media-widget fixture checks, use the owned MP3 fixture at
+`native/scene_harness/tests/fixtures/media/instalock.mp3`. It contains real
+title, artist, album, duration, and embedded album-art metadata. Generate
+harness-ready JSON with:
+
+```bash
+tools/media_fixture_payload.py \
+  native/scene_harness/tests/fixtures/media/instalock.mp3 \
+  --output-dir tmp/arona-media-instalock \
+  --property timeofday=1 \
+  --property mediaintegration=1 \
+  --position-ratio 0.5 \
+  --settle-seconds 1.25
+```
+
+The helper requires local `ffprobe` and `ffmpeg`, extracts album art into the
+repo-local output directory, and prints the complete scene-property JSON that
+can be passed to `--scene-properties-json`. Use `--position-ratio 0.0..1.0` to
+match a reference playback fraction across media files with different
+durations, or `--position seconds` for an exact synthetic timeline value. Use
+`--paused --clock-time HH:MM` for paused clock-widget references, or
+`--stopped` for unavailable-player references. It is still synthetic harness
+input; it does not read the current Linux media player.
+
+For broader media-widget coverage, build a local candidate inventory and run the
+fixture-backed matrix:
+
+```bash
+tools/media_widget_candidate_inventory.py /path/to/Steam/steamapps/workshop/content/431960 --json \
+  > tmp/media-widget-inventory.json
+
+xvfb-run -a -s '-screen 0 1600x900x24' tools/media_widget_matrix.py \
+  --inventory tmp/media-widget-inventory.json \
+  --assets /path/to/wallpaper_engine/assets \
+  --scene-id 3228578419 \
+  --output-dir tmp/media-widget-matrix/visual \
+  --window-size 1600x900 \
+  --capture-delay-ms 10000
+```
+
+`tools/media_widget_candidate_inventory.py` classifies candidates as
+`metadata-widget`, `property-only-media`, or `audio-reactive` from project
+properties and any unpacked scene script signatures it can see. Packaged
+`scene.pkg` content often classifies as `property-only-media` because the script
+body is not visible during inventory, so treat the output as a candidate list,
+not proof that a wallpaper has a supported metadata widget. The matrix runner
+adds the `Instalock.mp3` synthetic media payload, applies conservative authored
+media toggles from the inventory, writes per-scene captures/logs/results under
+the requested repo-local output directory, and records `summary.json` plus
+`summary.md`. Add `--debug` for generated-text diagnostics when a candidate
+needs media text crops; debug-effect capture failures can make that run fail
+even when the visual capture itself is usable.
+
+For Arona fixture-backed media parity, region fixtures may include nested
+`sampleRects` for localized album-frame, progress-line, and background-tint
+checks. The comparator writes those sample metrics to both `summary.json` and
+`summary.md` so visual review can start from the concrete drift rows instead of
+only the top-level crop score.
+
+For authored-script debugging of a specific media widget, use
+`tools/media_widget_script_audit.py` against an unpacked `scene.json`. It
+extracts script-bearing layer fields, callback usage, runtime API references,
+and side effects so fixes can start from Wallpaper Engine's authored behavior
+instead of from final-frame guesswork:
+
+```bash
+tools/media_widget_script_audit.py /path/to/scene/scene.json \
+  --json tmp/media-widget-script-audit/audit.json \
+  --markdown tmp/media-widget-script-audit/audit.md
+```
+
+For visual parity work against Windows Wallpaper Engine media-widget captures,
+use `tools/media_widget_parity_compare.py` after generating or receiving a
+same-sized Windows/Yakkai crop pair. The comparator writes a contact sheet,
+whole-crop metrics, per-region metrics, and generated-text diagnostics summary
+under repo-local `tmp/`. Region JSON entries can opt into bright feature-bound
+detection to quantify visible text or highlight footprint drift in addition to
+RMSE/mean-color metrics. Add `--dominant-mismatch` and `--review-note` after a
+human visual pass to record the current classification in the generated report.
+When producing pixel-sensitive Yakkai reference captures, pass `--frameless` to
+the scene harness so native window decorations do not reduce the rendered and
+captured content surface. For monitor-sized captures on Wayland/KWin, use
+`--fullscreen`; otherwise the compositor can constrain the harness to the
+available work area and silently change scene output size.
+If the two crops appear to be the same scale but offset by a few pixels, add
+`--align-search-radius <pixels>` to report the best integer Yakkai translation
+and write `yakkai-candidate-aligned.png`; treat that as overlap evidence only,
+not a substitute for matching the original render resolution and crop window.
+This is a debugging/reporting tool; it does not imply that the synthetic
+`__yakkaiMedia` harness path reads a live desktop player.
+
+For Arona's collected Windows media-widget references, use the exact-size
+fixture wrapper instead of hand-maintaining crop windows:
+
+```bash
+tools/arona_media_parity_fixture.py \
+  --output-dir tmp/arona-media-tightening/exact-fixture \
+  --candidate-frame tmp/arona-media-tightening/fullscreen-1440/capture.png \
+  --compare \
+  --reference duringPlayback
+```
+
+The fixture lives at
+`native/scene_harness/tests/fixtures/media/arona_media_parity.json` and records
+true `2560x1440` crop windows for `duringPlayback`, `almostEndPlayback`, and
+`noPlaybackClock`. Repeat `--reference` to compare only the references that
+match the synthetic playback state in the candidate frame; for example,
+compare `noPlaybackClock` only against an available-but-not-playing capture.
+When matching a Windows clock reference, synthetic media payloads may include
+`"clockTime": "HH:MM"` or `clockEpochMs` under `__yakkaiMedia`; this freezes
+SceneScript `new Date()` for clock widgets while leaving timer/progress
+settling based on the harness time. The clock override is a fixture/debug aid,
+not live desktop-player behavior.
 
 The harness also has `video` and `web` backends for plain Wallpaper Engine video projects and web projects. Web candidate manifests can pass harness-only flags through `harnessArgs`, including `--debug-synthetic-audio` for synthetic audio-reactive motion coverage and `--capture-exit-mode immediate` for QtWebEngine capture sequences that finish writing frames but crash during browser teardown. The synthetic audio path exercises web visualizers but does not capture real Linux audio, and audio visualizer baselines may need wider RMSE thresholds because browser animation timing can legitimately change the exact bar shape between runs. Web candidate promotion requires clean smoke-runner exit evidence and human-reviewed clips because web projects can depend on browser timing, media codecs, and input APIs.
 
@@ -100,6 +233,8 @@ Recent renderer-risk code is split by responsibility:
 - `Scene/PuppetEffectRoutePlan.*` computes pure puppet effect route decisions without allocating scene nodes or materials.
 - `Scene/PuppetFinalDisplayBuilder.*` builds standalone puppet final-display nodes, materials, meshes, and debug final-display boundary metadata.
 - `Puppet/PuppetSimulation.*` owns generic runtime puppet simulation eligibility and per-frame mechanics. The pass remains off by default and is only enabled through harness/validator debug options.
+- `Policy/MediaIntegrationPolicy.*` classifies native SceneScript media-integration utility layers. Metadata/progress widgets can render through synthetic `__yakkaiMedia`, including common metadata callbacks such as `mediaPropertiesChanged(event)` and `mediaThumbnailChanged(event)`. The SceneScript runtime seeds common Workshop media-widget shared defaults for settings state, text/card placement, clock placement, and media text background colors so cross-layer media widgets do not collapse before their settings scripts run; color property scripts are seeded from authored color values before thumbnail events are applied, returned `Vec3` values from `update()` are preserved as color bindings, album art derives thumbnail event colors when explicit media colors are omitted, and non-finite `Vec3.mix` amounts are coerced to finite endpoints to avoid NaN render state from zero-width scripted transitions. Synthetic playback maps available-but-not-playing media to `PLAYBACK_PAUSED` and unavailable media to `PLAYBACK_STOPPED`. Supported media-widget subtrees keep authored/script-active container transforms so generated text keeps its authored placement, while hidden template variants remain hidden unless authored properties or scripts activate them. Supported media-widget utility/effect carriers, including workshop model album-art carriers that bind `$mediaThumbnail`, keep their authored tint/opacity/blendgradient chains instead of inheriting the puppet-scene alpha-strip fallback. Timeline-driven solid-layer progress bars preserve their script-resolved horizontal origin while ordinary aligned solid layers still apply authored horizontal alignment, and progress bars apply mirror-aware leading-edge compensation so timeline scale changes do not shrink the bar from its center. Generated text renders through Qt's font rasterizer when available, including authored font files, alignment, WE-style point-size scaling from the scene canvas height after 100-DPI point-to-pixel conversion, color, alpha, horizontal/vertical text-card edge anchoring, mirror-aware text placement based on the final effective mirror state, and resolved `maxwidth` raster surfaces that can be wider than the authored card so long media titles are not clipped, with the CPU bitmap renderer kept as a fallback. SceneScript layer lookups keep authored text-card sizes instead of replacing `thisScene.getLayer(...).size` with generated glyph alpha bounds. Synthetic `$mediaThumbnail` textures can be supplied through `albumArtPath` or generated from synthetic media colors; derived thumbnail `textColor` blends the album average toward the contrast color instead of hard white/black. Synthetic media can also pin clock widgets with `clockTime` or `clockEpochMs` for Windows-reference fixture comparisons; `new Date()` uses that fixed clock value while `Date.now()` continues to include harness elapsed time for settling scripts. Read-only Linux MPRIS metadata integration is available for native SceneScript media widgets.
+  Click-driven player controls, native audio-reactive bars, texture-animation media widgets, exact rich text layout parity, and smooth live media-position updates inside an already-running parsed scene remain deferred diagnostics. Generated-text debug manifests include authored font, resolved rasterizer, font-load status, resolved font family, point size, effective pixel size, authored card size, resolved texture size, and measured alpha bounds fields for parity triage.
 
 When validating renderer-linkage issues, use a scratch build outside `./build`, point a smoke manifest at that scratch harness, and disable the QML disk cache. This proves the run is using the freshly built native renderer instead of repo-local build artifacts.
 
@@ -123,6 +258,23 @@ outputs. That directory is ignored and avoids filling the system `/tmp` with
 hundreds of megabytes of TGA/PNG evidence.
 
 `--debug-effect-captures` is harness-only and off by default. `--debug-effect-capture-delay-ms` can delay the TGA dumps until a requested scene time so effect captures line up with a delayed PNG or sequence frame; the manifest records this as `captureDelayMs`. `--debug-effect-capture-layers 405,239` filters normal capture records to those layer IDs and records the filter as top-level `captureLayerIds`; it reduces heavy TGA output but does not force, probe, strip, or otherwise change render policy. The manifest also records `shaderTimeSeconds`, `frameTimeSeconds`, and `effectiveCaptureTimeSeconds` so CPU shader oracles can use the exact `g_Time` value from the dumped frame instead of assuming the requested delay is the shader time. It writes `manifest.json` plus `effect-input`, `effect-output`, and `final-publish` TGA captures for preserved effect-chain layers. Each capture entry includes `captureIndex`, a zero-based manifest order marker for diagnostics that need stable capture progression. Rendered effect entries include diagnostic classification fields such as `candidateFamilies`, `candidateMixFamilies`, `candidateRisk`, `candidateChainShape`, `candidateEffectClass`, `candidateBlockedReason`, and `candidateChecks` when the policy can classify the layer. `candidateEffectClass` gives high-risk reports a stable grouping key, including `regular-blur-only`, `utility-blur`, `regular-lut-only`, `protected-puppet-lut`, `mixed-puppet-lut`, `composelayer-color-grade`, and water-carrier diagnostics such as `composelayer-water-only` and `utility-water-only`. `candidateChecks` also flags high-risk stripped families with `hasBlurFamily`, `hasLutFamily`, and `hasColorGradingFamily`. Preserved effect layers also include `effectMaterials` diagnostics with material shader names, authored/resolved texture slots, authored/resolved combos, material values, resolved shader constant values, generated defines, final-material routing, and a `publish` block with target, blend, parent, transform, mesh route, final display route, route risk, and capture-timing metadata. The `publish` block also records final-publish composition evidence: effect-input and standalone-display local transforms, standalone final source texture, standalone final material blend, display node ordinal, input/final mesh bounds, effect-input viewport size and whether it expanded to mesh bounds, and `puppetCutoutSlotCoverage` for puppet layers. Non-fullscreen composelayers keep their authored layer transform and publish through `effect-layer-node-final-publish`; fullscreen utility layers still use fullscreen final publish. Each puppet slot records bone/parent names, primary and weighted vertex/triangle coverage, secondary-only weighted slots, weighted layer-local bounds/centroid, raw simulation metadata, parsed simulation target point/mass fields, whether the metadata contains active physics controls, and a `simulatedInactive` marker for active-physics bones that are currently inactive. Target point/mass metadata alone is reported as tip metadata and does not mark a slot as simulated inactive. Standalone final-display nodes also register `final-display-before` and `final-display-after` captures by inserting debug-only render-graph copies around the tagged node; effect-layer node final-publish passes now register the same boundary around the actual final material node, with timing `render-graph-copy-around-effect-layer-final-publish-node`. Matching publish fields record `finalDisplayBoundaryCaptureTiming`, `finalDisplayBeforeRenderTarget`, and `finalDisplayAfterRenderTarget`. Puppet layers add `puppetAnimationLayers` entries with animation id/name, blend, rate, visibility, paused state, additive state, current time, animation match state, active weighting state, and active bone slot ids; the same state is summarized in top-level `puppetAnimationLayerInventory`. For preserved effect materials with non-empty shader names, the debug path registers `material-output-<effectIndex>-<materialIndex>` captures around the material stage. When a LUT material is also the final published pass, it additionally registers `material-output-local-<effectIndex>-<materialIndex>` from a duplicate layer-local diagnostic pass before final publish, while `material-output-<effectIndex>-<materialIndex>` remains the screen-sized final-publish material capture. The debug path also registers `default-before-effect` and `default-after-effect` captures around preserved effect layers by copying `_rt_default` into non-reused diagnostic render targets. `final-publish` is a post-frame render-target dump of `_rt_default`, not a per-layer final-node capture; prefer `final-display-before/after` when present for isolated final-display contribution evidence. Mismatched debug-copy extents are clamped to the overlapping region instead of aborting the renderer. These fields are diagnostic metadata only and do not imply that an effect chain is safe to render. The manifest also includes a top-level `strippedCandidates` array for effect chains that policy removed before render graph construction; these entries are metadata only and do not represent failed dumps. Protected puppet crop-sheet chains that remain stripped are additionally copied into `protectedPuppetDiagnostics` with `captureMode=metadata-only`, alpha evidence, authored effect order, authored material constants, pass order, final-publish routing, and puppet animation layer state so they can be inspected without creating normal capture records or modifying `_rt_default`. Simple isolated water candidates (`waterflow`, `waterripple`, and isolated `waterwaves`), composelayer water-only carriers classified as `composelayer-water-only`, regular image-layer `lut-only` chains, regular non-carrier `blur-only` chains, fullscreen utility blur carriers classified as `utility-blur`, composelayer color-grade carriers classified as `composelayer-color-grade`, and protected puppet crop-sheet chains made only from recognized water/LUT/pulse/shake families can be preserved. Water-only utility/fullscreen carrier classes remain diagnostic/probe-only unless a later slice adds a narrow production predicate. Mixed blur/color-grading chains outside the strict composelayer predicate, unknown families, non-blur utility carriers, fullscreen layers outside the strict `utility-blur` class, protected blur paths, and generic puppet paths remain stripped or probe-only. These captures are run artifacts for investigation; PNG smoke baselines remain the committed source of truth.
+
+For generated SceneScript/media text debugging, debug manifests also include
+top-level `sceneOrtho` and `generatedTextDiagnostics`. Each text diagnostic
+records resolved text, generated texture name, rasterizer, authored font path,
+font-load status, resolved font family, alignment fields, authored point size,
+effective canvas-scaled pixel size, parent chain, text-card size, local/world
+bounds, glyph alpha bounds, and a visibility classification. The
+crop helper maps those bounds as Wallpaper Engine scene coordinates with X from
+the left edge and Y from the bottom edge. To crop the final PNG around those
+regions and create a review contact sheet:
+
+```bash
+tools/media_text_diagnostics.py \
+  --manifest smoke-tests/artifacts/tmp/yakkai-effect-debug/manifest.json \
+  --capture smoke-tests/artifacts/tmp/yakkai-effect-debug/final.png \
+  --output-dir smoke-tests/artifacts/tmp/yakkai-effect-debug/media-text
+```
 
 Narrow non-protected puppet water chains can also be preserved as `puppet-water-effect` when the layer has a water family and every non-water mix family is one of `opacity`, `shine`, or `iris`. This route keeps the puppet render in a layer-local offscreen target, expands that target to the generated puppet mesh bounds when animated geometry extends outside the nominal object rectangle, preserves the layer's blend mode while composing overlapping puppet cutouts into that target, and publishes the result through the standalone puppet final-display path. Offscreen puppet effect targets are composited back into the scene with a premultiplied final-display blend so semi-transparent puppet edges are not multiplied by alpha twice. Generic puppet chains outside this predicate, plus audio/lightshaft, blur, LUT, color-grade, fullscreen/utility, protected blur, or unknown-family mixes, remain stripped or diagnostic-only.
 
@@ -157,7 +309,7 @@ tools/effect-candidate-inventory.py \
 
 `tools/effect-candidate-inventory.py` normalizes allowed, stripped, protected, and probe-only records into class-level evidence. Use it to group candidates by `candidateEffectClass`, chain shape, disposition, carrier flags, active puppet slots, and final-publish route before writing a production policy predicate. It also infers stable water-only carrier classes such as `composelayer-water-only` and `utility-water-only` from older manifests that predate explicit `candidateEffectClass` fields. It reports `route-audits` for classes with explicit route evidence; currently `regular-lut-only` records are classified as `route-complete`, `route-incomplete`, or `missing-local-material-output-capture` based on final-publish route metadata and local/material output capture coverage. It also reports `visual-gate-audits` for known high-risk classes; currently `composelayer-color-grade`, `utility-blur`, and `composelayer-water-only` records are classified as `production-allowed`, `needs-high-risk-probe-route`, `incomplete-visual-gate-evidence`, or `human-visual-review-required` so production captures, stripped baselines, and structurally valid probe routes are separated before a human visual gate. Add `--json` when a machine-readable inventory is needed for local analysis.
 
-`tools/validate-scene.sh` clears `~/.cache/wescene-renderer/*/spvs01/` before each harness render and writes a debug effect manifest during validation. Validator artifacts are written to `smoke-tests/artifacts/tmp/yakkai-debug` by default; set `YAKKAI_VALIDATE_OUTDIR=/path/to/output` to override. It also runs `tools/effect_route_guards.py`, a generic structural guard that fails when a puppet effect input mesh exceeds the recorded layer-local effect viewport by a meaningful amount. Tiny mesh bleed is tolerated so authored waterwave/shake mask coordinates stay in the original layer effect-space, while large overflow still requires an expanded viewport. For the renderer-risk fixtures, it fails if `3476236738` has no allowed simple-water candidates, if any simple-water candidate remains stripped there, if the `3476236738` visual sentinel detects clear-color leakage or a missing extended-hand foreground region, or if `3228578419` gains any allowed simple-water candidates. That sentinel is a regression guard for the layer-local effect source fix that keeps large parented background effect inputs from being cropped to clear color and the puppet effect viewport fix that keeps animated puppet geometry from being clipped outside the object rectangle. Add `--probe-layers 239` to run a second harness pass that forces explicitly eligible stripped layers through `--debug-effect-probe-layers`; add `--probe-high-risk-layers 137` for the blur/LUT/color-grade-only probe path. Add `--probe-max-effects N` with either probe mode to limit each forced probe layer to the first `N` visible effects, which is useful for finding the first effect in a mixed chain that causes drift. The validator reports baseline-vs-probe RMSE and, for scenes with configured sentinels, per-region mean/stddev/unique-color deltas.
+`tools/validate-scene.sh` clears `~/.cache/wescene-renderer/*/spvs01/` before each harness render and writes a debug effect manifest during validation. Validator artifacts are written to `smoke-tests/artifacts/tmp/yakkai-debug` by default; set `YAKKAI_VALIDATE_OUTDIR=/path/to/output` to override. If the Qt harness exits 134 before writing a log, the validator now records a display-access diagnostic in the log; in sandboxed agent runs, rerun with unsandboxed GUI/display access before treating that as a render failure. It also runs `tools/effect_route_guards.py`, a generic structural guard that fails when a puppet effect input mesh exceeds the recorded layer-local effect viewport by a meaningful amount. Tiny mesh bleed is tolerated so authored waterwave/shake mask coordinates stay in the original layer effect-space, while large overflow still requires an expanded viewport. For the renderer-risk fixtures, it fails if `3476236738` has no allowed simple-water candidates, if any simple-water candidate remains stripped there, if the `3476236738` visual sentinel detects clear-color leakage or a missing extended-hand foreground region, or if `3228578419` gains any allowed simple-water candidates. That sentinel is a regression guard for the layer-local effect source fix that keeps large parented background effect inputs from being cropped to clear color and the puppet effect viewport fix that keeps animated puppet geometry from being clipped outside the object rectangle. Add `--probe-layers 239` to run a second harness pass that forces explicitly eligible stripped layers through `--debug-effect-probe-layers`; add `--probe-high-risk-layers 137` for the blur/LUT/color-grade-only probe path. Add `--probe-max-effects N` with either probe mode to limit each forced probe layer to the first `N` visible effects, which is useful for finding the first effect in a mixed chain that causes drift. The validator reports baseline-vs-probe RMSE and, for scenes with configured sentinels, per-region mean/stddev/unique-color deltas.
 
 For harness-only mouse/parallax diagnostics, run:
 
@@ -253,9 +405,9 @@ kpackagetool6 -t Plasma/Wallpaper -u wallpapers/io.team7.yakkai
 
 ## Dependencies
 
-Yakkai requires KDE Plasma 6, Qt 6.6 or newer with Core/Gui/Qml/Quick/WebEngineQuick, CMake 3.24 or newer, a C++20 compiler, Vulkan development files, and liblz4. Qt Multimedia and Qt WebEngine runtime packages are needed for video and web wallpaper modes. FFmpeg development packages enable Wallpaper Engine video textures in native scene rendering when available.
+Yakkai requires KDE Plasma 6, Qt 6.6 or newer with Core/Gui/Qml/Quick/DBus/WebEngineQuick, CMake 3.24 or newer, a C++20 compiler, Vulkan development files, and liblz4. Qt Multimedia and Qt WebEngine runtime packages are needed for video and web wallpaper modes. FFmpeg development packages enable Wallpaper Engine video textures in native scene rendering when available.
 
-On distro packages, look for the Qt Quick/QML development packages, Qt Multimedia, Qt WebEngine Quick, `extra-cmake-modules`, `vulkan-headers`/`vulkan-loader`, `lz4`, and FFmpeg libraries (`libavformat`, `libavcodec`, `libswscale`, `libavutil`). The Python scanner used by the wallpaper package needs Python 3.
+On distro packages, look for the Qt Quick/QML development packages, Qt DBus, Qt Multimedia, Qt WebEngine Quick, `extra-cmake-modules`, `vulkan-headers`/`vulkan-loader`, `lz4`, and FFmpeg libraries (`libavformat`, `libavcodec`, `libswscale`, `libavutil`). The Python scanner used by the wallpaper package needs Python 3.
 
 ## Package Validation
 
@@ -281,7 +433,7 @@ The release suite contains the currently baselined required scenes. Add optional
 
 Use the coverage command before renderer phase work to confirm the limitation has an active baseline or candidate fixture. It performs no rendering and does not promote candidates into active smoke suites.
 
-`tools/validate-scene.sh <scene_id>` also summarizes SceneScript/runtime gaps from the harness log. Visible runtime gaps are reported as validator warnings, while harmless and media/runtime-only gaps are counted for triage. Script gaps on layers already suppressed as unsupported media integration are grouped as media-runtime-only so deferred media widgets stay separate from visible SceneScript work. SceneScript summaries preserve the unique layer binding count and also count binding properties separately; generated text bindings appear under `text` when `QuickJS binding: ... text=...` is present, separate from transform, color, and alpha bindings. Generated text objects are represented structurally in the scene graph with their script-resolved origin when SceneScript moves the layer. For per-layer API detail after a validation run:
+`tools/validate-scene.sh <scene_id>` also summarizes SceneScript/runtime gaps from the harness log. Non-zero SceneScript gap totals are reported as validator warnings; normal visible property bindings are included in the detail string but do not warn by themselves. Script gaps on layers suppressed as deferred media integration stay grouped as media-runtime-only; metadata/progress media-widget layers that can run through `__yakkaiMedia` are allowed to render instead of being hidden solely for mentioning media APIs. SceneScript summaries preserve the unique layer binding count and also count binding properties separately; generated text bindings appear under `text` when `QuickJS binding: ... text=...` is present, separate from transform, color, and alpha bindings. Generated text objects are represented structurally in the scene graph with their script-resolved origin/scale/color and authored text-card alignment. For per-layer API detail after a validation run:
 
 ```bash
 tools/scene-script-log-summary.py smoke-tests/artifacts/tmp/yakkai-debug/validate-3326873240.log
@@ -702,6 +854,7 @@ QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner \
 ├── tools/                   # Development utilities
 │   ├── arona_lut_parity_report.py # Summarize Arona comparator effect manifests
 │   ├── arona_mask_effect_parity.py # Map Arona ribbon masks/constants to slot displacement evidence
+│   ├── arona_media_parity_fixture.py # Emit exact Arona media-widget crops/regions from fixture data
 │   ├── arona_ribbon_flutter_parity.py # Compare lower-ribbon residual flutter kymographs
 │   ├── arona_ribbon_tip_boundary.py # Compare ribbon-tip motion across Windows/Yakkai frame sequences
 │   ├── arona_we_behavior_fitter.py # Fit Windows WE reference motion against Yakkai/prefix captures
@@ -712,6 +865,7 @@ QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner \
 │   ├── color-lab/           # Interactive color debugging web tool
 │   ├── effect-capture-summary.py # Summarize harness effect-capture manifests
 │   ├── effect_route_guards.py # Structural guards for effect-route manifests
+│   ├── media_text_diagnostics.py # Crop generated SceneScript/media text diagnostics
 │   ├── scene-script-log-summary.py # Summarize SceneScript bindings and runtime gaps
 │   ├── tst_config_persistence.qml # QML regression test for settings persistence
 │   └── validate-scene.sh    # Automated render validator
@@ -744,8 +898,8 @@ The native backend supports:
 - **Textures**: TEXB v1-v4 with LZ4 decompression, TEXB v4 sprite-sheet header parsing for particle material preflight, BC1/BC2/BC3/BC7 formats, embedded PNG/JPEG detection, video textures via FFmpeg
 - **Puppets**: MDL bone animation with additive layer blending, UTF-8 names, and mapped-area UV scaling for padded WE texture storage
 - **Shaders**: GLSL 150 preprocessing, authored combo preservation, HLSL `clip(x)` fragment-discard translation, `inverse()` polyfill stripping, varying type mismatch fix, `#require LightingV1` injection, ENABLEMASK/MASK combo mapping
-- **Effects**: Composelayer support, selective effect stripping for alpha compositing, no-op skip for stripped fullscreen/composelayer effect carriers, colorkey preservation, flare/lens detection via colorBlendMode, script-resolved zero-alpha flares preserved as hidden
-- **Scripts**: QuickJS-based SceneScript evaluation with WE API stubs (thisLayer, thisScene/scene layer lookup, layer transform helpers, Vec3/WEMath helpers, createScriptProperties override/default resolution, generated text return capture, localStorage, engine.registerAudioBuffers, engine.timeOfDay, etc.)
+- **Effects**: Composelayer support, selective effect stripping for alpha compositing, no-op skip for stripped fullscreen/composelayer effect carriers, colorkey preservation, flare/lens detection via colorBlendMode, script-resolved zero-alpha flares preserved as hidden, supported media-widget utility/effect carriers preserved for synthetic metadata widgets
+- **Scripts**: QuickJS-based SceneScript evaluation with WE API stubs (thisLayer, thisScene/scene layer lookup, layer transform helpers, Vec3/WEMath helpers, createScriptProperties override/default resolution, generated text return capture with Qt font rasterization and bitmap fallback, localStorage, engine.registerAudioBuffers, engine.timeOfDay, `shared.mi`, `engine.media`, `MediaPlaybackEvent`, etc.)
 - **Properties**: Conditional user property resolution, animation curve evaluation (alpha/color/origin), time-of-day mapping for day-night cycles, container visibility inheritance
 - **Particles**: Conditional visibility, parent container hiding
 
@@ -759,7 +913,8 @@ The native backend supports:
 - WE Web user-property editing/import is not implemented in the Plasma settings yet. Yakkai loads authored `project.json` defaults for web wallpapers, but per-user Wallpaper Engine adjustments such as moving CWAV's date position are a far-future settings feature.
 - Static model scenes use an experimental fallback for basis correction, camera framing, and material selection.
 - Material/lighting fidelity is partial: generic materials and point lights are supported, but full Wallpaper Engine PBR, shadow, and reflection parity is not.
-- SceneScript support is partial: Yakkai evaluates simple layer bindings (origin/color/alpha/visible and generated text returns) with generic layer/scene stubs, not the full Wallpaper Engine runtime. Text objects are represented structurally at their script-resolved transform and logged for validation, but full glyph rendering is not implemented yet. Media integration callbacks and unsupported object APIs are still diagnostics. Validator logs classify missing runtime APIs as visible, harmless, or media/runtime-only diagnostics so candidate fixtures can be triaged before adding new API stubs.
+- SceneScript support is partial: Yakkai evaluates simple layer bindings (origin/scale/color/alpha/visible and generated text returns) with generic layer/scene stubs, not the full Wallpaper Engine runtime. Text objects are represented structurally at their script-resolved transform, logged for validation, and rendered to generated RGBA textures with Qt font rasterization when available; authored font files, horizontal/vertical text-card edge anchoring, scene-canvas-scaled 100-DPI point-size conversion, color, alpha, and mirror-aware text placement based on the final effective mirror state are honored, with a simple bitmap renderer retained as fallback. SceneScript layer lookups preserve authored text-card sizes for `thisScene.getLayer(...).size`; generated glyph alpha bounds are recorded for diagnostics but do not resize the layer object exposed to scripts. Debug manifests and media text crop reports record whether Qt or the fallback renderer was used and whether an authored font loaded successfully. Full Wallpaper Engine wrapping, ellipsis, rich typography, and exact text layout parity are not implemented yet. Native SceneScript media metadata/progress widgets can read synthetic `__yakkaiMedia` state through `shared.mi`, `engine.media`, `MediaPlaybackEvent`, `mediaPropertiesChanged(event)`, and `mediaThumbnailChanged(event)`; read-only Linux MPRIS metadata integration can feed the same object in Plasma native scene mode.
+  The runtime seeds common media-widget shared defaults, preserves returned `Vec3` color bindings, and guards non-finite `Vec3.mix` amounts so property-only widgets can open without NaN transforms/colors. Supported widgets keep authored/script-active container transforms and structured transform fallback values, while hidden template variants, click-driven player controls, native audio-reactive bars, texture-animation media widgets, exact rich text layout parity, smooth live media-position updates inside an already-running parsed scene, and unsupported object APIs remain deferred diagnostics. Safe inert stubs exist for compatibility-only calls such as `thisObject.getAnimation().play()` and `thisLayer.play()` / `thisLayer.pause()` so unsupported control calls do not abort unrelated binding side effects. Synthetic media thumbnail textures are available for harness/backend debugging through `albumArtPath` or deterministic color placeholders; when album art is provided without explicit thumbnail colors, Yakkai derives the thumbnail event colors from that image, including a blended contrast `textColor` rather than pure white/black. Validator logs classify missing runtime APIs as visible, harmless, or media/runtime-only diagnostics so candidate fixtures can be triaged before adding new API stubs.
 
 ## Remove
 

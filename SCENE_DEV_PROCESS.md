@@ -30,6 +30,11 @@ The validator clears `~/.cache/wescene-renderer/*/spvs01/` before each harness
 render so stale SPIR-V does not mask regressions.
 It writes validator artifacts to `smoke-tests/artifacts/tmp/yakkai-debug` by
 default; set `YAKKAI_VALIDATE_OUTDIR=/path/to/output` to override.
+If the harness exits with code 134 before producing any log output, the
+validator writes a diagnostic note into the harness log. In managed sandboxed
+agent runs this usually means Qt/Wayland display access was blocked before the
+renderer started; rerun the validator from a normal desktop terminal or with
+unsandboxed GUI/display access before treating it as a render regression.
 
 When comparing delayed visual frames to effect-chain TGAs, pass
 `--debug-effect-capture-delay-ms <ms>` to the harness with the same timestamp as
@@ -120,17 +125,64 @@ viewport contains the mesh and report the expansion as evidence.
 ### `tools/scene-script-log-summary.py`
 
 SceneScript runtime diagnostic helper used by `tools/validate-scene.sh`. It
-summarizes QuickJS binding layers, unsupported media-integration layers, and
-non-fatal SceneScript runtime gaps by class, API name, and layer id. Visible
-runtime gaps are validator warnings; harmless and media/runtime-only gaps are
-kept as triage evidence. If a non-fatal script gap belongs to a layer already
-suppressed as unsupported media integration, the helper reclassifies that gap as
-media-runtime-only so deferred media widgets do not mask the remaining visible
-SceneScript work. The summary preserves the top-level unique layer binding
-count and also prints per-property binding counts. Generated text bindings are
-counted separately as `text` when validator logs contain
+summarizes QuickJS binding layers, deferred media-integration layers, and
+non-fatal SceneScript runtime gaps by class, API name, and layer id. The
+validator warns when `scene-script-gaps-total` is non-zero; visible property
+binding counts are reported as detail, but they do not warn by themselves.
+Harmless and media/runtime-only gaps are kept as triage evidence.
+Metadata/progress media-widget utility layers can run through synthetic
+`__yakkaiMedia` state exposed as `shared.mi`, `engine.media`,
+`MediaPlaybackEvent`, `mediaPropertiesChanged(event)`, and
+`mediaThumbnailChanged(event)` when synthetic thumbnail colors or textures are
+supplied.
+The synthetic thumbnail event can expose `textColor`, `primaryColor`,
+`secondaryColor`, and `tertiaryColor`; optional `albumArtPath` supplies
+synthetic `$mediaThumbnail` / `$mediaPreviousThumbnail` textures, while omitted
+album art falls back to a deterministic color placeholder. Optional
+`settleSeconds` can advance time-based media fades before a static binding
+sample in harness/debug runs.
+Supported media-widget subtrees keep authored/script-active container
+transforms, and structured scripted transform fields fall back to authored
+`value` data when a runtime-only script cannot be replayed natively. Hidden
+template variants remain hidden unless authored properties or scripts activate
+them. Generated text widgets render through Qt font rasterization when
+available, including authored font files, horizontal/vertical text-card edge
+anchoring, point size, color, alpha, and mirror-aware text placement based on
+the final effective mirror state, with the simple bitmap renderer kept as
+fallback. SceneScript layer lookups keep authored text-card sizes; measured
+glyph alpha bounds are diagnostic-only and must not replace
+`thisScene.getLayer(...).size`.
+Audio-reactive, click-driven, rich text layout, and texture-animation media
+layers remain deferred. If a
+non-fatal script gap
+belongs to a layer already suppressed as deferred media integration, the helper
+reclassifies that gap as media-runtime-only so deferred media widgets do not
+mask the remaining visible SceneScript work. The summary preserves the
+top-level unique layer binding count and also prints per-property binding
+counts. Generated text bindings are counted separately as `text` when validator
+logs contain
 `QuickJS binding: ... text=...`, distinct from transform, color, and alpha
 bindings.
+
+### `tools/media_text_diagnostics.py`
+
+Generated SceneScript/media text crop helper. Run it after a paper-backend
+harness capture that used `--debug-effect-captures` and wrote both a final PNG
+and `manifest.json`:
+
+```bash
+tools/media_text_diagnostics.py \
+  --manifest smoke-tests/artifacts/tmp/yakkai-effect-debug/manifest.json \
+  --capture smoke-tests/artifacts/tmp/yakkai-effect-debug/final.png \
+  --output-dir smoke-tests/artifacts/tmp/yakkai-effect-debug/media-text
+```
+
+The tool reads top-level `sceneOrtho` and `generatedTextDiagnostics`, projects
+each visible generated text `worldBounds` into the PNG, and writes per-layer
+crops, `media-text-diagnostics.json`, `media-text-diagnostics.md`, and
+`media-text-contact-sheet.png`. Use it as a human visual gate for text
+placement/overlap before widening native media-widget support. It is diagnostic
+only and does not replace smoke PNG baselines.
 
 ### `tools/arona_mouse_parallax_probe.py`
 
@@ -175,7 +227,7 @@ Regression tests for known-good scenes. Clears shader cache before each run. Use
 
 ### Policy Tests
 
-Phase 2 adds `yakkai_scene_policy_tests` for behavior-preserving renderer policy boundaries. Run it before and after touching `EffectPolicy`, `VideoTexturePolicy`, `ModelFallbackPolicy`, or `SceneScriptRuntimePolicy`:
+Phase 2 adds `yakkai_scene_policy_tests` for behavior-preserving renderer policy boundaries. Run it before and after touching `EffectPolicy`, `VideoTexturePolicy`, `ModelFallbackPolicy`, `MediaIntegrationPolicy`, or `SceneScriptRuntimePolicy`:
 
 ```bash
 cmake --build build --target yakkai_scene_policy_tests -j2
@@ -664,3 +716,5 @@ Only commit when:
 - QuickJS is embedded and ready but scripts are compiled, not inline text
 - High-risk color-grading outside the strict `composelayer-color-grade` class, fullscreen blur outside the strict `utility-blur` class, mixed blur, utility/fullscreen water-only carrier classes, audio/lightshaft utility effects, and protected blur effect paths remain stripped or harness-probe-only. Regular image-layer `lut-only` chains, regular non-carrier `blur-only` chains, fullscreen utility blur carriers classified as `utility-blur`, composelayer water-only carriers classified as `composelayer-water-only`, composelayer blur/color-grade carriers classified as `composelayer-color-grade`, non-protected puppet water chains whose mix families are limited to `opacity`, `shine`, and `iris`, and protected puppet crop-sheet chains limited to recognized water/LUT/pulse/shake families can render normally. Protected puppet probe reports include route metadata and screen-space drift against a normal non-probe comparator run; forced probes remain diagnostic even when a safe-family chain is allowed. Non-channelmap protected puppet final displays publish as original-parent sibling layer cards with premultiplied final-display blending because the effect output is already a rendered layer-local image, and non-channelmap puppet effect targets expand to mesh bounds when the generated puppet geometry exceeds the nominal object size.
 - Puppet chains with blur, LUT/color-grade, audio/lightshaft, utility/fullscreen carrier behavior, or unknown families remain deferred. Protected blur/color-grade crop-sheet chains and protected crop-sheet chains with unknown families also remain deferred.
+- Native SceneScript media widgets support metadata/progress state and synthetic thumbnail textures supplied through reserved `__yakkaiMedia` scene properties and common metadata callbacks such as `mediaPropertiesChanged(event)` and `mediaThumbnailChanged(event)`. Read-only Linux MPRIS metadata integration is available for Plasma native scene mode outside the harness.
+  Audio-reactive media bars, click-driven media controls, texture-animation media widgets, and smooth live media-position updates inside an already-running parsed scene remain deferred diagnostics.

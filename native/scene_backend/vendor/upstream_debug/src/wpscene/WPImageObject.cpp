@@ -1,4 +1,5 @@
 #include "WPImageObject.h"
+#include "Policy/MediaIntegrationPolicy.hpp"
 #include "Utils/Logging.h"
 #include "Fs/VFS.h"
 #include "Core/StringHelper.hpp"
@@ -6,99 +7,6 @@
 #include <sstream>
 
 using namespace wallpaper::wpscene;
-
-namespace
-{
-bool StringContainsAnyToken(std::string_view value,
-                            std::initializer_list<std::string_view> tokens) {
-    for (std::string_view token : tokens) {
-        if (value.find(token) != std::string_view::npos) return true;
-    }
-    return false;
-}
-
-bool IsUtilityUiImagePath(std::string_view path) {
-    return path == "models/util/solidlayer.json" || path == "models/util/projectlayer.json" ||
-           path == "models/util/fullscreenlayer.json" || wallpaper::sstart_with(path, "models/workshop/");
-}
-
-bool PropertyRequiresUnsupportedMediaIntegrationRuntime(const nlohmann::json& value) {
-    if (! value.is_object()) return false;
-
-    auto scriptIt = value.find("script");
-    if (scriptIt != value.end() && scriptIt->is_string()) {
-        const auto& script = scriptIt->get_ref<const std::string&>();
-        if (StringContainsAnyToken(script,
-                                   {
-                                       "shared.mi",
-                                       "mediaintegration",
-                                       "MediaPlaybackEvent",
-                                       "mediaThumbnailChanged",
-                                       "mediaTimelineChanged",
-                                       "mediaPlaybackChanged",
-                                       "cursorClick",
-                                       "localStorage",
-                                       "getTextureAnimation(",
-                                   })) {
-            return true;
-        }
-    }
-
-    auto userIt = value.find("user");
-    if (userIt != value.end() && userIt->is_string()) {
-        const auto& user = userIt->get_ref<const std::string&>();
-        if (wallpaper::sstart_with(user, "mediaintegration")) return true;
-    }
-
-    return false;
-}
-
-bool JsonRequiresUnsupportedMediaIntegrationRuntime(const nlohmann::json& value) {
-    if (PropertyRequiresUnsupportedMediaIntegrationRuntime(value)) {
-        return true;
-    }
-
-    if (value.is_object()) {
-        for (const auto& item : value.items()) {
-            if (JsonRequiresUnsupportedMediaIntegrationRuntime(item.value())) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    if (value.is_array()) {
-        for (const auto& item : value) {
-            if (JsonRequiresUnsupportedMediaIntegrationRuntime(item)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    if (value.is_string()) {
-        const auto& str = value.get_ref<const std::string&>();
-        return StringContainsAnyToken(str,
-                                      {
-                                          "$mediaThumbnail",
-                                          "$mediaPreviousThumbnail",
-                                          "MediaPlaybackEvent",
-                                          "mediaThumbnailChanged",
-                                          "mediaTimelineChanged",
-                                          "mediaPlaybackChanged",
-                                          "shared.mi",
-                                      });
-    }
-
-    return false;
-}
-
-bool RequiresUnsupportedMediaIntegrationRuntime(const nlohmann::json& json, std::string_view imagePath) {
-    if (! IsUtilityUiImagePath(imagePath)) return false;
-
-    return JsonRequiresUnsupportedMediaIntegrationRuntime(json);
-}
-} // namespace
 
 
 bool WPEffectCommand::FromJson(const nlohmann::json& json) {
@@ -261,13 +169,24 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
     // WE scripts can set thisLayer.color/alpha from scene properties.
     // We scan the layer's JSON for script text and resolve known patterns
     // (e.g., "engine.userProperties.newproperty13" → the property value).
-    if (RequiresUnsupportedMediaIntegrationRuntime(json, image)) {
+    const auto mediaSupport = wallpaper::policy::ClassifyMediaIntegrationSupport(json, image);
+    if (mediaSupport.kind == wallpaper::policy::MediaIntegrationSupportKind::DeferredRuntime) {
         visible = false;
-        LOG_INFO("suppressing unsupported media integration image layer: name=%s id=%d image=%s",
+        LOG_INFO("suppressing deferred media integration image layer: name=%s id=%d image=%s reason=%s",
                  name.c_str(),
                  id,
-                 image.c_str());
+                 image.c_str(),
+                 mediaSupport.reason.c_str());
         return true;
+    }
+    if (mediaSupport.kind == wallpaper::policy::MediaIntegrationSupportKind::SupportedWidget) {
+        supportedMediaWidgetUtility = true;
+        mediaTimelineSolidLayer = mediaSupport.timelineDrivenSolidLayer;
+        LOG_INFO("enabling media widget image layer: name=%s id=%d image=%s reason=%s",
+                 name.c_str(),
+                 id,
+                 image.c_str(),
+                 mediaSupport.reason.c_str());
     }
 	if(!fullscreen) {
 		GET_JSON_NAME_VALUE(json, "origin", origin);
@@ -318,6 +237,11 @@ bool WPImageObject::FromJson(const nlohmann::json& json, fs::VFS& vfs) {
             return false;
         }
         material.FromJson(jMat);
+        if (json.contains("instance") && json.at("instance").is_object()) {
+            WPMaterialPass instanceOverride;
+            instanceOverride.FromJson(json.at("instance"));
+            material.MergePass(instanceOverride);
+        }
     } else {
         LOG_INFO("image object no material");
         return false;

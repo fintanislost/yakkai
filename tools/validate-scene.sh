@@ -229,6 +229,14 @@ unset YAKKAI_PUPPET_SIMULATION
     --debug-effect-captures "$EFFECT_DEBUG_DIR" \
     "${PUPPET_SIMULATION_ARGS[@]}" \
     > "$LOG" 2>&1 || HARNESS_STATUS=$?
+if [ "$HARNESS_STATUS" -eq 134 ] && [ ! -s "$LOG" ]; then
+    cat > "$LOG" <<EOF
+validate-scene: harness aborted before writing renderer logs.
+Qt/Wayland display access may be blocked by the current execution sandbox.
+Run tools/validate-scene.sh from a normal desktop terminal or with unsandboxed GUI/display access.
+EOF
+    echo "NOTE: harness aborted before logging; Qt/Wayland display access may be blocked. See $LOG"
+fi
 
 PASS=0
 FAIL=0
@@ -358,10 +366,8 @@ if SCRIPT_SUMMARY=$(python3 tools/scene-script-log-summary.py "$LOG" 2>&1); then
     : "${SCRIPT_HARMLESS:=0}"
     : "${SCRIPT_UNKNOWN:=0}"
     SCRIPT_DETAIL="bindings=${SCRIPT_BINDINGS}; media-layers=${SCRIPT_MEDIA_LAYERS}; gaps=${SCRIPT_GAPS}; visible=${SCRIPT_VISIBLE}; media-runtime-only=${SCRIPT_MEDIA}; harmless=${SCRIPT_HARMLESS}; unknown=${SCRIPT_UNKNOWN}; detail=${LOG}"
-    if [ "$SCRIPT_VISIBLE" -gt 0 ]; then
+    if [ "$SCRIPT_GAPS" -gt 0 ]; then
         check "SceneScript runtime gaps" "WARN" "$SCRIPT_DETAIL"
-    elif [ "$SCRIPT_GAPS" -gt 0 ]; then
-        check "SceneScript runtime gaps" "PASS" "$SCRIPT_DETAIL"
     else
         check "SceneScript runtime gaps" "PASS" "$SCRIPT_DETAIL"
     fi
@@ -580,6 +586,14 @@ if [ -n "$PROBE_KIND" ]; then
         "${PUPPET_SIMULATION_ARGS[@]}" \
         "${PROBE_ARGS[@]}" \
         > "$PROBE_LOG" 2>&1 || PROBE_STATUS=$?
+    if [ "$PROBE_STATUS" -eq 134 ] && [ ! -s "$PROBE_LOG" ]; then
+        cat > "$PROBE_LOG" <<EOF
+validate-scene: probe harness aborted before writing renderer logs.
+Qt/Wayland display access may be blocked by the current execution sandbox.
+Run tools/validate-scene.sh from a normal desktop terminal or with unsandboxed GUI/display access.
+EOF
+        echo "NOTE: probe harness aborted before logging; Qt/Wayland display access may be blocked. See $PROBE_LOG"
+    fi
 
     if [ "$PROBE_STATUS" -eq 0 ]; then
         check "Probe harness execution" "PASS" "exit=0"

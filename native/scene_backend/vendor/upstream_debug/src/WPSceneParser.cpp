@@ -1,9 +1,11 @@
 #include "WPSceneParser.hpp"
 #include "WPJson.hpp"
 #include "Policy/EffectPolicy.hpp"
+#include "Policy/MediaIntegrationPolicy.hpp"
 #include "Policy/ModelFallbackPolicy.hpp"
 #include "Scene/PuppetEffectRoutePlan.hpp"
 #include "Scene/PuppetFinalDisplayBuilder.hpp"
+#include "SceneScriptMediaState.hpp"
 #include "WPSceneScript.hpp"
 #include <sstream>
 
@@ -48,10 +50,24 @@
 #include <unordered_set>
 #include <random>
 #include <cmath>
+#include <cctype>
+#include <cstdint>
+#include <cstring>
 #include <functional>
+#include <optional>
 #include <regex>
 #include <variant>
 #include <Eigen/Dense>
+#include <QtCore/QByteArray>
+#include <QtCore/QString>
+#include <QtGui/QColor>
+#include <QtGui/QFont>
+#include <QtGui/QFontDatabase>
+#include <QtGui/QFontMetrics>
+#include <QtGui/QGuiApplication>
+#include <QtGui/QImage>
+#include <QtGui/QPainter>
+#include <QtCore/QRectF>
 
 using namespace wallpaper;
 using namespace Eigen;
@@ -83,7 +99,155 @@ std::string EscapeSceneScriptLogText(const std::string& text)
     return escaped;
 }
 
+namespace wallpaper {
+
+namespace {
+
+std::string NormalizeGeneratedTextFontToken(std::string_view value)
+{
+    std::string out;
+    out.reserve(value.size());
+    for (unsigned char ch : value) {
+        if (std::isalnum(ch)) {
+            out.push_back(static_cast<char>(std::tolower(ch)));
+        }
+    }
+    return out;
+}
+
+std::string GeneratedTextFontStem(std::string_view fontPath)
+{
+    const std::size_t nameStart = fontPath.find_last_of("/\\");
+    std::string_view name = nameStart == std::string_view::npos
+        ? fontPath
+        : fontPath.substr(nameStart + 1);
+    const std::size_t extensionStart = name.find_last_of('.');
+    if (extensionStart != std::string_view::npos) {
+        name = name.substr(0, extensionStart);
+    }
+    return std::string(name);
+}
+
+} // namespace
+
+std::string ChooseGeneratedTextFontFamily(std::string_view fontPath,
+                                          const std::vector<std::string>& families)
+{
+    if (families.empty()) {
+        return {};
+    }
+
+    const std::string stem = NormalizeGeneratedTextFontToken(GeneratedTextFontStem(fontPath));
+    if (!stem.empty()) {
+        for (const auto& family : families) {
+            if (NormalizeGeneratedTextFontToken(family) == stem) {
+                return family;
+            }
+        }
+    }
+
+    for (const auto& family : families) {
+        if (!family.empty()) {
+            return family;
+        }
+    }
+    return families.front();
+}
+
+} // namespace wallpaper
+
+bool ParseSceneVec3Value(const nlohmann::json& field, std::array<float, 3>& out)
+{
+    const nlohmann::json* value = &field;
+    if (field.is_object() && field.contains("value")) {
+        value = &field.at("value");
+    }
+
+    if (value->is_string()) {
+        std::istringstream iss(value->get<std::string>());
+        float x = 0.0f;
+        float y = 0.0f;
+        float z = 0.0f;
+        if (iss >> x >> y >> z) {
+            out = {x, y, z};
+            return true;
+        }
+        return false;
+    }
+
+    if (value->is_array() && value->size() >= 3) {
+        out = {
+            value->at(0).get<float>(),
+            value->at(1).get<float>(),
+            value->at(2).get<float>(),
+        };
+        return true;
+    }
+
+    return false;
+}
+
+bool ParseSceneVec2Value(const nlohmann::json& field, std::array<float, 2>& out)
+{
+    const nlohmann::json* value = &field;
+    if (field.is_object() && field.contains("value")) {
+        value = &field.at("value");
+    }
+
+    if (value->is_string()) {
+        std::istringstream iss(value->get<std::string>());
+        float x = 0.0f;
+        float y = 0.0f;
+        if (iss >> x >> y) {
+            out = {x, y};
+            return true;
+        }
+        return false;
+    }
+
+    if (value->is_array() && value->size() >= 2) {
+        out = {
+            value->at(0).get<float>(),
+            value->at(1).get<float>(),
+        };
+        return true;
+    }
+
+    return false;
+}
+
+bool ParseSceneScalarValue(const nlohmann::json& field, float& out)
+{
+    const nlohmann::json* value = &field;
+    if (field.is_object()) {
+        if (auto resolved = ResolveConditionalProperty(field)) {
+            value = &*resolved;
+        } else if (field.contains("value")) {
+            value = &field.at("value");
+        }
+    }
+
+    if (value->is_number()) {
+        out = value->get<float>();
+        return true;
+    }
+    if (value->is_string()) {
+        try {
+            out = std::stof(value->get<std::string>());
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+    return false;
+}
+
 std::vector<float> DebugVec3(const Eigen::Vector3f& value)
+{
+    return {value.x(), value.y(), value.z()};
+}
+
+std::array<float, 3> DebugVec3Array(const Eigen::Vector3f& value)
 {
     return {value.x(), value.y(), value.z()};
 }
@@ -220,9 +384,19 @@ struct ParseContext {
         std::array<float, 3> color { 1.0f, 1.0f, 1.0f };
         float                alpha { 1.0f };
         std::array<float, 3> origin { 0.0f, 0.0f, 0.0f };
+        std::array<float, 3> scale { 1.0f, 1.0f, 1.0f };
+        bool                 visible { true };
+        float                maxWidth { 0.0f };
         bool                 has_color { false };
         bool                 has_alpha { false };
         bool                 has_origin { false };
+        bool                 has_scale { false };
+        bool                 has_visible { false };
+        bool                 has_max_width { false };
+        std::string          horizontalAlign;
+        std::string          verticalAlign;
+        bool                 has_horizontal_align { false };
+        bool                 has_vertical_align { false };
     };
     std::unordered_map<int32_t, ScriptColorBinding> script_color_bindings;
 
@@ -231,17 +405,113 @@ struct ParseContext {
         bool        has_text { false };
     };
     std::unordered_map<int32_t, ScriptTextBinding> script_text_bindings;
+    std::unordered_map<std::string, std::vector<float>> script_material_constant_bindings;
 
     // Container objects (no image/particle) whose conditional visibility is false.
     // Child objects with a parent in this set should be hidden.
     std::unordered_set<int32_t> hidden_containers;
+    // Any object hidden by its own visibility or by a hidden ancestor.
+    std::unordered_set<int32_t> hidden_objects;
     // All container object IDs (visible or not) — used to reparent orphaned children.
     std::unordered_set<int32_t> all_containers;
     std::unordered_map<int32_t, bool> debug_layer_visibility_originals;
 };
 
+std::string ScriptMaterialConstantKey(int32_t layerId,
+                                      int32_t effectId,
+                                      int32_t passId,
+                                      std::string_view name)
+{
+    return std::to_string(layerId) + ":" + std::to_string(effectId) + ":" +
+           std::to_string(passId) + ":" + std::string(name);
+}
+
+bool IsScalarScriptMaterialConstant(std::string_view name)
+{
+    return name == "alpha" || name == "multiply";
+}
+
+std::optional<std::vector<float>>
+ScalarScriptMaterialConstantValue(std::string_view name, const std::array<float, 3>& value)
+{
+    if (!IsScalarScriptMaterialConstant(name)) {
+        return std::nullopt;
+    }
+
+    constexpr float kEqualComponentEpsilon = 1.0e-6f;
+    if (std::abs(value[0] - value[1]) <= kEqualComponentEpsilon &&
+        std::abs(value[0] - value[2]) <= kEqualComponentEpsilon) {
+        return std::vector<float> { value[0] };
+    }
+
+    return std::nullopt;
+}
+
+std::optional<std::vector<float>>
+ScriptMaterialConstantValue(const SceneScriptResult& result, std::string_view name)
+{
+    if (result.scalar) {
+        return std::vector<float> { *result.scalar };
+    }
+    if (result.returnVector) {
+        if (auto scalar = ScalarScriptMaterialConstantValue(name, *result.returnVector)) {
+            return scalar;
+        }
+        return std::vector<float> {
+            (*result.returnVector)[0],
+            (*result.returnVector)[1],
+            (*result.returnVector)[2],
+        };
+    }
+    if (result.origin) {
+        if (auto scalar = ScalarScriptMaterialConstantValue(name, *result.origin)) {
+            return scalar;
+        }
+        return std::vector<float> {
+            (*result.origin)[0],
+            (*result.origin)[1],
+            (*result.origin)[2],
+        };
+    }
+    if (result.color) {
+        if (auto scalar = ScalarScriptMaterialConstantValue(name, *result.color)) {
+            return scalar;
+        }
+        return std::vector<float> {
+            (*result.color)[0],
+            (*result.color)[1],
+            (*result.color)[2],
+        };
+    }
+    if (name == "alpha" && result.alpha) {
+        return std::vector<float> { *result.alpha };
+    }
+    return std::nullopt;
+}
+
+void ApplyScriptMaterialConstantBindings(ParseContext& context,
+                                         int32_t layerId,
+                                         int32_t effectId,
+                                         int32_t passId,
+                                         wpscene::WPMaterial& material)
+{
+    for (auto& [name, value] : material.constantshadervalues) {
+        const auto key = ScriptMaterialConstantKey(layerId, effectId, passId, name);
+        auto bindingIt = context.script_material_constant_bindings.find(key);
+        if (bindingIt != context.script_material_constant_bindings.end()) {
+            value = bindingIt->second;
+        }
+    }
+}
+
+bool HasHiddenParent(const ParseContext& context, int32_t parentId)
+{
+    return parentId > 0 &&
+           (context.hidden_containers.count(parentId) || context.hidden_objects.count(parentId));
+}
+
 struct WPSolidAnchorObject {
-    bool FromJson(const nlohmann::json& json, fs::VFS&) {
+    bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
         GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
         GET_JSON_NAME_VALUE_NOWARN(json, "parent", parent);
         GET_JSON_NAME_VALUE_NOWARN(json, "name", name);
@@ -264,7 +534,7 @@ struct WPSolidAnchorObject {
 };
 
 struct WPTextObject {
-    bool FromJson(const nlohmann::json& json, fs::VFS&) {
+    bool FromJson(const nlohmann::json& json, fs::VFS& vfs) {
         GET_JSON_NAME_VALUE_NOWARN(json, "id", id);
         GET_JSON_NAME_VALUE_NOWARN(json, "parent", parent);
         GET_JSON_NAME_VALUE_NOWARN(json, "name", name);
@@ -272,6 +542,43 @@ struct WPTextObject {
         GET_JSON_NAME_VALUE_NOWARN(json, "angles", angles);
         GET_JSON_NAME_VALUE_NOWARN(json, "scale", scale);
         GET_JSON_NAME_VALUE_NOWARN(json, "size", size);
+        GET_JSON_NAME_VALUE_NOWARN(json, "font", font);
+        GET_JSON_NAME_VALUE_NOWARN(json, "pointsize", pointSize);
+        GET_JSON_NAME_VALUE_NOWARN(json, "horizontalalign", horizontalAlign);
+        GET_JSON_NAME_VALUE_NOWARN(json, "verticalalign", verticalAlign);
+        GET_JSON_NAME_VALUE_NOWARN(json, "limitwidth", limitWidth);
+        if (json.contains("maxwidth")) {
+            ParseSceneScalarValue(json.at("maxwidth"), maxWidth);
+        }
+        GET_JSON_NAME_VALUE_NOWARN(json, "maxrows", maxRows);
+        if (json.contains("color")) {
+            const auto& colorField = json.at("color");
+            if (colorField.is_object()) {
+                if (colorField.contains("value")) {
+                    GET_JSON_NAME_VALUE_NOWARN(colorField, "value", color);
+                } else if (auto resolved = ResolveConditionalProperty(colorField)) {
+                    GET_JSON_VALUE_NOWARN(*resolved, color);
+                }
+            } else {
+                GET_JSON_VALUE_NOWARN(colorField, color);
+            }
+        }
+        if (json.contains("alpha")) {
+            const auto& alphaField = json.at("alpha");
+            if (alphaField.is_number()) {
+                alpha = alphaField.get<float>();
+            } else if (alphaField.is_object()) {
+                if (auto animValue = EvaluateAnimationCurve(alphaField, GetSceneTimeSec())) {
+                    alpha = static_cast<float>(*animValue);
+                } else if (alphaField.contains("value")) {
+                    GET_JSON_NAME_VALUE_NOWARN(alphaField, "value", alpha);
+                } else if (auto resolved = ResolveConditionalProperty(alphaField)) {
+                    if (resolved->is_number()) {
+                        alpha = resolved->get<float>();
+                    }
+                }
+            }
+        }
         if (json.contains("visible")) {
             const auto& visibleField = json.at("visible");
             if (visibleField.is_boolean()) {
@@ -290,6 +597,14 @@ struct WPTextObject {
                 GET_JSON_NAME_VALUE_NOWARN(textNode, "value", text);
             }
         }
+        if (json.contains("effects")) {
+            for (const auto& jE : json.at("effects")) {
+                wpscene::WPImageEffect effect;
+                if (effect.FromJson(jE, vfs)) {
+                    effects.push_back(std::move(effect));
+                }
+            }
+        }
         return true;
     }
 
@@ -297,11 +612,21 @@ struct WPTextObject {
     int32_t              parent { 0 };
     std::string          name;
     std::string          text;
+    std::string          font;
     std::array<float, 3> origin { 0.0f, 0.0f, 0.0f };
     std::array<float, 3> scale { 1.0f, 1.0f, 1.0f };
     std::array<float, 3> angles { 0.0f, 0.0f, 0.0f };
     std::array<float, 2> size { 256.0f, 64.0f };
+    std::array<float, 3> color { 1.0f, 1.0f, 1.0f };
+    std::string          horizontalAlign { "left" };
+    std::string          verticalAlign { "center" };
+    float                pointSize { 0.0f };
+    float                alpha { 1.0f };
+    float                maxWidth { 0.0f };
+    int32_t              maxRows { 0 };
+    bool                 limitWidth { false };
     bool                 visible { true };
+    std::vector<wpscene::WPImageEffect> effects;
 };
 
 using WPObjectVar = std::variant<wpscene::WPImageObject, wpscene::WPParticleObject,
@@ -429,7 +754,41 @@ bool ResolveObjectVisibleForDebug(const nlohmann::json& obj)
             return resolved->get<double>() > 0.5;
         }
     }
+    if (visible.is_object() && visible.contains("value")) {
+        const auto& value = visible.at("value");
+        if (value.is_boolean()) {
+            return value.get<bool>();
+        }
+        if (value.is_number()) {
+            return value.get<double>() > 0.5;
+        }
+    }
     return true;
+}
+
+void ResolveStructuredObjectField(nlohmann::json& obj, const char* name)
+{
+    if (!obj.contains(name) || obj.at(name).is_null()) {
+        return;
+    }
+    try {
+        auto resolved = ResolveConditionalProperty(obj.at(name));
+        if (!resolved) {
+            return;
+        }
+        obj[name] = *resolved;
+    } catch (const std::exception&) {
+    }
+}
+
+void ResolveStructuredObjectFields(nlohmann::json& obj)
+{
+    ResolveStructuredObjectField(obj, "origin");
+    ResolveStructuredObjectField(obj, "angles");
+    ResolveStructuredObjectField(obj, "scale");
+    ResolveStructuredObjectField(obj, "color");
+    ResolveStructuredObjectField(obj, "alpha");
+    ResolveStructuredObjectField(obj, "visible");
 }
 
 void ApplyDebugLayerVisibilityOverride(ParseContext& context,
@@ -2298,6 +2657,45 @@ void GenCardMesh(SceneMesh& mesh, const std::array<uint16_t, 2> size,
     mesh.AddVertexArray(std::move(vertex));
 }
 
+void GenCardMeshFromLocalBounds(SceneMesh& mesh,
+                                const std::array<float, 4>& bounds,
+                                const std::array<float, 2> mapRate = { 1.0f, 1.0f })
+{
+    const float left = bounds[0];
+    const float bottom = bounds[1];
+    const float right = bounds[2];
+    const float top = bounds[3];
+    constexpr float z = 0.0f;
+
+    const float tw = mapRate[0];
+    const float th = mapRate[1];
+
+    // clang-format off
+    const std::array pos = {
+        left, bottom, z,
+        left, top, z,
+        right, bottom, z,
+        right, top, z,
+    };
+    const std::array texCoord = {
+        0.0f, th,
+        0.0f, 0.0f,
+        tw, th,
+        tw, 0.0f,
+    };
+    // clang-format on
+
+    SceneVertexArray vertex(
+        {
+            { WE_IN_POSITION.data(), VertexType::FLOAT3 },
+            { WE_IN_TEXCOORD.data(), VertexType::FLOAT2 },
+        },
+        4);
+    vertex.SetVertex(WE_IN_POSITION, pos);
+    vertex.SetVertex(WE_IN_TEXCOORD, texCoord);
+    mesh.AddVertexArray(std::move(vertex));
+}
+
 void SetParticleMesh(SceneMesh& mesh, const wpscene::Particle& particle, uint32_t count,
                      bool thick_format) {
     (void)particle;
@@ -2482,15 +2880,14 @@ void ParseSpecTexName(std::string& name, const wpscene::WPMaterial& wpmat,
     }
 }
 
-void AttachObjectNode(ParseContext&                    context,
-                      const std::shared_ptr<SceneNode>& node,
-                      int32_t                           id,
-                      int32_t                           parentId) {
+void AttachSceneGraphNode(ParseContext&                    context,
+                          const std::shared_ptr<SceneNode>& node,
+                          int32_t                           parentId) {
     if (! node) {
         return;
     }
 
-    if (parentId > 0 && parentId != id) {
+    if (parentId > 0 && parentId != node->ID()) {
         auto parentIt = context.object_nodes.find(parentId);
         if (parentIt != context.object_nodes.end()) {
             parentIt->second->AppendChild(node);
@@ -2500,6 +2897,13 @@ void AttachObjectNode(ParseContext&                    context,
     } else {
         context.scene->sceneGraph->AppendChild(node);
     }
+}
+
+void AttachObjectNode(ParseContext&                    context,
+                      const std::shared_ptr<SceneNode>& node,
+                      int32_t                           id,
+                      int32_t                           parentId) {
+    AttachSceneGraphNode(context, node, parentId);
 
     if (id <= 0) {
         return;
@@ -2533,6 +2937,141 @@ std::vector<int> DebugChildLayerIds(const ParseContext& context, int32_t id)
     std::sort(ids.begin(), ids.end());
     ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
     return ids;
+}
+
+std::vector<wallpaper::debug::GeneratedTextParentInfo>
+DebugParentChain(const ParseContext& context, int32_t parentId)
+{
+    std::vector<wallpaper::debug::GeneratedTextParentInfo> chain;
+    std::unordered_set<int32_t> visited;
+    int32_t current = parentId;
+    while (current > 0 && visited.insert(current).second && chain.size() < 32) {
+        chain.push_back({
+            .layerId = current,
+            .layerName = DebugObjectName(context, current),
+        });
+        auto parentIt = context.object_parent_ids.find(current);
+        if (parentIt == context.object_parent_ids.end()) {
+            break;
+        }
+        current = parentIt->second;
+    }
+    return chain;
+}
+
+std::vector<wallpaper::debug::GeneratedTextParentInfo>
+DebugSceneNodeParentChain(const ParseContext& context, SceneNode* parent)
+{
+    std::vector<wallpaper::debug::GeneratedTextParentInfo> chain;
+    std::unordered_set<SceneNode*> visited;
+    SceneNode* current = parent;
+    while (current != nullptr && current->ID() > 0 &&
+           visited.insert(current).second && chain.size() < 32) {
+        chain.push_back({
+            .layerId = current->ID(),
+            .layerName = DebugObjectName(context, current->ID()),
+            .translate = DebugVec3Array(current->Translate()),
+            .scale = DebugVec3Array(current->Scale()),
+        });
+        current = current->Parent();
+    }
+    return chain;
+}
+
+std::string NormalizeGeneratedTextAlign(std::string value);
+
+std::array<float, 4> LocalCardBounds(const WPTextObject& text_obj)
+{
+    const float width = text_obj.size[0];
+    const float height = text_obj.size[1];
+    const float halfHeight = height * 0.5f;
+    const std::string horizontalAlign = NormalizeGeneratedTextAlign(text_obj.horizontalAlign);
+    const std::string verticalAlign = NormalizeGeneratedTextAlign(text_obj.verticalAlign);
+
+    float left = width * -0.5f;
+    float right = width * 0.5f;
+    if (horizontalAlign == "left") {
+        left = 0.0f;
+        right = width;
+    } else if (horizontalAlign == "right") {
+        left = -width;
+        right = 0.0f;
+    }
+
+    float bottom = -halfHeight;
+    float top = halfHeight;
+    if (verticalAlign == "top") {
+        bottom = -height;
+        top = 0.0f;
+    } else if (verticalAlign == "bottom") {
+        bottom = 0.0f;
+        top = height;
+    }
+
+    return {left, bottom, right, top};
+}
+
+std::array<float, 4> WorldBoundsForLocalCard(SceneNode& node,
+                                             const std::array<float, 4>& localBounds)
+{
+    node.UpdateTrans();
+    const auto transform = node.ModelTrans();
+    const std::array<Eigen::Vector4d, 4> corners {{
+        {localBounds[0], localBounds[1], 0.0, 1.0},
+        {localBounds[2], localBounds[1], 0.0, 1.0},
+        {localBounds[2], localBounds[3], 0.0, 1.0},
+        {localBounds[0], localBounds[3], 0.0, 1.0},
+    }};
+
+    float minX = std::numeric_limits<float>::infinity();
+    float minY = std::numeric_limits<float>::infinity();
+    float maxX = -std::numeric_limits<float>::infinity();
+    float maxY = -std::numeric_limits<float>::infinity();
+    for (const auto& corner : corners) {
+        const auto world = transform * corner;
+        minX = std::min(minX, static_cast<float>(world.x()));
+        minY = std::min(minY, static_cast<float>(world.y()));
+        maxX = std::max(maxX, static_cast<float>(world.x()));
+        maxY = std::max(maxY, static_cast<float>(world.y()));
+    }
+    if (!std::isfinite(minX) || !std::isfinite(minY) ||
+        !std::isfinite(maxX) || !std::isfinite(maxY)) {
+        const auto& translate = node.Translate();
+        const auto& scale = node.Scale();
+        LOG_INFO("generated text world bounds invalid: node=%d translate=(%.3f,%.3f,%.3f) scale=(%.3f,%.3f,%.3f) parent=%d",
+                 node.ID(),
+                 translate.x(),
+                 translate.y(),
+                 translate.z(),
+                 scale.x(),
+                 scale.y(),
+                 scale.z(),
+                 node.Parent() ? node.Parent()->ID() : 0);
+    }
+    return {minX, minY, maxX, maxY};
+}
+
+std::pair<std::string, std::string>
+ClassifyGeneratedTextVisibility(const ParseContext& context,
+                                const WPTextObject& text_obj,
+                                const std::array<float, 4>& worldBounds,
+                                bool hasVisibleAlpha)
+{
+    if (text_obj.alpha <= 1.0e-6f || !hasVisibleAlpha) {
+        return {"transparent", "generated text has no visible alpha"};
+    }
+    if (worldBounds[2] <= worldBounds[0] || worldBounds[3] <= worldBounds[1]) {
+        return {"collapsed", "world bounds have zero area"};
+    }
+
+    const float halfWidth = static_cast<float>(context.ortho_w) * 0.5f;
+    const float halfHeight = static_cast<float>(context.ortho_h) * 0.5f;
+    if (worldBounds[2] < -halfWidth || worldBounds[0] > halfWidth ||
+        worldBounds[3] < -halfHeight || worldBounds[1] > halfHeight) {
+        return {"offscreen", "world bounds outside orthographic viewport"};
+    }
+
+    return {"visible-in-frame", "world bounds overlap orthographic viewport"};
 }
 
 bool LoadMaterial(fs::VFS& vfs, const wpscene::WPMaterial& wpmat, Scene* pScene, SceneNode* pNode,
@@ -2757,7 +3296,10 @@ const auto& f1     = texh.spriteAnim.GetCurFrame();
     return true;
 }
 
-void LoadAlignment(SceneNode& node, std::string_view align, Vector2f size) {
+void LoadAlignment(SceneNode& node,
+                   std::string_view align,
+                   Vector2f size,
+                   bool applyHorizontalAlignment = true) {
     Vector3f trans = node.Translate();
     size *= 0.5f;
     size.y() *= 1.0f;
@@ -2768,10 +3310,47 @@ void LoadAlignment(SceneNode& node, std::string_view align, Vector2f size) {
 
     // topleft top center ...
     if (contains("top")) trans.y() -= size.y();
-    if (contains("left")) trans.x() += size.x();
-    if (contains("right")) trans.x() -= size.x();
+    if (applyHorizontalAlignment && contains("left")) trans.x() += size.x();
+    if (applyHorizontalAlignment && contains("right")) trans.x() -= size.x();
     if (contains("bottom")) trans.y() += size.y();
 
+    node.SetTranslate(trans);
+}
+
+float ParentHorizontalSign(ParseContext& context, int32_t parentId)
+{
+    auto parentIt = context.object_nodes.find(parentId);
+    if (parentIt == context.object_nodes.end() || !parentIt->second) {
+        return 1.0f;
+    }
+
+    parentIt->second->UpdateTrans();
+    const auto axis = parentIt->second->ModelTrans() * Eigen::Vector4d {1.0, 0.0, 0.0, 0.0};
+    return axis.x() < 0.0 ? -1.0f : 1.0f;
+}
+
+void AnchorTimelineSolidLayerLeadingEdge(ParseContext& context,
+                                         const wpscene::WPImageObject& imageObject,
+                                         SceneNode& node)
+{
+    if (!imageObject.mediaTimelineSolidLayer ||
+        imageObject.image != "models/util/solidlayer.json") {
+        return;
+    }
+
+    const float scaleX = imageObject.scale[0];
+    if (!std::isfinite(scaleX)) {
+        return;
+    }
+    const float absScaleX = std::abs(scaleX);
+    if (absScaleX >= 1.0f) {
+        return;
+    }
+
+    const float parentSign = ParentHorizontalSign(context, imageObject.parent);
+    const float compensation = (1.0f - absScaleX) * imageObject.size[0] * 0.5f;
+    Vector3f trans = node.Translate();
+    trans.x() -= parentSign * compensation;
     node.SetTranslate(trans);
 }
 
@@ -3099,11 +3678,230 @@ void InitContext(ParseContext& context, fs::VFS& vfs, wpscene::WPScene& sc) {
     }
 }
 
+std::vector<uint8_t> SyntheticMediaThumbnailPlaceholder(const SceneScriptMediaState& mediaState,
+                                                        int width,
+                                                        int height)
+{
+    std::vector<uint8_t> rgba(static_cast<std::size_t>(width) *
+                              static_cast<std::size_t>(height) * 4u);
+    const auto colorAt = [](const std::array<float, 3>& color, int channel) -> uint8_t {
+        return static_cast<uint8_t>(
+            std::clamp(std::lround(color[static_cast<std::size_t>(channel)] * 255.0f),
+                       0l,
+                       255l));
+    };
+
+    const std::array<uint8_t, 3> top {
+        colorAt(mediaState.secondaryColor, 0),
+        colorAt(mediaState.secondaryColor, 1),
+        colorAt(mediaState.secondaryColor, 2),
+    };
+    const std::array<uint8_t, 3> bottom {
+        colorAt(mediaState.tertiaryColor, 0),
+        colorAt(mediaState.tertiaryColor, 1),
+        colorAt(mediaState.tertiaryColor, 2),
+    };
+    for (int y = 0; y < height; ++y) {
+        const float t = height > 1 ? static_cast<float>(y) / static_cast<float>(height - 1) : 0.0f;
+        for (int x = 0; x < width; ++x) {
+            const std::size_t offset =
+                (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+                 static_cast<std::size_t>(x)) * 4u;
+            for (int channel = 0; channel < 3; ++channel) {
+                rgba[offset + static_cast<std::size_t>(channel)] = static_cast<uint8_t>(
+                    std::clamp(std::lround(top[static_cast<std::size_t>(channel)] * (1.0f - t) +
+                                           bottom[static_cast<std::size_t>(channel)] * t),
+                               0l,
+                               255l));
+            }
+            rgba[offset + 3] = mediaState.available ? 255u : 0u;
+        }
+    }
+    return rgba;
+}
+
+float Luma(const std::array<float, 3>& color)
+{
+    return color[0] * 0.2126f + color[1] * 0.7152f + color[2] * 0.0722f;
+}
+
+std::array<float, 3> AverageMediaColors(const std::vector<std::array<float, 4>>& colors,
+                                        std::size_t begin,
+                                        std::size_t end)
+{
+    if (colors.empty() || begin >= end || begin >= colors.size()) {
+        return { 0.0f, 0.0f, 0.0f };
+    }
+    end = std::min(end, colors.size());
+
+    std::array<double, 3> sum { 0.0, 0.0, 0.0 };
+    for (std::size_t i = begin; i < end; ++i) {
+        sum[0] += colors[i][0];
+        sum[1] += colors[i][1];
+        sum[2] += colors[i][2];
+    }
+
+    const double count = static_cast<double>(end - begin);
+    return {
+        static_cast<float>(sum[0] / count),
+        static_cast<float>(sum[1] / count),
+        static_cast<float>(sum[2] / count),
+    };
+}
+
+std::array<float, 3> MixMediaColors(const std::array<float, 3>& lhs,
+                                    const std::array<float, 3>& rhs,
+                                    float t)
+{
+    return {
+        lhs[0] * (1.0f - t) + rhs[0] * t,
+        lhs[1] * (1.0f - t) + rhs[1] * t,
+        lhs[2] * (1.0f - t) + rhs[2] * t,
+    };
+}
+
+bool DeriveSyntheticMediaThumbnailColors(SceneScriptMediaState& mediaState)
+{
+    if (mediaState.hasThumbnailColors || mediaState.albumArtPath.empty()) {
+        return false;
+    }
+
+    QImage source(QString::fromStdString(mediaState.albumArtPath));
+    if (source.isNull()) {
+        LOG_INFO("synthetic media album art colors failed to load: path=%s",
+                 mediaState.albumArtPath.c_str());
+        return false;
+    }
+
+    constexpr int kSampleSize = 64;
+    QImage sampled = source.convertToFormat(QImage::Format_RGBA8888)
+                         .scaled(kSampleSize,
+                                 kSampleSize,
+                                 Qt::KeepAspectRatioByExpanding,
+                                 Qt::SmoothTransformation);
+    const int cropX = std::max(0, (sampled.width() - kSampleSize) / 2);
+    const int cropY = std::max(0, (sampled.height() - kSampleSize) / 2);
+    sampled = sampled.copy(cropX, cropY, kSampleSize, kSampleSize)
+                    .convertToFormat(QImage::Format_RGBA8888);
+
+    std::vector<std::array<float, 4>> colors;
+    colors.reserve(static_cast<std::size_t>(sampled.width()) *
+                   static_cast<std::size_t>(sampled.height()));
+    for (int y = 0; y < sampled.height(); ++y) {
+        for (int x = 0; x < sampled.width(); ++x) {
+            const QColor pixel = sampled.pixelColor(x, y);
+            if (pixel.alphaF() < 0.05f) {
+                continue;
+            }
+            const std::array<float, 3> rgb {
+                static_cast<float>(pixel.redF()),
+                static_cast<float>(pixel.greenF()),
+                static_cast<float>(pixel.blueF()),
+            };
+            colors.push_back({ rgb[0], rgb[1], rgb[2], Luma(rgb) });
+        }
+    }
+    if (colors.empty()) {
+        return false;
+    }
+
+    std::sort(colors.begin(), colors.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs[3] < rhs[3];
+    });
+
+    const std::size_t quartile = std::max<std::size_t>(1u, colors.size() / 4u);
+    const std::size_t mutedBaseEnd =
+        std::min(colors.size(), std::max<std::size_t>(quartile, (colors.size() * 3u) / 4u));
+    const auto highlightColor = AverageMediaColors(colors,
+                                                   colors.size() > quartile
+                                                       ? colors.size() - quartile
+                                                       : 0u,
+                                                   colors.size());
+    mediaState.primaryColor = AverageMediaColors(colors, 0u, mutedBaseEnd);
+    mediaState.secondaryColor = AverageMediaColors(colors, 0u, colors.size());
+    mediaState.tertiaryColor = MixMediaColors(mediaState.secondaryColor, highlightColor, 0.45f);
+    const std::array<float, 3> contrastColor = Luma(mediaState.primaryColor) > 0.45f
+        ? std::array<float, 3> { 0.0f, 0.0f, 0.0f }
+        : std::array<float, 3> { 1.0f, 1.0f, 1.0f };
+    mediaState.textColor = MixMediaColors(mediaState.secondaryColor, contrastColor, 0.55f);
+    mediaState.hasThumbnailColors = true;
+
+    LOG_INFO("synthetic media album art colors derived: primary=(%.3f,%.3f,%.3f) secondary=(%.3f,%.3f,%.3f) tertiary=(%.3f,%.3f,%.3f)",
+             mediaState.primaryColor[0],
+             mediaState.primaryColor[1],
+             mediaState.primaryColor[2],
+             mediaState.secondaryColor[0],
+             mediaState.secondaryColor[1],
+             mediaState.secondaryColor[2],
+             mediaState.tertiaryColor[0],
+             mediaState.tertiaryColor[1],
+             mediaState.tertiaryColor[2]);
+    return true;
+}
+
+void RegisterSyntheticMediaThumbnailTexture(ParseContext& context,
+                                            const SceneScriptMediaState& mediaState)
+{
+    if (!context.scene || !context.scene->imageParser) {
+        return;
+    }
+    auto* texParser = dynamic_cast<WPTexImageParser*>(context.scene->imageParser.get());
+    if (texParser == nullptr) {
+        return;
+    }
+
+    constexpr int kThumbnailSize = 512;
+    QImage thumbnail;
+    if (!mediaState.albumArtPath.empty()) {
+        QImage source(QString::fromStdString(mediaState.albumArtPath));
+        if (!source.isNull()) {
+            QImage fitted = source.convertToFormat(QImage::Format_RGBA8888)
+                                .scaled(kThumbnailSize,
+                                        kThumbnailSize,
+                                        Qt::KeepAspectRatioByExpanding,
+                                        Qt::SmoothTransformation);
+            const int cropX = std::max(0, (fitted.width() - kThumbnailSize) / 2);
+            const int cropY = std::max(0, (fitted.height() - kThumbnailSize) / 2);
+            thumbnail = fitted.copy(cropX, cropY, kThumbnailSize, kThumbnailSize)
+                            .convertToFormat(QImage::Format_RGBA8888);
+        } else {
+            LOG_INFO("synthetic media album art failed to load: path=%s",
+                     mediaState.albumArtPath.c_str());
+        }
+    }
+
+    std::vector<uint8_t> rgba;
+    int width = kThumbnailSize;
+    int height = kThumbnailSize;
+    if (!thumbnail.isNull()) {
+        width = thumbnail.width();
+        height = thumbnail.height();
+        rgba.resize(static_cast<std::size_t>(width) *
+                    static_cast<std::size_t>(height) * 4u);
+        for (int y = 0; y < height; ++y) {
+            const auto* row = thumbnail.constScanLine(y);
+            std::memcpy(rgba.data() + static_cast<std::size_t>(y) *
+                                      static_cast<std::size_t>(width) * 4u,
+                        row,
+                        static_cast<std::size_t>(width) * 4u);
+        }
+    } else {
+        rgba = SyntheticMediaThumbnailPlaceholder(mediaState, width, height);
+    }
+
+    texParser->RegisterGeneratedRgbaImage("$mediaThumbnail", width, height, rgba);
+    texParser->RegisterGeneratedRgbaImage("$mediaPreviousThumbnail", width, height, rgba);
+    LOG_INFO("synthetic media thumbnail texture registered: size=%dx%d source=%s",
+             width,
+             height,
+             thumbnail.isNull() ? "placeholder" : "albumArtPath");
+}
+
 void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
     auto& wpimgobj = img_obj;
     if (! wpimgobj.visible) return;
     // Hide children of invisible container objects
-    if (wpimgobj.parent > 0 && context.hidden_containers.count(wpimgobj.parent)) return;
+    if (HasHiddenParent(context, wpimgobj.parent)) return;
     if (DebugSkipLayerByName(wpimgobj.name)) {
         LOG_INFO("debug skipping image layer: name=%s id=%d image=%s",
                  wpimgobj.name.c_str(),
@@ -3187,6 +3985,7 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         effectInput.noEffectsDebug = std::getenv("YAKKAI_NO_EFFECTS") != nullptr;
         effectInput.isComposelayer = isCompose;
         effectInput.isPuppetLayer = hasPuppet;
+        effectInput.supportedMediaWidgetUtility = wpimgobj.supportedMediaWidgetUtility;
         effectInput.fullscreen = wpimgobj.fullscreen;
         effectInput.visibleEffectCount = count_eff;
         effectInput.colorBlendMode = wpimgobj.colorBlendMode;
@@ -3253,12 +4052,39 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
         if (it != context.script_color_bindings.end() && it->second.has_origin) {
             wpimgobj.origin = it->second.origin;
         }
+        if (it != context.script_color_bindings.end() && it->second.has_scale) {
+            wpimgobj.scale = it->second.scale;
+        }
     }
     auto spImgNode = std::make_shared<SceneNode>(Vector3f(wpimgobj.origin.data()),
                                                  Vector3f(wpimgobj.scale.data()),
                                                  Vector3f(wpimgobj.angles.data()));
-    LoadAlignment(*spImgNode, wpimgobj.alignment, { wpimgobj.size[0], wpimgobj.size[1] });
+    LoadAlignment(*spImgNode,
+                  wpimgobj.alignment,
+                  { wpimgobj.size[0], wpimgobj.size[1] },
+                  !wpimgobj.mediaTimelineSolidLayer);
+    AnchorTimelineSolidLayerLeadingEdge(context, wpimgobj, *spImgNode);
     spImgNode->ID() = wpimgobj.id;
+    std::shared_ptr<SceneNode> childTransformAnchorNode;
+    const auto childIdsIt = context.object_child_ids.find(wpimgobj.id);
+    const bool hasAuthoredChildren =
+        childIdsIt != context.object_child_ids.end() && !childIdsIt->second.empty();
+    if (hasEffect && hasAuthoredChildren) {
+        childTransformAnchorNode = std::make_shared<SceneNode>();
+        childTransformAnchorNode->CopyTrans(*spImgNode);
+        childTransformAnchorNode->ID() = wpimgobj.id;
+        LOG_INFO("effect image child transform anchor enabled: name=%s id=%d children=%zu",
+                 wpimgobj.name.c_str(),
+                 wpimgobj.id,
+                 childIdsIt->second.size());
+    }
+    if (wpimgobj.transformOnly) {
+        LOG_INFO("media widget transform-only node attached: name=%s id=%d",
+                 wpimgobj.name.c_str(),
+                 wpimgobj.id);
+        AttachObjectNode(context, spImgNode, wpimgobj.id, wpimgobj.parent);
+        return;
+    }
 
     SceneMaterial     material;
     WPShaderValueData svData;
@@ -3540,6 +4366,12 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 wpimgobj.color[2],
                 wpimgobj.alpha
             };
+            baseConstSvs["g_Color"] = std::array<float, 3> {
+                wpimgobj.color[0],
+                wpimgobj.color[1],
+                wpimgobj.color[2],
+            };
+            baseConstSvs["g_Alpha"] = wpimgobj.alpha;
         }
         baseConstSvs["g_UserAlpha"]  = wpimgobj.alpha;
         baseConstSvs["g_Brightness"] = wpimgobj.brightness;
@@ -4054,6 +4886,11 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
                 if (wpeffobj.passes.size() > i_mat) {
                     const auto& wppass = wpeffobj.passes.at(i_mat);
                     wpmat.MergePass(wppass);
+                    ApplyScriptMaterialConstantBindings(context,
+                                                        wpimgobj.id,
+                                                        wpeffobj.id,
+                                                        wppass.id,
+                                                        wpmat);
                     // Map ENABLEMASK → MASK (scene JSON uses ENABLEMASK,
                     // shader uses MASK as the preprocessor combo name)
                     if (wpmat.combos.count("ENABLEMASK") && wpmat.combos.at("ENABLEMASK") != 0) {
@@ -4479,7 +5316,12 @@ void ParseImageObj(ParseContext& context, wpscene::WPImageObject& img_obj) {
             wallpaper::debug::refreshEffectCaptureLayerInfo(scene, effectCaptureInfo);
         }
     }
-    AttachObjectNode(context, spImgNode, wpimgobj.id, wpimgobj.parent);
+    if (childTransformAnchorNode) {
+        AttachSceneGraphNode(context, spImgNode, wpimgobj.parent);
+        AttachObjectNode(context, childTransformAnchorNode, wpimgobj.id, wpimgobj.parent);
+    } else {
+        AttachObjectNode(context, spImgNode, wpimgobj.id, wpimgobj.parent);
+    }
     for (const auto& standaloneDisplayNode : standaloneDisplayNodes) {
         AttachObjectNode(context, standaloneDisplayNode, 0, wpimgobj.parent);
     }
@@ -4496,7 +5338,7 @@ struct ParticleChildPtr {
 void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartobj,
                       ParticleChildPtr child_ptr = {}) {
     if (! wppartobj.visible) return;
-    if (wppartobj.parent > 0 && context.hidden_containers.count(wppartobj.parent)) return;
+    if (HasHiddenParent(context, wppartobj.parent)) return;
     struct ChildData {
         ChildData() = default;
         ChildData(const wpscene::ParticleChild& o)
@@ -4701,6 +5543,16 @@ void ParseParticleObj(ParseContext& context, wpscene::WPParticleObject& wppartob
 
 void ParseSolidAnchorObj(ParseContext& context, WPSolidAnchorObject& solid_obj) {
     if (! solid_obj.visible) return;
+    if (HasHiddenParent(context, solid_obj.parent)) return;
+    auto bindingIt = context.script_color_bindings.find(solid_obj.id);
+    if (bindingIt != context.script_color_bindings.end()) {
+        if (bindingIt->second.has_origin) {
+            solid_obj.origin = bindingIt->second.origin;
+        }
+        if (bindingIt->second.has_scale) {
+            solid_obj.scale = bindingIt->second.scale;
+        }
+    }
 
     auto node = std::make_shared<SceneNode>(Vector3f(solid_obj.origin.data()),
                                             Vector3f(solid_obj.scale.data()),
@@ -4720,24 +5572,943 @@ void ParseSolidAnchorObj(ParseContext& context, WPSolidAnchorObject& solid_obj) 
     AttachObjectNode(context, node, solid_obj.id, solid_obj.parent);
 }
 
+std::array<uint8_t, 7> GeneratedTextGlyphRows(char ch)
+{
+    const char c = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+    switch (c) {
+    case 'A': return {0x0e, 0x11, 0x11, 0x1f, 0x11, 0x11, 0x11};
+    case 'B': return {0x1e, 0x11, 0x11, 0x1e, 0x11, 0x11, 0x1e};
+    case 'C': return {0x0e, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0e};
+    case 'D': return {0x1e, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1e};
+    case 'E': return {0x1f, 0x10, 0x10, 0x1e, 0x10, 0x10, 0x1f};
+    case 'F': return {0x1f, 0x10, 0x10, 0x1e, 0x10, 0x10, 0x10};
+    case 'G': return {0x0e, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0f};
+    case 'H': return {0x11, 0x11, 0x11, 0x1f, 0x11, 0x11, 0x11};
+    case 'I': return {0x0e, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0e};
+    case 'J': return {0x07, 0x02, 0x02, 0x02, 0x12, 0x12, 0x0c};
+    case 'K': return {0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11};
+    case 'L': return {0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1f};
+    case 'M': return {0x11, 0x1b, 0x15, 0x15, 0x11, 0x11, 0x11};
+    case 'N': return {0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11};
+    case 'O': return {0x0e, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0e};
+    case 'P': return {0x1e, 0x11, 0x11, 0x1e, 0x10, 0x10, 0x10};
+    case 'Q': return {0x0e, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0d};
+    case 'R': return {0x1e, 0x11, 0x11, 0x1e, 0x14, 0x12, 0x11};
+    case 'S': return {0x0f, 0x10, 0x10, 0x0e, 0x01, 0x01, 0x1e};
+    case 'T': return {0x1f, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04};
+    case 'U': return {0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0e};
+    case 'V': return {0x11, 0x11, 0x11, 0x11, 0x11, 0x0a, 0x04};
+    case 'W': return {0x11, 0x11, 0x11, 0x15, 0x15, 0x15, 0x0a};
+    case 'X': return {0x11, 0x11, 0x0a, 0x04, 0x0a, 0x11, 0x11};
+    case 'Y': return {0x11, 0x11, 0x0a, 0x04, 0x04, 0x04, 0x04};
+    case 'Z': return {0x1f, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1f};
+    case '0': return {0x0e, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0e};
+    case '1': return {0x04, 0x0c, 0x04, 0x04, 0x04, 0x04, 0x0e};
+    case '2': return {0x0e, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1f};
+    case '3': return {0x1e, 0x01, 0x01, 0x0e, 0x01, 0x01, 0x1e};
+    case '4': return {0x02, 0x06, 0x0a, 0x12, 0x1f, 0x02, 0x02};
+    case '5': return {0x1f, 0x10, 0x10, 0x1e, 0x01, 0x01, 0x1e};
+    case '6': return {0x0e, 0x10, 0x10, 0x1e, 0x11, 0x11, 0x0e};
+    case '7': return {0x1f, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08};
+    case '8': return {0x0e, 0x11, 0x11, 0x0e, 0x11, 0x11, 0x0e};
+    case '9': return {0x0e, 0x11, 0x11, 0x0f, 0x01, 0x01, 0x0e};
+    case '.': return {0x00, 0x00, 0x00, 0x00, 0x00, 0x0c, 0x0c};
+    case ',': return {0x00, 0x00, 0x00, 0x00, 0x0c, 0x04, 0x08};
+    case ':': return {0x00, 0x0c, 0x0c, 0x00, 0x0c, 0x0c, 0x00};
+    case ';': return {0x00, 0x0c, 0x0c, 0x00, 0x0c, 0x04, 0x08};
+    case '-': return {0x00, 0x00, 0x00, 0x1f, 0x00, 0x00, 0x00};
+    case '_': return {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1f};
+    case '+': return {0x00, 0x04, 0x04, 0x1f, 0x04, 0x04, 0x00};
+    case '/': return {0x01, 0x01, 0x02, 0x04, 0x08, 0x10, 0x10};
+    case '\\': return {0x10, 0x10, 0x08, 0x04, 0x02, 0x01, 0x01};
+    case '\'': return {0x0c, 0x04, 0x08, 0x00, 0x00, 0x00, 0x00};
+    case '"': return {0x0a, 0x0a, 0x0a, 0x00, 0x00, 0x00, 0x00};
+    case '!': return {0x04, 0x04, 0x04, 0x04, 0x04, 0x00, 0x04};
+    case '?': return {0x0e, 0x11, 0x01, 0x02, 0x04, 0x00, 0x04};
+    case '&': return {0x0c, 0x12, 0x14, 0x08, 0x15, 0x12, 0x0d};
+    case '(': return {0x02, 0x04, 0x08, 0x08, 0x08, 0x04, 0x02};
+    case ')': return {0x08, 0x04, 0x02, 0x02, 0x02, 0x04, 0x08};
+    case '[': return {0x0e, 0x08, 0x08, 0x08, 0x08, 0x08, 0x0e};
+    case ']': return {0x0e, 0x02, 0x02, 0x02, 0x02, 0x02, 0x0e};
+    case ' ': return {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    default: return {0x1f, 0x11, 0x15, 0x15, 0x15, 0x11, 0x1f};
+    }
+}
+
+std::vector<std::string> SplitGeneratedTextLines(const std::string& text)
+{
+    std::vector<std::string> lines(1);
+    for (char ch : text) {
+        if (ch == '\r') {
+            continue;
+        }
+        if (ch == '\n') {
+            lines.emplace_back();
+        } else {
+            lines.back().push_back(ch);
+        }
+    }
+    return lines;
+}
+
+std::vector<std::string> LimitedGeneratedTextLines(const WPTextObject& text_obj)
+{
+    auto lines = SplitGeneratedTextLines(text_obj.text);
+    if (text_obj.maxRows > 0 &&
+        lines.size() > static_cast<std::size_t>(text_obj.maxRows)) {
+        lines.resize(static_cast<std::size_t>(text_obj.maxRows));
+    }
+    return lines;
+}
+
+std::string NormalizeGeneratedTextAlign(std::string value)
+{
+    for (char& ch : value) {
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    }
+    return value;
+}
+
+std::string FlipGeneratedTextHorizontalAlign(std::string align)
+{
+    align = NormalizeGeneratedTextAlign(std::move(align));
+    if (align == "left") {
+        return "right";
+    }
+    if (align == "right") {
+        return "left";
+    }
+    return align;
+}
+
+float EffectiveParentScaleX(const ParseContext& context, int32_t parentId)
+{
+    auto it = context.object_nodes.find(parentId);
+    if (it == context.object_nodes.end() || !it->second) {
+        return 1.0f;
+    }
+
+    float scale = 1.0f;
+    const SceneNode* node = it->second.get();
+    std::unordered_set<const SceneNode*> visited;
+    while (node != nullptr && visited.insert(node).second) {
+        scale *= node->Scale().x();
+        node = node->Parent();
+    }
+    return scale;
+}
+
+WPTextObject TextObjectForRasterization(const ParseContext& context,
+                                        const WPTextObject& text_obj)
+{
+    WPTextObject rasterText = text_obj;
+    const float parentScaleX = EffectiveParentScaleX(context, text_obj.parent);
+    const float effectiveScaleX = parentScaleX * text_obj.scale[0];
+    if (effectiveScaleX < 0.0f) {
+        rasterText.horizontalAlign =
+            FlipGeneratedTextHorizontalAlign(text_obj.horizontalAlign);
+    }
+    return rasterText;
+}
+
+int GeneratedTextLayoutWidth(const WPTextObject& text_obj, int textureWidth)
+{
+    int layoutWidth = textureWidth;
+    if (text_obj.limitWidth && text_obj.maxWidth > 0.0f) {
+        layoutWidth = std::clamp(static_cast<int>(std::ceil(text_obj.maxWidth)),
+                                 1,
+                                 textureWidth);
+    }
+    return std::max(1, layoutWidth);
+}
+
+int GeneratedTextRasterWidth(const WPTextObject& text_obj)
+{
+    int width = std::clamp(static_cast<int>(std::ceil(text_obj.size[0])), 1, 8192);
+    if (text_obj.limitWidth && text_obj.maxWidth > static_cast<float>(width)) {
+        width = std::clamp(static_cast<int>(std::ceil(text_obj.maxWidth)), 1, 8192);
+    }
+    return width;
+}
+
+int GeneratedTextRasterHeight(const WPTextObject& text_obj)
+{
+    return std::clamp(static_cast<int>(std::ceil(text_obj.size[1])), 1, 2048);
+}
+
+int GeneratedTextEffectivePixelSize(const ParseContext& context, const WPTextObject& text_obj);
+
+int GeneratedTextRasterPadding(const ParseContext& context, const WPTextObject& text_obj)
+{
+    const int effectivePixelSize = GeneratedTextEffectivePixelSize(context, text_obj);
+    if (effectivePixelSize <= 0) {
+        return 4;
+    }
+    return std::clamp(static_cast<int>(std::ceil(static_cast<float>(effectivePixelSize) * 0.12f)),
+                      4,
+                      32);
+}
+
+QRectF GeneratedTextLayoutRect(const WPTextObject& text_obj, int width, int height)
+{
+    const int layoutWidth = GeneratedTextLayoutWidth(text_obj, width);
+    const std::string horizontalAlign = NormalizeGeneratedTextAlign(text_obj.horizontalAlign);
+    int x = 0;
+    if (layoutWidth < width) {
+        if (horizontalAlign == "right") {
+            x = width - layoutWidth;
+        } else if (horizontalAlign == "center" || horizontalAlign == "centre") {
+            x = (width - layoutWidth) / 2;
+        }
+    }
+    return QRectF(static_cast<qreal>(x),
+                  0.0,
+                  static_cast<qreal>(layoutWidth),
+                  static_cast<qreal>(height));
+}
+
+struct GeneratedTextTextureRegistration {
+    std::string textureName;
+    std::array<float, 2> textureSize { 0.0f, 0.0f };
+    std::array<float, 2> layoutSize { 0.0f, 0.0f };
+    std::array<float, 4> alphaBounds { 0.0f, 0.0f, 0.0f, 0.0f };
+    std::string rasterizer;
+    bool fontLoaded { false };
+    std::string fontFamily;
+    std::string fontLoadStatus;
+    bool hasVisibleAlpha { false };
+    int padding { 0 };
+};
+
+struct GeneratedTextFontLoadResult {
+    std::optional<QString> family;
+    std::string status;
+};
+
+struct GeneratedTextRasterDiagnostic {
+    std::string rasterizer;
+    bool fontLoaded { false };
+    std::string fontFamily;
+    std::string fontLoadStatus;
+};
+
+uint8_t ByteFromUnit(float value)
+{
+    return static_cast<uint8_t>(std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f);
+}
+
+int GeneratedTextEffectivePixelSize(const ParseContext& context, const WPTextObject& text_obj)
+{
+    if (text_obj.pointSize <= 0.0f) {
+        return 0;
+    }
+
+    const float sceneHeight = context.ortho_h > 0 ? static_cast<float>(context.ortho_h) : 720.0f;
+    const float canvasScale = sceneHeight / 720.0f;
+    constexpr float kWePointToPixelScale = 100.0f / 72.0f;
+    return std::max(
+        1,
+        static_cast<int>(std::round(text_obj.pointSize * kWePointToPixelScale * canvasScale)));
+}
+
+Qt::Alignment GeneratedTextQtAlignment(const WPTextObject& text_obj)
+{
+    const std::string horizontalAlign = NormalizeGeneratedTextAlign(text_obj.horizontalAlign);
+    const std::string verticalAlign = NormalizeGeneratedTextAlign(text_obj.verticalAlign);
+
+    Qt::Alignment alignment = {};
+    if (horizontalAlign == "right") {
+        alignment |= Qt::AlignRight;
+    } else if (horizontalAlign == "center" || horizontalAlign == "centre") {
+        alignment |= Qt::AlignHCenter;
+    } else {
+        alignment |= Qt::AlignLeft;
+    }
+
+    // WE text cards are authored in scene-space coordinates while Qt
+    // rasterizes into top-left image coordinates. The card mesh maps image top
+    // back to scene top, so vertical text placement needs the opposite Qt edge.
+    if (verticalAlign == "top") {
+        alignment |= Qt::AlignBottom;
+    } else if (verticalAlign == "bottom") {
+        alignment |= Qt::AlignTop;
+    } else {
+        alignment |= Qt::AlignVCenter;
+    }
+    return alignment;
+}
+
+GeneratedTextFontLoadResult LoadGeneratedTextFontFamily(ParseContext& context,
+                                                        const WPTextObject& text_obj)
+{
+    if (text_obj.font.empty()) {
+        return {std::nullopt, "no-font-requested"};
+    }
+    if (!context.vfs) {
+        return {std::nullopt, "no-vfs"};
+    }
+
+    const std::string fontPath = "/assets/" + text_obj.font;
+    if (!context.vfs->Contains(fontPath)) {
+        return {std::nullopt, "missing-font-file"};
+    }
+
+    const std::string fontBytes = fs::GetFileContent(*context.vfs, fontPath);
+    if (fontBytes.empty()) {
+        return {std::nullopt, "empty-font-file"};
+    }
+
+    const QByteArray fontData(fontBytes.data(), static_cast<int>(fontBytes.size()));
+    const int fontId = QFontDatabase::addApplicationFontFromData(fontData);
+    if (fontId < 0) {
+        return {std::nullopt, "invalid-font-data"};
+    }
+
+    const QStringList families = QFontDatabase::applicationFontFamilies(fontId);
+    if (families.empty()) {
+        return {std::nullopt, "no-font-family"};
+    }
+    std::vector<std::string> familyNames;
+    familyNames.reserve(static_cast<std::size_t>(families.size()));
+    for (const auto& family : families) {
+        familyNames.push_back(family.toStdString());
+    }
+    const std::string chosenFamily =
+        wallpaper::ChooseGeneratedTextFontFamily(text_obj.font, familyNames);
+    if (chosenFamily.empty()) {
+        return {std::nullopt, "no-font-family"};
+    }
+    return {QString::fromStdString(chosenFamily), "loaded"};
+}
+
+bool TryRenderGeneratedTextWithQt(ParseContext& context,
+                                  const WPTextObject& text_obj,
+                                  int width,
+                                  int height,
+                                  std::vector<uint8_t>& rgba,
+                                  GeneratedTextRasterDiagnostic* diagnostic = nullptr,
+                                  int padding = 0)
+{
+    if (QGuiApplication::instance() == nullptr) {
+        if (diagnostic) {
+            diagnostic->rasterizer = "none";
+            diagnostic->fontLoadStatus = "qt-unavailable";
+        }
+        return false;
+    }
+
+    QImage image(width, height, QImage::Format_RGBA8888);
+    image.fill(Qt::transparent);
+
+    QFont font;
+    const auto fontLoad = LoadGeneratedTextFontFamily(context, text_obj);
+    if (fontLoad.family) {
+        font.setFamily(*fontLoad.family);
+    }
+    if (diagnostic) {
+        diagnostic->fontLoaded = fontLoad.family.has_value();
+        diagnostic->fontFamily = fontLoad.family ? fontLoad.family->toStdString() : "";
+        diagnostic->fontLoadStatus = fontLoad.status;
+    }
+    if (text_obj.pointSize > 0.0f) {
+        font.setPixelSize(GeneratedTextEffectivePixelSize(context, text_obj));
+    }
+
+    QPainter painter(&image);
+    if (!painter.isActive()) {
+        if (diagnostic) {
+            diagnostic->rasterizer = "none";
+            if (diagnostic->fontLoadStatus.empty()) {
+                diagnostic->fontLoadStatus = "painter-inactive";
+            }
+        }
+        return false;
+    }
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::TextAntialiasing, true);
+    painter.setFont(font);
+    painter.setPen(QColor(ByteFromUnit(text_obj.color[0]),
+                          ByteFromUnit(text_obj.color[1]),
+                          ByteFromUnit(text_obj.color[2]),
+                          ByteFromUnit(text_obj.alpha)));
+    const int contentWidth = std::max(1, width - padding * 2);
+    const int contentHeight = std::max(1, height - padding * 2);
+    QRectF layoutRect = GeneratedTextLayoutRect(text_obj, contentWidth, contentHeight);
+    if (padding > 0) {
+        layoutRect.translate(static_cast<qreal>(padding), static_cast<qreal>(padding));
+    }
+    painter.setClipRect(layoutRect);
+    painter.drawText(layoutRect,
+                     static_cast<int>(GeneratedTextQtAlignment(text_obj)),
+                     QString::fromStdString(
+                         [&text_obj]() {
+                             const auto lines = LimitedGeneratedTextLines(text_obj);
+                             std::string out;
+                             for (std::size_t i = 0; i < lines.size(); ++i) {
+                                 if (i > 0) {
+                                     out.push_back('\n');
+                                 }
+                                 out += lines[i];
+                             }
+                             return out;
+                         }()));
+    painter.end();
+
+    rgba.assign(static_cast<std::size_t>(width) *
+                    static_cast<std::size_t>(height) * 4u,
+                0u);
+    for (int y = 0; y < height; ++y) {
+        const auto* src = image.constScanLine(y);
+        for (int x = 0; x < width; ++x) {
+            const std::size_t dstOffset =
+                (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+                 static_cast<std::size_t>(x)) * 4u;
+            const int srcOffset = x * 4;
+            rgba[dstOffset + 0] = src[srcOffset + 0];
+            rgba[dstOffset + 1] = src[srcOffset + 1];
+            rgba[dstOffset + 2] = src[srcOffset + 2];
+            rgba[dstOffset + 3] = src[srcOffset + 3];
+        }
+    }
+    if (diagnostic) {
+        diagnostic->rasterizer = "qt";
+    }
+    return true;
+}
+
+void RenderGeneratedTextWithBitmapFallback(const ParseContext& context,
+                                           const WPTextObject& text_obj,
+                                           int width,
+                                           int height,
+                                           std::vector<uint8_t>& rgba,
+                                           int padding = 0)
+{
+    rgba.assign(static_cast<std::size_t>(width) *
+                    static_cast<std::size_t>(height) * 4u,
+                0u);
+
+    const auto lines = LimitedGeneratedTextLines(text_obj);
+    std::size_t maxLineLength = 1;
+    for (const auto& line : lines) {
+        maxLineLength = std::max(maxLineLength, line.size());
+    }
+    const int contentWidth = std::max(1, width - padding * 2);
+    const int contentHeight = std::max(1, height - padding * 2);
+    QRectF layoutRect = GeneratedTextLayoutRect(text_obj, contentWidth, contentHeight);
+    if (padding > 0) {
+        layoutRect.translate(static_cast<qreal>(padding), static_cast<qreal>(padding));
+    }
+    const int layoutX = std::clamp(static_cast<int>(std::round(layoutRect.x())), 0, width - 1);
+    const int layoutWidth = std::clamp(static_cast<int>(std::round(layoutRect.width())),
+                                       1,
+                                       width - layoutX);
+    const int scaleByWidth = layoutWidth / static_cast<int>(maxLineLength * 6);
+    const int scaleByHeight = height / static_cast<int>(std::max<std::size_t>(1, lines.size()) * 8);
+    const int fitScale = std::max(1, std::min(scaleByWidth <= 0 ? 1 : scaleByWidth,
+                                             scaleByHeight <= 0 ? 1 : scaleByHeight));
+    int scale = fitScale;
+    if (text_obj.pointSize > 0.0f) {
+        const int pointScale = std::max(
+            1,
+            static_cast<int>(
+                std::round(static_cast<float>(
+                               GeneratedTextEffectivePixelSize(context, text_obj)) /
+                           7.0f)));
+        scale = std::max(1, std::min(pointScale, fitScale));
+    }
+    const int lineHeight = 8 * scale;
+    const int totalTextHeight = static_cast<int>(lines.size()) * lineHeight;
+    const std::string verticalAlign = NormalizeGeneratedTextAlign(text_obj.verticalAlign);
+    int startY = std::max(0, (height - totalTextHeight) / 2);
+    if (verticalAlign == "top") {
+        startY = std::max(0, height - totalTextHeight);
+    } else if (verticalAlign == "bottom") {
+        startY = 0;
+    }
+
+    const std::string horizontalAlign = NormalizeGeneratedTextAlign(text_obj.horizontalAlign);
+    const auto textAdvanceWidth = [scale](std::size_t length) -> int {
+        if (length == 0) {
+            return 0;
+        }
+        return static_cast<int>((length * 6 - 1) * static_cast<std::size_t>(scale));
+    };
+
+    const uint8_t red = ByteFromUnit(text_obj.color[0]);
+    const uint8_t green = ByteFromUnit(text_obj.color[1]);
+    const uint8_t blue = ByteFromUnit(text_obj.color[2]);
+    const uint8_t alpha = ByteFromUnit(text_obj.alpha);
+
+    for (std::size_t lineIndex = 0; lineIndex < lines.size(); ++lineIndex) {
+        const std::string& line = lines[lineIndex];
+        const int lineWidth = textAdvanceWidth(line.size());
+        int penX = layoutX;
+        if (horizontalAlign == "right") {
+            penX = std::max(layoutX, layoutX + layoutWidth - lineWidth);
+        } else if (horizontalAlign == "center" || horizontalAlign == "centre") {
+            penX = std::max(layoutX, layoutX + (layoutWidth - lineWidth) / 2);
+        }
+        const int penY = startY + static_cast<int>(lineIndex) * lineHeight;
+        for (char ch : line) {
+            const auto rows = GeneratedTextGlyphRows(ch);
+            for (int row = 0; row < 7; ++row) {
+                for (int col = 0; col < 5; ++col) {
+                    if ((rows[row] & (1u << (4 - col))) == 0) {
+                        continue;
+                    }
+                    for (int sy = 0; sy < scale; ++sy) {
+                        const int y = penY + row * scale + sy;
+                        if (y < 0 || y >= height) {
+                            continue;
+                        }
+                        for (int sx = 0; sx < scale; ++sx) {
+                            const int x = penX + col * scale + sx;
+                            if (x < layoutX || x >= layoutX + layoutWidth || x >= width) {
+                                continue;
+                            }
+                            const std::size_t offset =
+                                (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+                                 static_cast<std::size_t>(x)) * 4u;
+                            rgba[offset + 0] = red;
+                            rgba[offset + 1] = green;
+                            rgba[offset + 2] = blue;
+                            rgba[offset + 3] = alpha;
+                        }
+                    }
+                }
+            }
+            penX += 6 * scale;
+            if (penX >= layoutX + layoutWidth) {
+                break;
+            }
+        }
+    }
+}
+
+float GeneratedTextMaterialScalar(const wpscene::WPMaterial& material,
+                                  std::string_view name,
+                                  float fallback)
+{
+    auto it = material.constantshadervalues.find(std::string(name));
+    if (it == material.constantshadervalues.end() || it->second.empty()) {
+        return fallback;
+    }
+    return it->second.front();
+}
+
+std::array<float, 3> GeneratedTextMaterialColor(const wpscene::WPMaterial& material,
+                                                std::string_view name,
+                                                std::array<float, 3> fallback)
+{
+    auto it = material.constantshadervalues.find(std::string(name));
+    if (it == material.constantshadervalues.end() || it->second.size() < 3) {
+        return fallback;
+    }
+    return {it->second[0], it->second[1], it->second[2]};
+}
+
+wpscene::WPMaterial GeneratedTextMergedEffectMaterial(const wpscene::WPImageEffect& effect,
+                                                      std::size_t materialIndex)
+{
+    wpscene::WPMaterial material = effect.materials.at(materialIndex);
+    if (effect.passes.size() > materialIndex) {
+        material.MergePass(effect.passes.at(materialIndex));
+    }
+    return material;
+}
+
+void ApplyGeneratedTextTint(const wpscene::WPMaterial& material,
+                            std::vector<uint8_t>& rgba)
+{
+    const auto tintColor = GeneratedTextMaterialColor(material, "color", {0.0f, 0.0f, 0.0f});
+    const float tintAmount = std::clamp(GeneratedTextMaterialScalar(material, "alpha", 1.0f),
+                                        0.0f,
+                                        1.0f);
+    const uint8_t tintRed = ByteFromUnit(tintColor[0]);
+    const uint8_t tintGreen = ByteFromUnit(tintColor[1]);
+    const uint8_t tintBlue = ByteFromUnit(tintColor[2]);
+    for (std::size_t offset = 0; offset + 3 < rgba.size(); offset += 4) {
+        if (rgba[offset + 3] == 0) {
+            continue;
+        }
+        rgba[offset + 0] = static_cast<uint8_t>(
+            std::lround(static_cast<float>(rgba[offset + 0]) * (1.0f - tintAmount) +
+                        static_cast<float>(tintRed) * tintAmount));
+        rgba[offset + 1] = static_cast<uint8_t>(
+            std::lround(static_cast<float>(rgba[offset + 1]) * (1.0f - tintAmount) +
+                        static_cast<float>(tintGreen) * tintAmount));
+        rgba[offset + 2] = static_cast<uint8_t>(
+            std::lround(static_cast<float>(rgba[offset + 2]) * (1.0f - tintAmount) +
+                        static_cast<float>(tintBlue) * tintAmount));
+    }
+}
+
+std::array<uint8_t, 3> AverageGeneratedTextVisibleColor(const std::vector<uint8_t>& rgba)
+{
+    double red = 0.0;
+    double green = 0.0;
+    double blue = 0.0;
+    double weight = 0.0;
+    for (std::size_t offset = 0; offset + 3 < rgba.size(); offset += 4) {
+        const double alpha = static_cast<double>(rgba[offset + 3]);
+        if (alpha <= 0.0) {
+            continue;
+        }
+        red += static_cast<double>(rgba[offset + 0]) * alpha;
+        green += static_cast<double>(rgba[offset + 1]) * alpha;
+        blue += static_cast<double>(rgba[offset + 2]) * alpha;
+        weight += alpha;
+    }
+    if (weight <= 0.0) {
+        return {0, 0, 0};
+    }
+    return {
+        static_cast<uint8_t>(std::clamp(std::lround(red / weight), 0l, 255l)),
+        static_cast<uint8_t>(std::clamp(std::lround(green / weight), 0l, 255l)),
+        static_cast<uint8_t>(std::clamp(std::lround(blue / weight), 0l, 255l)),
+    };
+}
+
+void ApplyGeneratedTextAlphaBlur(int width,
+                                 int height,
+                                 int radius,
+                                 std::vector<uint8_t>& rgba)
+{
+    if (width <= 0 || height <= 0 || radius <= 0 || rgba.empty()) {
+        return;
+    }
+    radius = std::clamp(radius, 1, 24);
+    std::vector<float> alpha(static_cast<std::size_t>(width) *
+                             static_cast<std::size_t>(height));
+    std::vector<float> temp(alpha.size());
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const std::size_t index =
+                static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+                static_cast<std::size_t>(x);
+            alpha[index] = static_cast<float>(rgba[index * 4u + 3u]);
+        }
+    }
+
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            float sum = 0.0f;
+            int count = 0;
+            for (int dx = -radius; dx <= radius; ++dx) {
+                const int sampleX = std::clamp(x + dx, 0, width - 1);
+                sum += alpha[static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+                             static_cast<std::size_t>(sampleX)];
+                count++;
+            }
+            temp[static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+                 static_cast<std::size_t>(x)] = sum / static_cast<float>(count);
+        }
+    }
+
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            float sum = 0.0f;
+            int count = 0;
+            for (int dy = -radius; dy <= radius; ++dy) {
+                const int sampleY = std::clamp(y + dy, 0, height - 1);
+                sum += temp[static_cast<std::size_t>(sampleY) * static_cast<std::size_t>(width) +
+                            static_cast<std::size_t>(x)];
+                count++;
+            }
+            alpha[static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+                  static_cast<std::size_t>(x)] = sum / static_cast<float>(count);
+        }
+    }
+
+    const auto color = AverageGeneratedTextVisibleColor(rgba);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const std::size_t index =
+                static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+                static_cast<std::size_t>(x);
+            const uint8_t blurredAlpha = static_cast<uint8_t>(
+                std::clamp(std::lround(alpha[index]), 0l, 255l));
+            const std::size_t offset = index * 4u;
+            if (blurredAlpha > 0) {
+                rgba[offset + 0] = color[0];
+                rgba[offset + 1] = color[1];
+                rgba[offset + 2] = color[2];
+            }
+            rgba[offset + 3] = blurredAlpha;
+        }
+    }
+}
+
+void ApplyGeneratedTextCpuEffects(const WPTextObject& text_obj,
+                                  int width,
+                                  int height,
+                                  std::vector<uint8_t>& rgba)
+{
+    for (const auto& effect : text_obj.effects) {
+        if (!effect.visible) {
+            continue;
+        }
+        for (std::size_t i = 0; i < effect.materials.size(); ++i) {
+            const auto material = GeneratedTextMergedEffectMaterial(effect, i);
+            if (material.shader.find("effects/tint") != std::string::npos) {
+                ApplyGeneratedTextTint(material, rgba);
+            } else if (material.shader.find("effects/blur_precise_gaussian") != std::string::npos ||
+                       material.shader.find("effects/blur") != std::string::npos) {
+                const float scale = std::max(GeneratedTextMaterialScalar(material, "scale", 2.0f),
+                                             1.0f);
+                const int radius = std::clamp(static_cast<int>(std::ceil(scale * 1.5f)), 1, 24);
+                ApplyGeneratedTextAlphaBlur(width, height, radius, rgba);
+            }
+        }
+    }
+}
+
+std::optional<GeneratedTextTextureRegistration>
+RegisterGeneratedTextTexture(ParseContext& context,
+                             const WPTextObject& text_obj)
+{
+    if (! context.scene || ! context.scene->imageParser || text_obj.text.empty()) {
+        return std::nullopt;
+    }
+    auto* texParser = dynamic_cast<WPTexImageParser*>(context.scene->imageParser.get());
+    if (texParser == nullptr) {
+        return std::nullopt;
+    }
+
+    const int layoutWidth = GeneratedTextRasterWidth(text_obj);
+    const int layoutHeight = GeneratedTextRasterHeight(text_obj);
+    const int padding = GeneratedTextRasterPadding(context, text_obj);
+    int width = std::clamp(layoutWidth + padding * 2, 1, 8192);
+    int height = std::clamp(layoutHeight + padding * 2, 1, 2048);
+    std::vector<uint8_t> rgba;
+    GeneratedTextRasterDiagnostic rasterDiagnostic;
+    if (!TryRenderGeneratedTextWithQt(context,
+                                      text_obj,
+                                      width,
+                                      height,
+                                      rgba,
+                                      &rasterDiagnostic,
+                                      padding)) {
+        RenderGeneratedTextWithBitmapFallback(context, text_obj, width, height, rgba, padding);
+        rasterDiagnostic.rasterizer = "bitmap-fallback";
+        if (rasterDiagnostic.fontLoadStatus.empty()) {
+            rasterDiagnostic.fontLoadStatus = "qt-render-failed";
+        }
+    }
+    ApplyGeneratedTextCpuEffects(text_obj, width, height, rgba);
+
+    int alphaMinX = width;
+    int alphaMinY = height;
+    int alphaMaxX = -1;
+    int alphaMaxY = -1;
+    const auto scanAlphaBounds = [&]() {
+        alphaMinX = width;
+        alphaMinY = height;
+        alphaMaxX = -1;
+        alphaMaxY = -1;
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                const std::size_t offset =
+                    (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+                     static_cast<std::size_t>(x)) * 4u;
+                if (rgba[offset + 3] == 0) {
+                    continue;
+                }
+                alphaMinX = std::min(alphaMinX, x);
+                alphaMinY = std::min(alphaMinY, y);
+                alphaMaxX = std::max(alphaMaxX, x);
+                alphaMaxY = std::max(alphaMaxY, y);
+            }
+        }
+    };
+    scanAlphaBounds();
+
+    char nameBuffer[96] {};
+    std::snprintf(nameBuffer,
+                  sizeof(nameBuffer),
+                  "__yakkai_generated_text/%d_%zx",
+                  text_obj.id,
+                  std::hash<std::string>{}(text_obj.text));
+    const std::string textureName = nameBuffer;
+    texParser->RegisterGeneratedRgbaImage(textureName, width, height, rgba);
+    GeneratedTextTextureRegistration registration;
+    registration.textureName = textureName;
+    registration.textureSize = {
+        static_cast<float>(width),
+        static_cast<float>(height),
+    };
+    registration.layoutSize = {
+        static_cast<float>(layoutWidth),
+        static_cast<float>(layoutHeight),
+    };
+    registration.padding = padding;
+    registration.rasterizer = rasterDiagnostic.rasterizer;
+    registration.fontLoaded = rasterDiagnostic.fontLoaded;
+    registration.fontFamily = rasterDiagnostic.fontFamily;
+    registration.fontLoadStatus = rasterDiagnostic.fontLoadStatus;
+    if (alphaMaxX >= alphaMinX && alphaMaxY >= alphaMinY) {
+        registration.hasVisibleAlpha = true;
+        registration.alphaBounds = {
+            static_cast<float>(alphaMinX),
+            static_cast<float>(alphaMinY),
+            static_cast<float>(alphaMaxX),
+            static_cast<float>(alphaMaxY),
+        };
+    }
+    return registration;
+}
+
+std::array<float, 4>
+GeneratedTextLocalBoundsWithPadding(const WPTextObject& text_obj,
+                                    const GeneratedTextTextureRegistration& registration)
+{
+    WPTextObject boundsTextObject = text_obj;
+    boundsTextObject.size[0] = std::max(boundsTextObject.size[0], registration.layoutSize[0]);
+    boundsTextObject.size[1] = std::max(boundsTextObject.size[1], registration.layoutSize[1]);
+    auto bounds = LocalCardBounds(boundsTextObject);
+    const float padding = static_cast<float>(registration.padding);
+    bounds[0] -= padding;
+    bounds[1] -= padding;
+    bounds[2] += padding;
+    bounds[3] += padding;
+    return bounds;
+}
+
 void ParseTextObj(ParseContext& context, WPTextObject& text_obj) {
     if (! text_obj.visible) return;
-    if (text_obj.parent > 0 && context.hidden_containers.count(text_obj.parent)) return;
+    if (HasHiddenParent(context, text_obj.parent)) return;
 
     auto it = context.script_text_bindings.find(text_obj.id);
-    if (it != context.script_text_bindings.end() && it->second.has_text) {
+    const bool hasScriptResolvedText = it != context.script_text_bindings.end() &&
+        it->second.has_text;
+    if (hasScriptResolvedText) {
         text_obj.text = it->second.text;
     }
     auto originIt = context.script_color_bindings.find(text_obj.id);
     if (originIt != context.script_color_bindings.end() && originIt->second.has_origin) {
         text_obj.origin = originIt->second.origin;
     }
-
+    if (originIt != context.script_color_bindings.end() && originIt->second.has_scale) {
+        text_obj.scale = originIt->second.scale;
+    }
+    if (originIt != context.script_color_bindings.end() && originIt->second.has_color) {
+        text_obj.color = originIt->second.color;
+    }
+    if (originIt != context.script_color_bindings.end() && originIt->second.has_alpha) {
+        text_obj.alpha = originIt->second.alpha;
+    }
+    if (originIt != context.script_color_bindings.end() &&
+        originIt->second.has_horizontal_align) {
+        text_obj.horizontalAlign = originIt->second.horizontalAlign;
+    }
+    if (originIt != context.script_color_bindings.end() &&
+        originIt->second.has_vertical_align) {
+        text_obj.verticalAlign = originIt->second.verticalAlign;
+    }
+    if (originIt != context.script_color_bindings.end() &&
+        originIt->second.has_max_width) {
+        text_obj.maxWidth = originIt->second.maxWidth;
+    }
     auto node = std::make_shared<SceneNode>(Vector3f(text_obj.origin.data()),
                                             Vector3f(text_obj.scale.data()),
                                             Vector3f(text_obj.angles.data()));
     node->ID() = text_obj.id;
+    const WPTextObject rasterTextObject = TextObjectForRasterization(context, text_obj);
+    const auto textureRegistration =
+        RegisterGeneratedTextTexture(context, rasterTextObject);
+    if (textureRegistration) {
+        wpscene::WPMaterial wpmat;
+        wpmat.shader = "genericimage4";
+        wpmat.blending = "translucent";
+        wpmat.cullmode = "nocull";
+        wpmat.depthtest = "disabled";
+        wpmat.depthwrite = "disabled";
+        wpmat.textures = {textureRegistration->textureName};
+
+        SceneMaterial material;
+        WPShaderValueData svData;
+        WPShaderInfo shaderInfo;
+        shaderInfo.baseConstSvs = context.global_base_uniforms;
+        shaderInfo.baseConstSvs["g_Color4"] =
+            std::array<float, 4> {1.0f, 1.0f, 1.0f, 1.0f};
+        shaderInfo.baseConstSvs["g_UserAlpha"] = 1.0f;
+
+        const bool canLoadGenericImageMaterial = context.vfs &&
+            context.vfs->Contains("/assets/shaders/genericimage4.vert") &&
+            context.vfs->Contains("/assets/shaders/genericimage4.frag");
+        const bool materialLoaded = context.scene && context.vfs && canLoadGenericImageMaterial &&
+            LoadMaterial(*context.vfs,
+                         wpmat,
+                         context.scene.get(),
+                         node.get(),
+                         &material,
+                         &svData,
+                         &shaderInfo);
+        if (materialLoaded) {
+            LoadConstvalue(material, wpmat, shaderInfo);
+        } else {
+            material.textures = {textureRegistration->textureName};
+            material.defines = {"g_Texture0"};
+            material.blenmode = BlendMode::Translucent;
+        }
+
+        auto mesh = std::make_shared<SceneMesh>();
+        GenCardMeshFromLocalBounds(*mesh,
+                                   GeneratedTextLocalBoundsWithPadding(
+                                       text_obj,
+                                       *textureRegistration));
+        mesh->AddMaterial(std::move(material));
+        node->AddMesh(mesh);
+        context.shader_updater->SetNodeData(node.get(), svData);
+        LOG_INFO("generated text texture layer: id=%d name=%s texture=%s textureSize=%dx%d authoredSize=%dx%d",
+                 text_obj.id,
+                 text_obj.name.c_str(),
+                 textureRegistration->textureName.c_str(),
+                 static_cast<int>(textureRegistration->textureSize[0]),
+                 static_cast<int>(textureRegistration->textureSize[1]),
+                 static_cast<int>(text_obj.size[0]),
+                 static_cast<int>(text_obj.size[1]));
+    }
     AttachObjectNode(context, node, text_obj.id, text_obj.parent);
+
+    if (context.scene && context.scene->debugEffectCaptures.enabled() && textureRegistration) {
+        const auto localBounds =
+            GeneratedTextLocalBoundsWithPadding(text_obj, *textureRegistration);
+        const auto worldBounds = WorldBoundsForLocalCard(*node, localBounds);
+        const auto [visibility, reason] =
+            ClassifyGeneratedTextVisibility(context,
+                                            text_obj,
+                                            worldBounds,
+                                            textureRegistration->hasVisibleAlpha);
+        wallpaper::debug::GeneratedTextDiagnostic info;
+        info.layerId = text_obj.id;
+        info.layerName = text_obj.name;
+        info.text = text_obj.text;
+        info.textureName = textureRegistration->textureName;
+        info.font = text_obj.font;
+        info.rasterizer = textureRegistration->rasterizer;
+        info.fontLoaded = textureRegistration->fontLoaded;
+        info.fontFamily = textureRegistration->fontFamily;
+        info.fontLoadStatus = textureRegistration->fontLoadStatus;
+        info.horizontalAlign = text_obj.horizontalAlign;
+        info.verticalAlign = text_obj.verticalAlign;
+        info.pointSize = text_obj.pointSize;
+        info.effectivePixelSize = GeneratedTextEffectivePixelSize(context, rasterTextObject);
+        info.parentId = text_obj.parent;
+        info.parentChain = DebugSceneNodeParentChain(context, node->Parent());
+        info.cardSize = text_obj.size;
+        info.textureSize = textureRegistration->textureSize;
+        info.color = text_obj.color;
+        info.alpha = text_obj.alpha;
+        info.nodeTranslate = DebugVec3Array(node->Translate());
+        info.nodeScale = DebugVec3Array(node->Scale());
+        info.localBounds = localBounds;
+        info.worldBounds = worldBounds;
+        info.alphaBounds = textureRegistration->alphaBounds;
+        info.visibility = visibility;
+        info.classificationReason = reason;
+        wallpaper::debug::recordGeneratedTextDiagnostic(*context.scene, info);
+    }
 
     const std::string logText = EscapeSceneScriptLogText(text_obj.text);
     LOG_INFO("generated text layer: id=%d name=%s text=%s",
@@ -4747,6 +6518,7 @@ void ParseTextObj(ParseContext& context, WPTextObject& text_obj) {
 }
 
 void ParseLightObj(ParseContext& context, wpscene::WPLightObject& light_obj) {
+    if (HasHiddenParent(context, light_obj.parent)) return;
     auto node = std::make_shared<SceneNode>(Vector3f(light_obj.origin.data()),
                                             Vector3f(light_obj.scale.data()),
                                             Vector3f(light_obj.angles.data()));
@@ -4829,6 +6601,7 @@ bool LoadModelFallbackMaterial(fs::VFS& vfs, const std::string& matJsonFile,
 
 void ParseModelObj(ParseContext& context, wpscene::WPModelObject& model_obj) {
     if (! model_obj.visible) return;
+    if (HasHiddenParent(context, model_obj.parent)) return;
 
     auto& vfs = *context.vfs;
 
@@ -5003,6 +6776,155 @@ void AddWPObject(std::vector<WPObjectVar>& objs, const nlohmann::json& json_obj,
     objs.push_back(wpobj);
 }
 
+std::vector<std::string> CollectJsonStrings(const nlohmann::json& value)
+{
+    std::vector<std::string> strings;
+    std::function<void(const nlohmann::json&)> visit = [&](const nlohmann::json& item) {
+        if (item.is_string()) {
+            strings.push_back(item.get<std::string>());
+            return;
+        }
+        if (item.is_object()) {
+            for (const auto& child : item.items()) {
+                strings.push_back(child.key());
+                visit(child.value());
+            }
+            return;
+        }
+        if (item.is_array()) {
+            for (const auto& child : item) {
+                visit(child);
+            }
+        }
+    };
+    visit(value);
+    return strings;
+}
+
+std::string LowerAscii(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return value;
+}
+
+bool JsonContainsMediaWidgetRuntimeToken(const nlohmann::json& objectJson)
+{
+    static const std::array<std::string_view, 7> tokens {
+        "shared.mi",
+        "engine.media",
+        "mediaintegration",
+        "MediaPlaybackEvent",
+        "mediaTimelineChanged",
+        "mediaPlaybackChanged",
+        "mediaPropertiesChanged",
+    };
+
+    const auto strings = CollectJsonStrings(objectJson);
+    for (const std::string& value : strings) {
+        const std::string loweredValue = LowerAscii(value);
+        for (const std::string_view token : tokens) {
+            const std::string loweredToken = LowerAscii(std::string(token));
+            if (loweredValue.find(loweredToken) != std::string::npos) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+std::optional<int32_t> JsonObjectId(const nlohmann::json& objectJson)
+{
+    if (!objectJson.contains("id") || !objectJson.at("id").is_number_integer()) {
+        return std::nullopt;
+    }
+    return objectJson.at("id").get<int32_t>();
+}
+
+int32_t JsonObjectParentId(const nlohmann::json& objectJson)
+{
+    if (!objectJson.contains("parent") || !objectJson.at("parent").is_number_integer()) {
+        return 0;
+    }
+    return objectJson.at("parent").get<int32_t>();
+}
+
+bool JsonObjectVisibleDefaultTrue(const nlohmann::json& objectJson);
+
+std::optional<SceneScriptLayerSnapshot>
+SceneScriptLayerSnapshotFromJsonObject(const nlohmann::json& objectJson)
+{
+    const auto id = JsonObjectId(objectJson);
+    if (!id) {
+        return std::nullopt;
+    }
+
+    SceneScriptLayerSnapshot snapshot;
+    snapshot.id = *id;
+    snapshot.parentId = JsonObjectParentId(objectJson);
+    if (objectJson.contains("name") && objectJson.at("name").is_string()) {
+        snapshot.name = objectJson.at("name").get<std::string>();
+    }
+    if (objectJson.contains("origin")) {
+        ParseSceneVec3Value(objectJson.at("origin"), snapshot.origin);
+    }
+    if (objectJson.contains("scale")) {
+        ParseSceneVec3Value(objectJson.at("scale"), snapshot.scale);
+    }
+    if (objectJson.contains("size")) {
+        ParseSceneVec2Value(objectJson.at("size"), snapshot.size);
+    }
+    snapshot.visible = JsonObjectVisibleDefaultTrue(objectJson);
+    return snapshot;
+}
+
+bool JsonObjectVisibleDefaultTrue(const nlohmann::json& objectJson)
+{
+    if (!objectJson.contains("visible")) {
+        return true;
+    }
+    const auto& visible = objectJson.at("visible");
+    if (visible.is_boolean()) {
+        return visible.get<bool>();
+    }
+    if (visible.is_object()) {
+        if (auto resolved = ResolveConditionalProperty(visible)) {
+            if (resolved->is_boolean()) {
+                return resolved->get<bool>();
+            }
+            if (resolved->is_number()) {
+                return resolved->get<double>() > 0.5;
+            }
+        }
+        if (visible.contains("value")) {
+            const auto& value = visible.at("value");
+            if (value.is_boolean()) {
+                return value.get<bool>();
+            }
+            if (value.is_number()) {
+                return value.get<double>() > 0.5;
+            }
+        }
+    }
+    return true;
+}
+
+void AddWPImageObject(std::vector<WPObjectVar>& objs,
+                      const nlohmann::json& json_obj,
+                      fs::VFS& vfs)
+{
+    wpscene::WPImageObject wpobj;
+    if (!wpobj.FromJson(json_obj, vfs)) {
+        LOG_ERROR("parse scene object failed, name: %s", wpobj.name.c_str());
+        return;
+    }
+    if (!wpobj.visible) {
+        return;
+    }
+    objs.push_back(wpobj);
+}
+
 void RegisterDebugObjectGraphEntry(ParseContext& context,
                                    int32_t id,
                                    int32_t parent,
@@ -5074,6 +6996,8 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
 
 
     nlohmann::json sceneProperties = ResolveSceneProperties(vfs, m_scene_properties_json);
+    SceneScriptMediaState mediaState = SceneScriptMediaStateFromSceneProperties(sceneProperties);
+    DeriveSyntheticMediaThumbnailColors(mediaState);
     SetActiveScenePropertyState(sceneProperties);
     struct ClearScenePropertyStateGuard {
         ~ClearScenePropertyStateGuard() { ClearActiveScenePropertyState(); }
@@ -5082,12 +7006,22 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
     if (! sceneProperties.empty()) {
         LOG_INFO("scene property defaults active: count=%zu", sceneProperties.size());
     }
+    if (mediaState.available) {
+        LOG_INFO("SceneScript synthetic media state active: title='%s' artist='%s' playing=%d",
+                 mediaState.title.c_str(),
+                 mediaState.artist.c_str(),
+                 mediaState.playing ? 1 : 0);
+    }
 
     wpscene::WPScene sc;
     sc.FromJson(json);
     //	LOG_INFO(nlohmann::json(sc).dump(4));
 
     ParseContext context;
+    // The script pre-scan runs before InitContext creates the Scene, but it
+    // still needs the VFS for generated text diagnostics and font lookup.
+    // SceneScript layer lookups keep authored layer sizes.
+    context.vfs = &vfs;
 
     // Detect color tint overlay properties from scene settings.
     // WE scenes commonly have colour0/opacity0 + colour1/opacity1 pairs
@@ -5147,8 +7081,45 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
     {
         SceneScriptContext scriptCtx;
         scriptCtx.setUserProperties(sceneProperties);
+        scriptCtx.setMediaState(mediaState);
         scriptCtx.setCanvasSize(sc.general.orthogonalprojection.width,
                                 sc.general.orthogonalprojection.height);
+        std::unordered_map<int32_t, SceneScriptLayerSnapshot> runtimeLayerSnapshots;
+        std::unordered_map<int32_t, WPTextObject> runtimeTextObjects;
+        for (const auto& obj : json.at("objects")) {
+            if (const auto snapshot = SceneScriptLayerSnapshotFromJsonObject(obj)) {
+                runtimeLayerSnapshots[snapshot->id] = *snapshot;
+                scriptCtx.registerLayerSnapshot(*snapshot);
+            }
+            if ((obj.contains("text") || obj.contains("font")) &&
+                obj.contains("id") && obj.at("id").is_number_integer()) {
+                WPTextObject textObject;
+                if (textObject.FromJson(obj, vfs)) {
+                    runtimeTextObjects[textObject.id] = std::move(textObject);
+                }
+            }
+        }
+        const auto refreshRuntimeLayerSnapshot = [&](int32_t layerId,
+                                                     const ParseContext::ScriptColorBinding& binding) {
+            auto snapshotIt = runtimeLayerSnapshots.find(layerId);
+            if (snapshotIt == runtimeLayerSnapshots.end()) {
+                return;
+            }
+            auto& snapshot = snapshotIt->second;
+            if (binding.has_origin) {
+                snapshot.origin = binding.origin;
+            }
+            if (binding.has_scale) {
+                snapshot.scale = binding.scale;
+            }
+            if (binding.has_visible) {
+                snapshot.visible = binding.visible;
+            }
+            if (binding.has_max_width && binding.maxWidth > 0.0f) {
+                snapshot.size[0] = std::min(snapshot.size[0], binding.maxWidth);
+            }
+            scriptCtx.registerLayerSnapshot(snapshot);
+        };
         {
             // Compute current time-of-day fraction (0.0 = midnight, 0.5 = noon)
             using clock = std::chrono::system_clock;
@@ -5159,27 +7130,51 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
             scriptCtx.setTimeOfDay(frac);
         }
 
-        for (const auto& obj : json.at("objects")) {
-            if (! obj.contains("id")) continue;
-            int32_t objId = obj.at("id").get<int32_t>();
+        constexpr int kSceneScriptBindingPasses = 2;
+        for (int scriptPass = 0; scriptPass < kSceneScriptBindingPasses; ++scriptPass) {
+            for (const auto& obj : json.at("objects")) {
+                if (! obj.contains("id")) continue;
+                int32_t objId = obj.at("id").get<int32_t>();
 
-            // Find script strings anywhere in the object's JSON tree
-            std::function<void(const nlohmann::json&)> scanForScripts =
-                [&](const nlohmann::json& node) {
+                // Find script strings anywhere in the object's JSON tree
+                std::function<void(const nlohmann::json&,
+                                   const std::string&,
+                                   bool,
+                                   int32_t,
+                                   int32_t,
+                                   bool)> scanForScripts =
+                    [&](const nlohmann::json& node,
+                        const std::string& scriptField,
+                        bool maxWidthOnly,
+                        int32_t effectId,
+                        int32_t passId,
+                        bool inConstantShaderValues) {
                 if (node.is_object() && node.contains("script") &&
                     node.at("script").is_string()) {
+                    const bool isMaxWidthScript = scriptField == "maxwidth";
+                    if (maxWidthOnly != isMaxWidthScript) {
+                        return;
+                    }
                     const auto& script = node.at("script").get_ref<const std::string&>();
                     if (script.size() < 50) return; // skip trivial scripts
 
                     // Get current layer defaults
-                    std::array<float, 3> origin { 0, 0, 0 };
+                    std::array<float, 3> vectorValue { 0, 0, 0 };
                     std::array<float, 3> color { 1, 1, 1 };
                     float alpha = 1.0f;
-                    if (obj.contains("origin")) {
-                        std::string ov = obj.at("origin").is_string()
-                            ? obj.at("origin").get<std::string>() : "";
-                        std::istringstream iss(ov);
-                        iss >> origin[0] >> origin[1] >> origin[2];
+                    if (scriptField == "scale") {
+                        vectorValue = {1.0f, 1.0f, 1.0f};
+                        if (obj.contains("scale")) {
+                            ParseSceneVec3Value(obj.at("scale"), vectorValue);
+                        }
+                    } else if (scriptField == "color") {
+                        vectorValue = color;
+                        ParseSceneVec3Value(node, vectorValue);
+                    } else if (obj.contains("origin")) {
+                        ParseSceneVec3Value(obj.at("origin"), vectorValue);
+                    }
+                    if (obj.contains("color")) {
+                        ParseSceneVec3Value(obj.at("color"), color);
                     }
 
                     // Resolve scriptproperties user bindings before evaluating.
@@ -5212,37 +7207,136 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
                             if (resolved) scriptCtx.setScriptProperty(spKey, dval);
                         }
                     }
-                    auto result = scriptCtx.evaluateLayerScript(script, origin, color, alpha, objId);
-                    if (result.color) {
+                    const bool currentVisible = ResolveObjectVisibleForDebug(obj);
+                    auto result = scriptCtx.evaluateLayerScript(
+                        script, vectorValue, color, alpha, objId, currentVisible);
+                    const bool isMaterialConstantScript =
+                        inConstantShaderValues && effectId != 0 && passId != 0;
+                    if (isMaterialConstantScript) {
+                        if (auto value = ScriptMaterialConstantValue(result, scriptField)) {
+                            context.script_material_constant_bindings[
+                                ScriptMaterialConstantKey(objId, effectId, passId, scriptField)] = *value;
+                            LOG_INFO("QuickJS material binding: id=%d effect=%d pass=%d %s values=%zu",
+                                     objId,
+                                     effectId,
+                                     passId,
+                                     scriptField.c_str(),
+                                     value->size());
+                        }
+                        return;
+                    }
+                    const bool isLayerPropertyScript = scriptField.empty();
+                    const bool isColorFieldScript = scriptField == "color";
+                    const bool isAlphaFieldScript = scriptField == "alpha";
+                    const bool isVisibleFieldScript = scriptField == "visible";
+                    bool shouldRefreshRuntimeLayerSnapshot = false;
+
+                    if (result.color && (isColorFieldScript || isLayerPropertyScript)) {
                         context.script_color_bindings[objId].color = *result.color;
                         context.script_color_bindings[objId].has_color = true;
+                        shouldRefreshRuntimeLayerSnapshot = true;
                         LOG_INFO("QuickJS binding: id=%d color=(%.3f,%.3f,%.3f)",
                                  objId, (*result.color)[0], (*result.color)[1], (*result.color)[2]);
                     }
-                    if (result.alpha) {
+                    if (result.alpha && (isAlphaFieldScript || isLayerPropertyScript)) {
                         context.script_color_bindings[objId].alpha = *result.alpha;
                         context.script_color_bindings[objId].has_alpha = true;
+                        shouldRefreshRuntimeLayerSnapshot = true;
                         LOG_INFO("QuickJS binding: id=%d alpha=%.3f", objId, *result.alpha);
                     }
-                    if (result.origin) {
-                        context.script_color_bindings[objId].origin = *result.origin;
-                        context.script_color_bindings[objId].has_origin = true;
-                        LOG_INFO("QuickJS binding: id=%d origin=(%.0f,%.0f,%.0f)",
-                                 objId, (*result.origin)[0], (*result.origin)[1], (*result.origin)[2]);
+                    const auto& vectorResult = result.returnVector ? result.returnVector : result.origin;
+                    if (vectorResult) {
+                        if (scriptField == "scale") {
+                            context.script_color_bindings[objId].scale = *vectorResult;
+                            context.script_color_bindings[objId].has_scale = true;
+                            shouldRefreshRuntimeLayerSnapshot = true;
+                            LOG_INFO("QuickJS binding: id=%d scale=(%.3f,%.3f,%.3f)",
+                                     objId, (*vectorResult)[0], (*vectorResult)[1], (*vectorResult)[2]);
+                        } else if (scriptField == "color") {
+                            context.script_color_bindings[objId].color = *vectorResult;
+                            context.script_color_bindings[objId].has_color = true;
+                            shouldRefreshRuntimeLayerSnapshot = true;
+                            LOG_INFO("QuickJS binding: id=%d color=(%.3f,%.3f,%.3f)",
+                                     objId, (*vectorResult)[0], (*vectorResult)[1], (*vectorResult)[2]);
+                        } else {
+                            context.script_color_bindings[objId].origin = *vectorResult;
+                            context.script_color_bindings[objId].has_origin = true;
+                            shouldRefreshRuntimeLayerSnapshot = true;
+                            LOG_INFO("QuickJS binding: id=%d origin=(%.0f,%.0f,%.0f)",
+                                     objId, (*vectorResult)[0], (*vectorResult)[1], (*vectorResult)[2]);
+                        }
+                    }
+                    if (result.visible && (isVisibleFieldScript || isLayerPropertyScript)) {
+                        context.script_color_bindings[objId].visible = *result.visible;
+                        context.script_color_bindings[objId].has_visible = true;
+                        shouldRefreshRuntimeLayerSnapshot = true;
+                        LOG_INFO("QuickJS binding: id=%d visible=%d",
+                                 objId, *result.visible ? 1 : 0);
+                    }
+                    if (result.horizontalAlign && !result.horizontalAlign->empty()) {
+                        context.script_color_bindings[objId].horizontalAlign = *result.horizontalAlign;
+                        context.script_color_bindings[objId].has_horizontal_align = true;
+                        shouldRefreshRuntimeLayerSnapshot = true;
+                        LOG_INFO("QuickJS binding: id=%d horizontalalign=%s",
+                                 objId, result.horizontalAlign->c_str());
+                    }
+                    if (result.verticalAlign && !result.verticalAlign->empty()) {
+                        context.script_color_bindings[objId].verticalAlign = *result.verticalAlign;
+                        context.script_color_bindings[objId].has_vertical_align = true;
+                        shouldRefreshRuntimeLayerSnapshot = true;
+                        LOG_INFO("QuickJS binding: id=%d verticalalign=%s",
+                                 objId, result.verticalAlign->c_str());
+                    }
+                    if (result.scalar && scriptField == "maxwidth") {
+                        context.script_color_bindings[objId].maxWidth = *result.scalar;
+                        context.script_color_bindings[objId].has_max_width = true;
+                        shouldRefreshRuntimeLayerSnapshot = true;
+                        LOG_INFO("QuickJS binding: id=%d maxwidth=%.3f",
+                                 objId, *result.scalar);
                     }
                     if (result.text) {
                         context.script_text_bindings[objId].text = *result.text;
                         context.script_text_bindings[objId].has_text = true;
+                        shouldRefreshRuntimeLayerSnapshot = true;
                         const std::string logText = EscapeSceneScriptLogText(*result.text);
                         LOG_INFO("QuickJS binding: id=%d text=%s", objId, logText.c_str());
                     }
+                    if (shouldRefreshRuntimeLayerSnapshot) {
+                        refreshRuntimeLayerSnapshot(objId, context.script_color_bindings[objId]);
+                    }
                 } else if (node.is_object()) {
-                    for (const auto& [k, v] : node.items()) scanForScripts(v);
+                    int32_t childEffectId = effectId;
+                    int32_t childPassId = passId;
+                    if (node.contains("file") && node.contains("passes") &&
+                        node.contains("id") && node.at("id").is_number_integer()) {
+                        childEffectId = node.at("id").get<int32_t>();
+                    }
+                    if (node.contains("constantshadervalues") &&
+                        node.contains("id") && node.at("id").is_number_integer()) {
+                        childPassId = node.at("id").get<int32_t>();
+                    }
+                    for (const auto& [k, v] : node.items()) {
+                        scanForScripts(v,
+                                       k,
+                                       maxWidthOnly,
+                                       childEffectId,
+                                       childPassId,
+                                       inConstantShaderValues || k == "constantshadervalues");
+                    }
                 } else if (node.is_array()) {
-                    for (const auto& v : node) scanForScripts(v);
+                    for (const auto& v : node) {
+                        scanForScripts(v,
+                                       scriptField,
+                                       maxWidthOnly,
+                                       effectId,
+                                       passId,
+                                       inConstantShaderValues);
+                    }
                 }
-            };
-            scanForScripts(obj);
+                };
+                scanForScripts(obj, "", false, 0, 0, false);
+                scanForScripts(obj, "", true, 0, 0, false);
+            }
         }
         std::unordered_set<int32_t> resolvedScriptBindingLayers;
         for (const auto& entry : context.script_color_bindings) {
@@ -5258,7 +7352,23 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
     }
 
     for (auto& obj : json["objects"]) {
+        if (! obj.contains("id") || ! obj.at("id").is_number_integer()) {
+            continue;
+        }
+        const int32_t objId = obj.at("id").get<int32_t>();
+        auto bindingIt = context.script_color_bindings.find(objId);
+        if (bindingIt == context.script_color_bindings.end() ||
+            ! bindingIt->second.has_visible) {
+            continue;
+        }
+        obj["visible"] = bindingIt->second.visible;
+    }
+
+    for (auto& obj : json["objects"]) {
         ApplyDebugLayerVisibilityOverride(context, obj, m_debug_effect_captures);
+    }
+    for (auto& obj : json["objects"]) {
+        ResolveStructuredObjectFields(obj);
     }
     for (const auto& obj : json.at("objects")) {
         RegisterDebugJsonObjectGraph(context, obj);
@@ -5288,13 +7398,46 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
         }
     }
 
+    std::unordered_set<int32_t> explicitlyHiddenObjects;
+    for (const auto& obj : json.at("objects")) {
+        const auto id = JsonObjectId(obj);
+        if (!id) {
+            continue;
+        }
+        if (!ResolveObjectVisibleForDebug(obj)) {
+            explicitlyHiddenObjects.insert(*id);
+            context.hidden_objects.insert(*id);
+        }
+    }
+    for (const auto& obj : json.at("objects")) {
+        const auto id = JsonObjectId(obj);
+        if (!id) {
+            continue;
+        }
+        int32_t parentId = JsonObjectParentId(obj);
+        std::unordered_set<int32_t> visited;
+        while (parentId > 0 && !visited.count(parentId)) {
+            visited.insert(parentId);
+            if (explicitlyHiddenObjects.count(parentId) ||
+                context.hidden_objects.count(parentId)) {
+                context.hidden_objects.insert(*id);
+                break;
+            }
+            const auto nextParentIt = context.object_parent_ids.find(parentId);
+            if (nextParentIt == context.object_parent_ids.end()) {
+                break;
+            }
+            parentId = nextParentIt->second;
+        }
+    }
+
     std::vector<WPObjectVar> wp_objs;
     int modelObjectCount = 0;
 
     for (auto& obj : json.at("objects")) {
         RegisterPuppetPauseDirectives(context, obj);
         if (obj.contains("image") && ! obj.at("image").is_null()) {
-            AddWPObject<wpscene::WPImageObject>(wp_objs, obj, vfs);
+            AddWPImageObject(wp_objs, obj, vfs);
         } else if (obj.contains("particle") && ! obj.at("particle").is_null()) {
             AddWPObject<wpscene::WPParticleObject>(wp_objs, obj, vfs);
         } else if (obj.contains("sound") && ! obj.at("sound").is_null()) {
@@ -5361,6 +7504,7 @@ std::shared_ptr<Scene> WPSceneParser::Parse(std::string_view scene_id, const std
     }
 
     InitContext(context, vfs, sc);
+    RegisterSyntheticMediaThumbnailTexture(context, mediaState);
     ParseCamera(context, sc, modelObjectCount > 0);
 
     {

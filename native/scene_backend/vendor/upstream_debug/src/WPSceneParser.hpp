@@ -3,10 +3,15 @@
 #include "Interface/ISceneParser.h"
 #include <random>
 #include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 namespace wallpaper
 {
+
+std::string ChooseGeneratedTextFontFamily(std::string_view fontPath,
+                                          const std::vector<std::string>& families);
 
 class WPSceneParser : public ISceneParser {
 public:

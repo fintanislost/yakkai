@@ -691,6 +691,14 @@ int main(int argc, char* argv[])
         QStringLiteral("size"),
         QStringLiteral("1600x900")
     );
+    QCommandLineOption framelessOption(
+        QStringList{QStringLiteral("frameless")},
+        QStringLiteral("Run the harness window without native decorations so --window-size maps to the captured content surface.")
+    );
+    QCommandLineOption fullscreenOption(
+        QStringList{QStringLiteral("fullscreen")},
+        QStringLiteral("Run the harness window fullscreen on the active screen. Useful when a compositor constrains decorated or frameless window height.")
+    );
     QCommandLineOption mouseOption(
         QStringList{QStringLiteral("mouse")},
         QStringLiteral("Enable mouse and hover input.")
@@ -859,6 +867,8 @@ int main(int argc, char* argv[])
     parser.addOption(assetsOption);
     parser.addOption(fillOption);
     parser.addOption(windowSizeOption);
+    parser.addOption(framelessOption);
+    parser.addOption(fullscreenOption);
     parser.addOption(mouseOption);
     parser.addOption(interactiveMouseOption);
     parser.addOption(unmutedOption);
@@ -1219,6 +1229,8 @@ int main(int argc, char* argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessFillModeValue"), fillModeFromString(fillMode));
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessWindowWidth"), windowSize->width());
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessWindowHeight"), windowSize->height());
+    engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessFrameless"), parser.isSet(framelessOption));
+    engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessFullscreen"), parser.isSet(fullscreenOption));
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessMouseInput"), mouseInputRequested);
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessMuted"), !parser.isSet(unmutedOption));
     engine.rootContext()->setContextProperty(QStringLiteral("sceneHarnessShowInfoOverlay"), !parser.isSet(hideInfoOverlayOption));

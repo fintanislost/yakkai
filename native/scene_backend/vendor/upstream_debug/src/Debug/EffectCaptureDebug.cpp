@@ -281,6 +281,73 @@ nlohmann::json mouseParallaxToJson(const Scene& scene)
     return out;
 }
 
+nlohmann::json generatedTextParentToJson(const GeneratedTextParentInfo& parent)
+{
+    return {
+        {"layerId", parent.layerId},
+        {"layerName", parent.layerName},
+        {"translate", parent.translate},
+        {"scale", parent.scale},
+    };
+}
+
+nlohmann::json generatedTextParentChainToJson(
+    const std::vector<GeneratedTextParentInfo>& parents)
+{
+    nlohmann::json out = nlohmann::json::array();
+    for (const auto& parent : parents) {
+        out.push_back(generatedTextParentToJson(parent));
+    }
+    return out;
+}
+
+nlohmann::json generatedTextDiagnosticToJson(const GeneratedTextDiagnostic& info)
+{
+    return {
+        {"layerId", info.layerId},
+        {"layerName", info.layerName},
+        {"text", info.text},
+        {"textureName", info.textureName},
+        {"font", info.font},
+        {"rasterizer", info.rasterizer},
+        {"fontLoaded", info.fontLoaded},
+        {"fontFamily", info.fontFamily},
+        {"fontLoadStatus", info.fontLoadStatus},
+        {"horizontalAlign", info.horizontalAlign},
+        {"verticalAlign", info.verticalAlign},
+        {"pointSize", info.pointSize},
+        {"effectivePixelSize", info.effectivePixelSize},
+        {"parentId", info.parentId},
+        {"parentChain", generatedTextParentChainToJson(info.parentChain)},
+        {"cardSize", info.cardSize},
+        {"textureSize", info.textureSize},
+        {"color", info.color},
+        {"alpha", info.alpha},
+        {"nodeTranslate", info.nodeTranslate},
+        {"nodeScale", info.nodeScale},
+        {"localBounds", info.localBounds},
+        {"worldBounds", info.worldBounds},
+        {"alphaBounds", info.alphaBounds},
+        {"visibility", info.visibility},
+        {"classificationReason", info.classificationReason},
+    };
+}
+
+nlohmann::json generatedTextDiagnosticsToJson(const Scene& scene)
+{
+    std::vector<GeneratedTextDiagnostic> diagnostics = scene.debugGeneratedTextDiagnostics;
+    std::sort(diagnostics.begin(), diagnostics.end(), [](const auto& left, const auto& right) {
+        return std::tie(left.layerId, left.layerName) <
+               std::tie(right.layerId, right.layerName);
+    });
+
+    nlohmann::json out = nlohmann::json::array();
+    for (const auto& info : diagnostics) {
+        out.push_back(generatedTextDiagnosticToJson(info));
+    }
+    return out;
+}
+
 nlohmann::json materialToJson(const EffectCaptureMaterialInfo& material)
 {
     nlohmann::json textureBindings = nlohmann::json::array();
@@ -1174,6 +1241,21 @@ void recordMouseParallaxLayer(Scene& scene,
     scene.debugMouseParallaxLayerInventory.push_back(std::move(info));
 }
 
+void recordGeneratedTextDiagnostic(Scene& scene, const GeneratedTextDiagnostic& info)
+{
+    if (!scene.debugEffectCaptures.enabled()) {
+        return;
+    }
+
+    for (auto& existing : scene.debugGeneratedTextDiagnostics) {
+        if (existing.layerId == info.layerId) {
+            existing = info;
+            return;
+        }
+    }
+    scene.debugGeneratedTextDiagnostics.push_back(info);
+}
+
 bool writeEffectCaptureManifest(const Scene& scene)
 {
     if (!scene.debugEffectCaptures.enabled()) {
@@ -1219,6 +1301,9 @@ bool writeEffectCaptureManifest(const Scene& scene)
             {"nodeId", state.nodeId},
             {"materialName", state.materialName},
             {"debugPurpose", state.debugPurpose},
+            {"localTransform", transformToJson(state.localTransform)},
+            {"meshBounds", meshBoundsToJson(state.meshBounds)},
+            {"worldBounds", state.worldBounds},
         });
     }
 
@@ -1240,6 +1325,7 @@ bool writeEffectCaptureManifest(const Scene& scene)
     nlohmann::json manifest = {
         {"status", failed ? "failed" : "ok"},
         {"sceneId", scene.scene_id},
+        {"sceneOrtho", {scene.ortho[0], scene.ortho[1]}},
         {"commandLine", scene.debugEffectCaptures.commandLine},
         {"captureLayerIds", scene.debugEffectCaptures.captureLayerIds},
         {"probeLayerIds", scene.debugEffectCaptures.probeLayerIds},
@@ -1257,6 +1343,7 @@ bool writeEffectCaptureManifest(const Scene& scene)
         {"puppetFinalMeshOverride", scene.debugEffectCaptures.puppetFinalMeshOverride},
         {"puppetEffectRouteOnly", scene.debugEffectCaptures.puppetEffectRouteOnly},
         {"mouseParallax", mouseParallaxToJson(scene)},
+        {"generatedTextDiagnostics", generatedTextDiagnosticsToJson(scene)},
         {"captureCount", scene.debugEffectCaptureRecords.size()},
         {"captures", captures},
         {"passStates", passStates},

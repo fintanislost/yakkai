@@ -92,6 +92,63 @@ void testUnavailablePublishesStableAndRuntimeFallback()
           "runtime mediaJson uses unavailable fallback");
 }
 
+void testPlayerServiceSwitchEmitsStableMediaChange()
+{
+    YakkaiMprisMediaSource source;
+    QSignalSpy stableSpy(&source, &YakkaiMprisMediaSource::mediaChanged);
+    QSignalSpy runtimeSpy(&source, &YakkaiMprisMediaSource::runtimeMediaChanged);
+
+    source.publishStateForTest(playerState(42000000LL));
+
+    auto switchedPlayer = playerState(84000000LL);
+    switchedPlayer.service = QStringLiteral("org.mpris.MediaPlayer2.other");
+    source.publishStateForTest(switchedPlayer);
+
+    check(stableSpy.count() == 2, "player service switch emits stable mediaChanged");
+    check(runtimeSpy.count() == 2, "player service switch emits runtimeMediaChanged");
+    check(source.activeService() == QStringLiteral("org.mpris.MediaPlayer2.other"),
+          "active service follows selected player switch");
+    check(mediaFromPayload(source.mediaJson()).value(QStringLiteral("position")).toDouble() == 84.0,
+          "stable mediaJson refreshes from switched player payload");
+}
+
+void testPlaybackStatusChangeEmitsStableMediaChange()
+{
+    YakkaiMprisMediaSource source;
+    QSignalSpy stableSpy(&source, &YakkaiMprisMediaSource::mediaChanged);
+    QSignalSpy runtimeSpy(&source, &YakkaiMprisMediaSource::runtimeMediaChanged);
+
+    source.publishStateForTest(playerState(42000000LL));
+
+    auto pausedPlayer = playerState(84000000LL);
+    pausedPlayer.playbackStatus = QStringLiteral("Paused");
+    source.publishStateForTest(pausedPlayer);
+
+    check(stableSpy.count() == 2, "playback status change emits stable mediaChanged");
+    check(runtimeSpy.count() == 2, "playback status change emits runtimeMediaChanged");
+    check(source.available(), "paused player remains available");
+    check(!source.playing(), "paused player clears playing");
+    check(!mediaFromPayload(source.mediaJson()).value(QStringLiteral("playing")).toBool(true),
+          "stable mediaJson refreshes paused playback state");
+}
+
+void testPlaybackStatusCaseChangeIsNotStableMetadataChange()
+{
+    YakkaiMprisMediaSource source;
+    QSignalSpy stableSpy(&source, &YakkaiMprisMediaSource::mediaChanged);
+    QSignalSpy runtimeSpy(&source, &YakkaiMprisMediaSource::runtimeMediaChanged);
+
+    source.publishStateForTest(playerState(42000000LL));
+
+    auto lowercasePlayer = playerState(84000000LL);
+    lowercasePlayer.playbackStatus = QStringLiteral("playing");
+    source.publishStateForTest(lowercasePlayer);
+
+    check(stableSpy.count() == 1, "playback status case-only change does not emit stable mediaChanged");
+    check(runtimeSpy.count() == 2, "playback status case-only change still emits runtime position update");
+    check(source.playing(), "case-insensitive playback status keeps playing true");
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -100,6 +157,9 @@ int main(int argc, char** argv)
 
     testPositionOnlyUpdatesRuntimePayloadWithoutStableMediaSignal();
     testUnavailablePublishesStableAndRuntimeFallback();
+    testPlayerServiceSwitchEmitsStableMediaChange();
+    testPlaybackStatusChangeEmitsStableMediaChange();
+    testPlaybackStatusCaseChangeIsNotStableMetadataChange();
 
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -3,6 +3,7 @@
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QJsonValue>
+#include <QtCore/QDir>
 #include <QtCore/QUrl>
 #include <QtCore/QVariant>
 #include <QtCore/QVariantList>
@@ -59,16 +60,21 @@ QJsonObject unavailableMediaObject()
 
 QString normalizeArtUrl(const QString& artUrl)
 {
-    if (artUrl.isEmpty()) {
+    const QString value = artUrl.trimmed();
+    if (value.isEmpty()) {
         return {};
     }
 
-    const QUrl url(artUrl);
-    if (!url.isLocalFile()) {
-        return {};
+    const QUrl url(value);
+    if (url.isLocalFile()) {
+        return url.toLocalFile();
     }
 
-    return url.toLocalFile();
+    if (url.scheme().isEmpty() && QDir::isAbsolutePath(value)) {
+        return value;
+    }
+
+    return {};
 }
 
 QString buildMediaPayload(const PlayerState& state)

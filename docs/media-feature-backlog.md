@@ -27,6 +27,8 @@ not be inferred from README prose alone.
   the runtime-only path, so generated text and other parse-time media-widget
   outputs refresh when title, artist, album, album art, playback availability,
   or playback state changes.
+- MPRIS album art accepts `file://` URLs and absolute local filesystem paths.
+  Remote and non-file art URLs remain ignored.
 - The standalone scene harness accepts `--media-state-timeline-json` for
   synthetic runtime media-position keyframes and records the normalized timeline
   in paper-backend debug manifests when `--debug-effect-captures` is enabled.
@@ -44,16 +46,17 @@ not be inferred from README prose alone.
   texture replacement without a scene reload.
 - Full rich text and exact Wallpaper Engine text-layout parity.
 - Broader real-player compatibility coverage across common MPRIS providers,
-  including players with missing metadata, remote/non-file album art, empty
-  playback status, and multiple simultaneous players.
+  including players with missing metadata, empty playback status, and multiple
+  simultaneous players.
 
 ## Regression Gates Before Media Commits
 
 Run these before committing media-runtime changes:
 
 ```bash
-cmake --build build/native/scene_backend --target yakkai_scene_backend yakkai_scene_backendplugin yakkai_mpris_media_payload_tests yakkai_scene_policy_tests -j2
+cmake --build build/native/scene_backend --target yakkai_scene_backend yakkai_scene_backendplugin yakkai_mpris_media_payload_tests yakkai_mpris_media_source_tests yakkai_scene_policy_tests -j2
 build/native/scene_backend/yakkai_mpris_media_payload_tests
+build/native/scene_backend/yakkai_mpris_media_source_tests
 build/native/scene_backend/yakkai_scene_policy_tests
 QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner -input tools/tst_config_persistence.qml
 scripts/check-package.sh --skip-kpackage

@@ -29,6 +29,11 @@ not be inferred from README prose alone.
   or playback state changes.
 - MPRIS album art accepts `file://` URLs and absolute local filesystem paths.
   Remote and non-file art URLs remain ignored.
+- `tools/mpris_live_smoke.py` can probe a real MPRIS player through `qdbus6`,
+  print the normalized live `__yakkaiMedia` payload, and fail fast on explicit
+  service/status/metadata/art expectations without controlling playback. Its
+  default selection mirrors the native runtime, while `--service` limits a
+  manual probe to one exact provider when several MPRIS services are registered.
 - The standalone scene harness accepts `--media-state-timeline-json` for
   synthetic runtime media-position keyframes and records the normalized timeline
   in paper-backend debug manifests when `--debug-effect-captures` is enabled.
@@ -54,6 +59,7 @@ not be inferred from README prose alone.
 Run these before committing media-runtime changes:
 
 ```bash
+python3 tools/test_mpris_live_smoke.py
 cmake --build build/native/scene_backend --target yakkai_scene_backend yakkai_scene_backendplugin yakkai_mpris_media_payload_tests yakkai_mpris_media_source_tests yakkai_scene_policy_tests -j2
 build/native/scene_backend/yakkai_mpris_media_payload_tests
 build/native/scene_backend/yakkai_mpris_media_source_tests

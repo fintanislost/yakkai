@@ -100,6 +100,32 @@ SceneScript `color` property scripts are evaluated from the authored color value
 
 In Plasma, native scene mode can also read the active Linux media player through MPRIS over the session DBus. The runtime maps title, artist, album, playback status, track duration, a position snapshot, and local `mpris:artUrl` album art into the same `__yakkaiMedia` object used by the harness. Album art accepts `file://` URLs and absolute local filesystem paths; remote and non-file art URLs are ignored. This path is read-only: Yakkai does not send play/pause/next commands and does not capture real audio-reactive data.
 
+For a live-player smoke check, start an MPRIS-capable player separately and run
+the qdbus-backed probe:
+
+```bash
+cvlc --extraintf dbus --no-video --quiet native/scene_harness/tests/fixtures/media/instalock.mp3
+
+tools/mpris_live_smoke.py \
+  --service org.mpris.MediaPlayer2.vlc \
+  --expect-service org.mpris.MediaPlayer2.vlc \
+  --expect-status Playing \
+  --expect-title Instalock \
+  --expect-artist WYLTK \
+  --expect-album Instalock \
+  --require-local-art \
+  --pretty
+```
+
+`tools/mpris_live_smoke.py` requires `qdbus6`, reads the current session bus,
+prints the normalized live `__yakkaiMedia` JSON, and exits nonzero if no
+readable MPRIS player is available or any `--expect-*` assertion fails. It does
+not launch, stop, or control media players. By default it uses the same
+case-insensitive service ordering and first-playing preference as the native
+runtime; pass `--service org.mpris.MediaPlayer2.<name>` when other session
+providers such as image viewers are registered and you want to inspect one exact
+player.
+
 To avoid restarting the native scene renderer every progress tick, stable MPRIS
 metadata still flows through scene properties while live player state flows
 through a separate runtime `mediaStateJson` path. Stable metadata changes, such

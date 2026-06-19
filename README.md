@@ -126,6 +126,22 @@ runtime; pass `--service org.mpris.MediaPlayer2.<name>` when other session
 providers such as image viewers are registered and you want to inspect one exact
 player.
 
+To inventory the current desktop's provider behavior, run the read-only matrix
+wrapper:
+
+```bash
+tools/mpris_compat_matrix.py \
+  --output-dir tmp/mpris-compat-matrix
+```
+
+The matrix always records a Yakkai-like default selection probe, then exact
+service probes for all currently registered MPRIS services unless `--service` is
+used to limit the list. It writes `summary.json` and `summary.md` with provider
+status, metadata availability, playback state, album-art availability, and
+classification issues such as `missing-metadata`, `missing-art`, or
+`not-playing`. The wrapper is diagnostic by default; add `--fail-on-issues` only
+for a deliberately strict local gate.
+
 To avoid restarting the native scene renderer every progress tick, stable MPRIS
 metadata still flows through scene properties while live player state flows
 through a separate runtime `mediaStateJson` path. Stable metadata changes, such

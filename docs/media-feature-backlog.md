@@ -34,6 +34,9 @@ not be inferred from README prose alone.
   service/status/metadata/art expectations without controlling playback. Its
   default selection mirrors the native runtime, while `--service` limits a
   manual probe to one exact provider when several MPRIS services are registered.
+- `tools/mpris_compat_matrix.py` runs a read-only live-provider inventory on top
+  of the smoke probe, writing `summary.json` and `summary.md` under a
+  repo-local output directory for default-selection and exact-service probes.
 - The standalone scene harness accepts `--media-state-timeline-json` for
   synthetic runtime media-position keyframes and records the normalized timeline
   in paper-backend debug manifests when `--debug-effect-captures` is enabled.
@@ -50,9 +53,10 @@ not be inferred from README prose alone.
   transform/material/visibility bindings, including in-place generated text
   texture replacement without a scene reload.
 - Full rich text and exact Wallpaper Engine text-layout parity.
-- Broader real-player compatibility coverage across common MPRIS providers,
-  including players with missing metadata, empty playback status, and multiple
-  simultaneous players.
+- Promotion of broader real-player compatibility fixtures across common MPRIS
+  providers such as browser media sessions, KDE media apps, and missing-metadata
+  providers. The current matrix can inventory those cases when installed, but
+  only VLC plus the owned `Instalock.mp3` fixture is a practical local baseline.
 
 ## Regression Gates Before Media Commits
 
@@ -60,6 +64,7 @@ Run these before committing media-runtime changes:
 
 ```bash
 python3 tools/test_mpris_live_smoke.py
+python3 tools/test_mpris_compat_matrix.py
 cmake --build build/native/scene_backend --target yakkai_scene_backend yakkai_scene_backendplugin yakkai_mpris_media_payload_tests yakkai_mpris_media_source_tests yakkai_scene_policy_tests -j2
 build/native/scene_backend/yakkai_mpris_media_payload_tests
 build/native/scene_backend/yakkai_mpris_media_source_tests

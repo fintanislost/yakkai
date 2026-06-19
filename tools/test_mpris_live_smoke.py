@@ -77,23 +77,50 @@ class MprisLiveSmokeTests(unittest.TestCase):
     def test_uses_first_readable_player_when_none_are_playing(self):
         client = FixtureMprisClient(
             [
-                "org.mpris.MediaPlayer2.b",
-                "org.mpris.MediaPlayer2.a",
+                "org.mpris.MediaPlayer2.blank",
+                "org.mpris.MediaPlayer2.metadata",
             ],
             {
-                ("org.mpris.MediaPlayer2.a", "PlaybackStatus"): "Paused",
-                ("org.mpris.MediaPlayer2.a", "Metadata"): {"xesam:title": "Paused Track"},
-                ("org.mpris.MediaPlayer2.a", "Position"): 0,
-                ("org.mpris.MediaPlayer2.b", "PlaybackStatus"): "Stopped",
+                ("org.mpris.MediaPlayer2.blank", "PlaybackStatus"): "Stopped",
+                ("org.mpris.MediaPlayer2.blank", "Metadata"): {},
+                ("org.mpris.MediaPlayer2.blank", "Position"): 0,
+                ("org.mpris.MediaPlayer2.metadata", "PlaybackStatus"): "Paused",
+                ("org.mpris.MediaPlayer2.metadata", "Metadata"): {
+                    "xesam:title": "Paused Track"
+                },
+                ("org.mpris.MediaPlayer2.metadata", "Position"): 0,
             },
         )
 
         snapshot = mpris_live_smoke.collect_snapshot(client)
 
-        self.assertEqual(snapshot["selectedService"], "org.mpris.MediaPlayer2.a")
+        self.assertEqual(snapshot["selectedService"], "org.mpris.MediaPlayer2.metadata")
         self.assertEqual(snapshot["playbackStatus"], "Paused")
         self.assertTrue(snapshot["__yakkaiMedia"]["available"])
         self.assertFalse(snapshot["__yakkaiMedia"]["playing"])
+
+    def test_prefers_playing_metadata_over_paused_metadata(self):
+        client = FixtureMprisClient(
+            [
+                "org.mpris.MediaPlayer2.paused",
+                "org.mpris.MediaPlayer2.playing",
+            ],
+            {
+                ("org.mpris.MediaPlayer2.paused", "PlaybackStatus"): "Paused",
+                ("org.mpris.MediaPlayer2.paused", "Metadata"): {"xesam:title": "Paused"},
+                ("org.mpris.MediaPlayer2.paused", "Position"): 0,
+                ("org.mpris.MediaPlayer2.playing", "PlaybackStatus"): "Playing",
+                ("org.mpris.MediaPlayer2.playing", "Metadata"): {
+                    "xesam:title": "Playing"
+                },
+                ("org.mpris.MediaPlayer2.playing", "Position"): 0,
+            },
+        )
+
+        snapshot = mpris_live_smoke.collect_snapshot(client)
+
+        self.assertEqual(snapshot["selectedService"], "org.mpris.MediaPlayer2.playing")
+        self.assertEqual(snapshot["__yakkaiMedia"]["title"], "Playing")
 
     def test_target_service_limits_probe_to_one_provider(self):
         client = FixtureMprisClient(

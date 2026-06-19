@@ -176,6 +176,28 @@ class CandidateDiagnostic:
         return result
 
 
+def _candidate_score(candidate: dict[str, Any]) -> int:
+    if not candidate.get("readable"):
+        return -1
+    score = 0
+    if candidate.get("metadata"):
+        score += 4
+    if str(candidate.get("playbackStatus") or "").casefold() == "playing":
+        score += 2
+    return score
+
+
+def _select_candidate(candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
+    selected: dict[str, Any] | None = None
+    selected_score = -1
+    for candidate in candidates:
+        score = _candidate_score(candidate)
+        if score > selected_score:
+            selected = candidate
+            selected_score = score
+    return selected
+
+
 def collect_snapshot(client: Any, target_service: str | None = None) -> dict[str, Any]:
     registered_names = client.list_names()
     if target_service:
@@ -197,9 +219,8 @@ def collect_snapshot(client: Any, target_service: str | None = None) -> dict[str
             "__yakkaiMedia": unavailable_media_payload(),
         }
 
-    selected_service = ""
-    selected_status = ""
     diagnostics: list[CandidateDiagnostic] = []
+    candidate_states: list[dict[str, Any]] = []
     last_status_error = ""
 
     for candidate in candidates:
@@ -213,15 +234,26 @@ def collect_snapshot(client: Any, target_service: str | None = None) -> dict[str
             continue
 
         diagnostics.append(CandidateDiagnostic(candidate, True, status))
-        if not selected_service:
-            selected_service = candidate
-            selected_status = status
-        if status.casefold() == "playing":
-            selected_service = candidate
-            selected_status = status
+        try:
+            metadata = client.get_property(candidate, "Metadata")
+        except Exception:
+            metadata = {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+
+        candidate_states.append(
+            {
+                "service": candidate,
+                "readable": True,
+                "playbackStatus": status,
+                "metadata": metadata,
+            }
+        )
+        if status.casefold() == "playing" and metadata:
             break
 
-    if not selected_service:
+    selected_candidate = _select_candidate(candidate_states)
+    if selected_candidate is None:
         return {
             "ok": False,
             "diagnostic": f"No readable MPRIS media player is available: {last_status_error}",
@@ -230,6 +262,10 @@ def collect_snapshot(client: Any, target_service: str | None = None) -> dict[str
             "candidates": [diagnostic.to_json() for diagnostic in diagnostics],
             "__yakkaiMedia": unavailable_media_payload(),
         }
+
+    selected_service = str(selected_candidate["service"])
+    selected_status = str(selected_candidate["playbackStatus"])
+    metadata = selected_candidate.get("metadata")
 
     try:
         playback_status = str(
@@ -249,17 +285,6 @@ def collect_snapshot(client: Any, target_service: str | None = None) -> dict[str
             }
         playback_status = selected_status
 
-    try:
-        metadata = client.get_property(selected_service, "Metadata")
-    except Exception as exc:
-        return {
-            "ok": False,
-            "diagnostic": f"Could not read Metadata from {selected_service}: {exc}",
-            "selectedService": selected_service,
-            "playbackStatus": playback_status,
-            "candidates": [diagnostic.to_json() for diagnostic in diagnostics],
-            "__yakkaiMedia": unavailable_media_payload(),
-        }
     if not isinstance(metadata, dict):
         metadata = {}
 

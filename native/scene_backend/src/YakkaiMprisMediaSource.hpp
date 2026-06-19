@@ -3,6 +3,7 @@
 #include <QtCore/QObject>
 #include <QtCore/QString>
 #include <QtCore/QTimer>
+#include <QtCore/QVector>
 #include <QtQml/qqmlregistration.h>
 
 #include "MprisMediaPayload.hpp"
@@ -38,6 +39,7 @@ public:
 #ifdef YAKKAI_ENABLE_MPRIS_SOURCE_TEST_API
     void publishStateForTest(const yakkai::mpris::PlayerState& state);
     void publishUnavailableForTest(const QString& diagnostic);
+    static QString selectPreferredServiceForTest(const QVector<yakkai::mpris::PlayerState>& candidates);
 #endif
 
 signals:

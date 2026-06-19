@@ -4,6 +4,7 @@
 
 #include <QtCore/QVariant>
 #include <QtCore/QVariantMap>
+#include <QtCore/QVector>
 #include <QtDBus/QDBusArgument>
 #include <QtDBus/QDBusConnection>
 #include <QtDBus/QDBusConnectionInterface>
@@ -22,6 +23,14 @@ constexpr auto mprisObjectPath = "/org/mpris/MediaPlayer2";
 constexpr auto mprisPlayerInterface = "org.mpris.MediaPlayer2.Player";
 constexpr auto dbusPropertiesInterface = "org.freedesktop.DBus.Properties";
 constexpr int propertyCallTimeoutMs = 250;
+
+struct MprisCandidateState {
+    yakkai::mpris::PlayerState state;
+    bool statusReadable = false;
+    bool metadataReadable = false;
+    QString statusError;
+    QString metadataError;
+};
 
 QString firstArtist(const QVariant& value)
 {
@@ -115,6 +124,41 @@ QStringList sortedMprisServices(const QStringList& registeredNames)
     return candidates;
 }
 
+bool isPlayingStatus(const QString& value)
+{
+    return value.compare(QStringLiteral("Playing"), Qt::CaseInsensitive) == 0;
+}
+
+int selectionScore(const MprisCandidateState& candidate)
+{
+    if (!candidate.statusReadable) {
+        return -1;
+    }
+
+    int score = 0;
+    if (!candidate.state.metadata.isEmpty()) {
+        score += 4;
+    }
+    if (isPlayingStatus(candidate.state.playbackStatus)) {
+        score += 2;
+    }
+    return score;
+}
+
+qsizetype preferredCandidateIndex(const QVector<MprisCandidateState>& candidates)
+{
+    qsizetype selectedIndex = -1;
+    int selectedScore = -1;
+    for (qsizetype index = 0; index < candidates.size(); ++index) {
+        const int score = selectionScore(candidates.at(index));
+        if (score > selectedScore) {
+            selectedIndex = index;
+            selectedScore = score;
+        }
+    }
+    return selectedIndex;
+}
+
 QString diagnosticForSelectedPlayer(const yakkai::mpris::PlayerState& state)
 {
     if (state.service.isEmpty()) {
@@ -201,6 +245,26 @@ void YakkaiMprisMediaSource::publishUnavailableForTest(const QString& diagnostic
 {
     publishUnavailable(diagnostic);
 }
+
+QString YakkaiMprisMediaSource::selectPreferredServiceForTest(
+    const QVector<yakkai::mpris::PlayerState>& candidates)
+{
+    QVector<MprisCandidateState> selectionCandidates;
+    selectionCandidates.reserve(candidates.size());
+    for (const yakkai::mpris::PlayerState& candidate : candidates) {
+        selectionCandidates.append({
+            .state = candidate,
+            .statusReadable = !candidate.service.isEmpty(),
+            .metadataReadable = true,
+        });
+    }
+
+    const qsizetype selectedIndex = preferredCandidateIndex(selectionCandidates);
+    if (selectedIndex < 0) {
+        return {};
+    }
+    return selectionCandidates.at(selectedIndex).state.service;
+}
 #endif
 
 void YakkaiMprisMediaSource::refresh()
@@ -228,8 +292,8 @@ void YakkaiMprisMediaSource::refresh()
         return;
     }
 
-    QString selectedService;
-    QString selectedStatus;
+    QVector<MprisCandidateState> selectionCandidates;
+    selectionCandidates.reserve(candidates.size());
     QString lastStatusError;
     for (const QString& candidate : candidates) {
         QVariant statusValue;
@@ -239,55 +303,51 @@ void YakkaiMprisMediaSource::refresh()
             continue;
         }
 
-        const QString status = statusValue.toString();
-        if (selectedService.isEmpty()) {
-            selectedService = candidate;
-            selectedStatus = status;
+        MprisCandidateState candidateState;
+        candidateState.statusReadable = true;
+        candidateState.state.service = candidate;
+        candidateState.state.playbackStatus = statusValue.toString();
+
+        QVariant metadataValue;
+        QString metadataError;
+        if (readPlayerProperty(candidate, QStringLiteral("Metadata"), &metadataValue, &metadataError)) {
+            candidateState.metadataReadable = true;
+            candidateState.state.metadata = metadataFromVariant(metadataValue);
+        } else {
+            candidateState.metadataError = metadataError;
         }
-        if (status.compare(QStringLiteral("Playing"), Qt::CaseInsensitive) == 0) {
-            selectedService = candidate;
-            selectedStatus = status;
+
+        selectionCandidates.append(candidateState);
+        if (isPlayingStatus(candidateState.state.playbackStatus) && !candidateState.state.metadata.isEmpty()) {
             break;
         }
     }
 
-    if (selectedService.isEmpty()) {
+    const qsizetype selectedIndex = preferredCandidateIndex(selectionCandidates);
+    if (selectedIndex < 0) {
         publishUnavailable(QStringLiteral("No readable MPRIS media player is available: %1").arg(lastStatusError));
         return;
     }
 
-    yakkai::mpris::PlayerState state;
-    state.service = selectedService;
-    state.playbackStatus = selectedStatus;
-
-    QString propertyError;
-    QVariant playbackStatusValue;
-    if (readPlayerProperty(selectedService, QStringLiteral("PlaybackStatus"), &playbackStatusValue, &propertyError)) {
-        state.playbackStatus = playbackStatusValue.toString();
-    } else if (state.playbackStatus.isEmpty()) {
-        publishUnavailable(QStringLiteral("Could not read PlaybackStatus from %1: %2").arg(selectedService, propertyError));
-        return;
-    }
-
-    QVariant metadataValue;
-    if (readPlayerProperty(selectedService, QStringLiteral("Metadata"), &metadataValue, &propertyError)) {
-        state.metadata = metadataFromVariant(metadataValue);
-    } else {
-        publishUnavailable(QStringLiteral("Could not read Metadata from %1: %2").arg(selectedService, propertyError));
-        return;
-    }
+    const MprisCandidateState selectedCandidate = selectionCandidates.at(selectedIndex);
+    yakkai::mpris::PlayerState state = selectedCandidate.state;
 
     QVariant positionValue;
-    if (readPlayerProperty(selectedService, QStringLiteral("Position"), &positionValue, &propertyError)) {
+    QString propertyError;
+    if (readPlayerProperty(state.service, QStringLiteral("Position"), &positionValue, &propertyError)) {
         state.positionUsec = positionValue.toLongLong();
     } else {
         state.positionUsec = 0;
     }
 
-    const QString diagnostic = lastStatusError.isEmpty()
-        ? diagnosticForSelectedPlayer(state)
-        : QStringLiteral("MPRIS media player selected: %1; one or more players could not be queried: %2")
-              .arg(selectedService, lastStatusError);
+    QString diagnostic = diagnosticForSelectedPlayer(state);
+    if (!selectedCandidate.metadataReadable && state.metadata.isEmpty()) {
+        diagnostic = QStringLiteral("Could not read Metadata from %1: %2").arg(state.service, selectedCandidate.metadataError);
+    }
+    if (!lastStatusError.isEmpty()) {
+        diagnostic = QStringLiteral("%1; one or more players could not be queried: %2")
+                         .arg(diagnostic, lastStatusError);
+    }
     publishState(yakkai::mpris::buildMediaPayload(state), stableSignatureForState(state), diagnostic);
 }
 

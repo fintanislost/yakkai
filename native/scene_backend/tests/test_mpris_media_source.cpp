@@ -48,6 +48,63 @@ yakkai::mpris::PlayerState playerState(qint64 positionUsec)
     };
 }
 
+void testSelectionPrefersMetadataProviderWhenNoPlayerIsPlaying()
+{
+    const QString selected = YakkaiMprisMediaSource::selectPreferredServiceForTest({
+        {
+            .service = QStringLiteral("org.mpris.MediaPlayer2.Gwenview"),
+            .playbackStatus = QStringLiteral("Stopped"),
+            .metadata = QVariantMap(),
+        },
+        {
+            .service = QStringLiteral("org.mpris.MediaPlayer2.vlc"),
+            .playbackStatus = QStringLiteral("Paused"),
+            .metadata = metadata(),
+        },
+    });
+
+    check(selected == QStringLiteral("org.mpris.MediaPlayer2.vlc"),
+          "selection prefers metadata-bearing paused player over stopped blank provider");
+}
+
+void testSelectionPrefersPlayingMetadataProvider()
+{
+    const QString selected = YakkaiMprisMediaSource::selectPreferredServiceForTest({
+        {
+            .service = QStringLiteral("org.mpris.MediaPlayer2.paused"),
+            .playbackStatus = QStringLiteral("Paused"),
+            .metadata = metadata(),
+        },
+        {
+            .service = QStringLiteral("org.mpris.MediaPlayer2.playing"),
+            .playbackStatus = QStringLiteral("Playing"),
+            .metadata = metadata(),
+        },
+    });
+
+    check(selected == QStringLiteral("org.mpris.MediaPlayer2.playing"),
+          "selection prefers playing metadata-bearing player over paused metadata provider");
+}
+
+void testSelectionFallsBackToPlayingBlankProvider()
+{
+    const QString selected = YakkaiMprisMediaSource::selectPreferredServiceForTest({
+        {
+            .service = QStringLiteral("org.mpris.MediaPlayer2.stopped"),
+            .playbackStatus = QStringLiteral("Stopped"),
+            .metadata = QVariantMap(),
+        },
+        {
+            .service = QStringLiteral("org.mpris.MediaPlayer2.playing"),
+            .playbackStatus = QStringLiteral("Playing"),
+            .metadata = QVariantMap(),
+        },
+    });
+
+    check(selected == QStringLiteral("org.mpris.MediaPlayer2.playing"),
+          "selection falls back to playing blank provider when no metadata is available");
+}
+
 void testPositionOnlyUpdatesRuntimePayloadWithoutStableMediaSignal()
 {
     YakkaiMprisMediaSource source;
@@ -155,6 +212,9 @@ int main(int argc, char** argv)
 {
     QCoreApplication app(argc, argv);
 
+    testSelectionPrefersMetadataProviderWhenNoPlayerIsPlaying();
+    testSelectionPrefersPlayingMetadataProvider();
+    testSelectionFallsBackToPlayingBlankProvider();
     testPositionOnlyUpdatesRuntimePayloadWithoutStableMediaSignal();
     testUnavailablePublishesStableAndRuntimeFallback();
     testPlayerServiceSwitchEmitsStableMediaChange();

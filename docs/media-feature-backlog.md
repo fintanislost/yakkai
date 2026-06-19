@@ -29,11 +29,16 @@ not be inferred from README prose alone.
   or playback state changes.
 - MPRIS album art accepts `file://` URLs and absolute local filesystem paths.
   Remote and non-file art URLs remain ignored.
+- MPRIS player selection prefers a playing provider with metadata, then any
+  metadata-bearing provider, and only uses blank providers as a diagnostic
+  fallback. This prevents stopped/no-metadata providers from hiding paused
+  providers that can still render a media widget.
 - `tools/mpris_live_smoke.py` can probe a real MPRIS player through `qdbus6`,
   print the normalized live `__yakkaiMedia` payload, and fail fast on explicit
   service/status/metadata/art expectations without controlling playback. Its
-  default selection mirrors the native runtime, while `--service` limits a
-  manual probe to one exact provider when several MPRIS services are registered.
+  default selection mirrors the native runtime metadata-first policy, while
+  `--service` limits a manual probe to one exact provider when several MPRIS
+  services are registered.
 - `tools/mpris_compat_matrix.py` runs a read-only live-provider inventory on top
   of the smoke probe, writing `summary.json` and `summary.md` under a
   repo-local output directory for default-selection and exact-service probes.

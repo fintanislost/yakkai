@@ -109,9 +109,8 @@ class MprisCompatMatrixTests(unittest.TestCase):
         self.assertEqual(
             matrix["summary"]["issueCounts"],
             {
-                "missing-art": 1,
-                "missing-metadata": 1,
-                "not-playing": 1,
+                "missing-art": 2,
+                "not-playing": 2,
             },
         )
 
